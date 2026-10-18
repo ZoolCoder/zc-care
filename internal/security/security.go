@@ -74,6 +74,10 @@ var checks = []check{
 	{"automatic login off", "System Settings, Users & Groups: set Automatically log in as to Off",
 		[]string{"/bin/sh", "-c", "defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null; true"},
 		func(out string) bool { return strings.TrimSpace(out) == "" }},
+	// A Mac without a backup disk says so on standard error.
+	{"Time Machine backups", "System Settings, General, Time Machine: add a backup disk",
+		[]string{"/bin/sh", "-c", "tmutil destinationinfo 2>&1; true"},
+		func(out string) bool { return strings.Contains(out, "Name") }},
 	{"AirDrop not open to everyone", "System Settings, General, AirDrop & Handoff: set AirDrop to Contacts Only",
 		[]string{"/bin/sh", "-c", "defaults read com.apple.sharingd DiscoverableMode 2>/dev/null; true"},
 		func(out string) bool { return !strings.Contains(out, "Everyone") }},
