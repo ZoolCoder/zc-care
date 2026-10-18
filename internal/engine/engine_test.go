@@ -142,3 +142,22 @@ func TestCaptureNeedsOneCapturingTarget(t *testing.T) {
 		t.Fatalf("localdir: %v", err)
 	}
 }
+
+func TestSelectLeavesOutOtherProfilesTargets(t *testing.T) {
+	cfg := config.Config{Version: 1, Profiles: []string{"everyday"}, Targets: []config.Target{
+		{Name: "apps", Provider: "localdir", Path: "a"},
+		{Name: "dev", Provider: "localdir", Path: "b", Profiles: []string{"developer"}},
+		{Name: "home", Provider: "localdir", Path: "c", Profiles: []string{"everyday", "creative"}},
+	}}
+	got, err := Select(cfg, nil)
+	if err != nil || len(got) != 2 || got[0].Name != "apps" || got[1].Name != "home" {
+		t.Fatalf("select %+v %v", got, err)
+	}
+	if _, err := Select(cfg, []string{"dev"}); err == nil || !strings.Contains(err.Error(), "zc-care profile") {
+		t.Fatalf("named dev: %v", err)
+	}
+	cfg.Profiles = nil
+	if got, _ := Select(cfg, nil); len(got) != 3 {
+		t.Fatalf("a machine without profiles gets every target: %+v", got)
+	}
+}

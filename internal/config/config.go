@@ -37,6 +37,9 @@ type Config struct {
 	// Skip is this machine's skip list, from SkipPath; Resolve hands it to
 	// every target.
 	Skip []string `yaml:"-"`
+	// Profiles is who this machine is for, from ProfilesPath; a target
+	// with profiles applies only when one of them is here.
+	Profiles []string `yaml:"-"`
 }
 
 // Target is one thing to reconcile.
@@ -77,6 +80,9 @@ type Target struct {
 	// Agents are the launchd agent plists the services provider keeps
 	// loaded.
 	Agents []string `yaml:"agents"`
+	// Profiles limits the target to machines with one of these profiles,
+	// such as developer or work; empty is every machine.
+	Profiles []string `yaml:"profiles"`
 	// Skip lists the resources, such as cask:ghostty, this machine does not
 	// install. The packages provider reads it; it is never in the YAML.
 	Skip []string `yaml:"-"`
@@ -173,6 +179,9 @@ func Load(path string, stdin io.Reader) (Config, error) {
 	if cfg.Skip, err = ReadSkip(SkipPath()); err != nil {
 		return Config{}, err
 	}
+	if cfg.Profiles, err = ReadProfiles(ProfilesPath()); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -209,6 +218,11 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s: declared twice", where))
 		}
 		seen[t.Name] = true
+		for _, p := range t.Profiles {
+			if !IsProfile(p) {
+				errs = append(errs, fmt.Errorf("%s: profile %q must be kebab-case", where, p))
+			}
+		}
 		if !slices.Contains(Providers, t.Provider) {
 			errs = append(errs, fmt.Errorf("%s: provider %q is not one of %s", where, t.Provider, strings.Join(Providers, ", ")))
 		} else {
