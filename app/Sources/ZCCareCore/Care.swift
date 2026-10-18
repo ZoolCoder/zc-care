@@ -14,6 +14,16 @@ public enum DiskUsage {
     }
 }
 
+/// A folder Care empties for good must be a real folder this user owns:
+/// /tmp is open to every user, and a link there could point into the home
+/// folder.
+public enum OwnFolder {
+    public static func check(_ path: String) -> Bool {
+        var info = stat()
+        return lstat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR && info.st_uid == getuid()
+    }
+}
+
 /// The apps that hold a file open, read from `lsof -Fc` output.
 public enum OpenFile {
     public static func holders(_ output: String) -> [String] {

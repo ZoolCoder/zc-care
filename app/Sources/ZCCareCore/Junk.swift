@@ -91,6 +91,7 @@ public struct Junk: Sendable, Equatable, Identifiable {
     }
 
     private func entries(keeping extra: Set<String>) -> [URL] {
+        guard OwnFolder.check(path) else { return [] }
         let kept = Set(keep.union(extra).map { $0.lowercased() })
         let all = (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path),
                                                                 includingPropertiesForKeys: nil)) ?? []
