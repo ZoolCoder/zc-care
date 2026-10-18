@@ -11,7 +11,7 @@ struct PanelView: View {
         VStack(alignment: .leading, spacing: 10) {
             Header(store: store)
             if let problem = store.setupProblem {
-                SetupCard(problem: problem, choose: store.chooseConfig)
+                SetupCard(problem: problem, setup: store.needsConfig ? store.openSetup : nil, choose: store.chooseConfig)
             } else if let snapshot = store.snapshot {
                 Tabs(store: store, snapshot: snapshot)
                 ScrollView {
@@ -145,12 +145,16 @@ private struct Tabs: View {
 
 private struct SetupCard: View {
     let problem: String
+    let setup: (() -> Void)?
     let choose: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(problem).font(.callout)
-            Button("Choose Config…", action: choose)
+            HStack {
+                if let setup { Button("Set Up This Mac…", action: setup).keyboardShortcut(.defaultAction) }
+                Button("Choose Config…", action: choose)
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

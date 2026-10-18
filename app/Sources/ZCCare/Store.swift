@@ -92,6 +92,8 @@ final class Store {
     }
 
     private var careCLI: CareCLI?
+    /// The zc-care found, config or not, for the Setup Assistant.
+    private var binary: String?
     private var env: [String: String] = [:]
     private var ticker: Task<Void, Never>?
     private var discovery: Task<Void, Never>?
@@ -107,6 +109,8 @@ final class Store {
     var openSettings: (() -> Void)?
     /// Set by the app delegate, which owns the app picker.
     var openApps: (() -> Void)?
+    /// Set by the app delegate, which owns the Setup Assistant.
+    var openSetup: (() -> Void)?
     /// Set by Care, which drops what the list names from its own lists.
     var ignoreListChanged: (() -> Void)?
     /// Set by Care, whose lists are stale once files come back.
@@ -258,9 +262,10 @@ final class Store {
             setupProblem = "zc-care is missing. Install ZC Care again with brew reinstall --cask zc-care."
             return
         }
+        self.binary = binary
         let chosen = UserDefaults.standard.string(forKey: Keys.config)
         guard let config = Discovery.config(chosen: chosen, env: env, home: home) else {
-            setupProblem = "Choose your zc-care.yaml to start."
+            setupProblem = "Set up this Mac, or choose the zc-care.yaml you have."
             return
         }
         setupProblem = nil
@@ -298,6 +303,44 @@ final class Store {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         UserDefaults.standard.set(url.path, forKey: Keys.config)
         Task { await connect() }
+    }
+
+    // MARK: Setup
+
+    /// The CLI is here but no config is: the Setup Assistant can make one.
+    var needsConfig: Bool { careCLI == nil && binary != nil }
+
+    /// The CLI, without a config until there is one; nil when zc-care is
+    /// missing.
+    var setupCLI: CareCLI? {
+        careCLI ?? binary.map { CareCLI(binary: $0, config: "", env: env) }
+    }
+
+    /// Writes the starter config for who the Mac is for, then reads the
+    /// Mac with it. Nothing is installed yet.
+    func createConfig(profiles: [String], role: String?, fromMac: Bool) async throws -> InitResult {
+        await connected()
+        guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
+        busy = "Writing your config"
+        defer { busy = nil }
+        let result = try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac)
+        UserDefaults.standard.set(result.config, forKey: Keys.config)
+        await connect()
+        return result
+    }
+
+    /// Fixes every failed check that runs as root, behind one password
+    /// dialog.
+    func secureAll() async {
+        guard busy == nil, let command = Fix.rootCommands(for: snapshot?.security ?? []),
+              Alerts.confirm(fix: command, for: "this Mac") else { return }
+        busy = "Securing this Mac"
+        defer { busy = nil }
+        let r = try? await ProcessRunner().run("/usr/bin/osascript", ["-e", adminScript(command)], env: [:])
+        message = r?.status == 0
+            ? Message(text: "This Mac: fixed.", failed: false)
+            : Message(text: "This Mac: not changed. \(r?.stderr ?? "")", failed: true)
+        await refresh()
     }
 
     // MARK: Targets

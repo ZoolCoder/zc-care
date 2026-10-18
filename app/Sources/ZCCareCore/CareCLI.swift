@@ -107,6 +107,11 @@ private final class Once: @unchecked Sendable {
 
 public struct CLIError: LocalizedError, Sendable {
     public var message: String
+
+    public init(message: String) {
+        self.message = message
+    }
+
     public var errorDescription: String? { message }
 }
 

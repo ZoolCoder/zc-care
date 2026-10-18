@@ -153,6 +153,9 @@ struct SettingsView: View {
                     }
                     Button("Choose…", action: store.chooseConfig)
                 }
+                LabeledContent("Who this Mac is for") {
+                    Button("Set Up This Mac…") { store.openSetup?() }
+                }
                 LabeledContent("Apps on this Mac") {
                     Button("Choose Apps…") { store.openApps?() }
                 }

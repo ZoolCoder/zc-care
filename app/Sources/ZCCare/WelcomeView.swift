@@ -22,6 +22,10 @@ struct WelcomeView: View {
             .padding(.top, 36)
             .padding(.horizontal, 40)
             VStack(spacing: 8) {
+                Step(symbol: "person.crop.circle.badge.checkmark", colors: Tint.green, title: "Set up this Mac",
+                     detail: "Who it is for, its security, and for developers git and GitHub.") {
+                    Button("Start…") { store.openSetup?() }.controlSize(.small)
+                }
                 Step(symbol: "square.grid.2x2.fill", colors: Tint.blue, title: "Your apps",
                      detail: "Pick what this Mac installs from your config, with tips for each.") {
                     Button("Choose…") { store.openApps?() }.controlSize(.small)

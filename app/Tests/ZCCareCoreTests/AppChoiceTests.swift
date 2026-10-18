@@ -51,6 +51,20 @@ private func item(_ kind: String, _ name: String, _ state: String, section: Stri
     #expect(choice.toSkip.isEmpty)
 }
 
+@Test func severalProfilesPickEachOnesSections() {
+    var dev = item("brew", "k9s", "missing", section: "Containers")
+    dev.profiles = ["developer"]
+    var art = item("cask", "figma", "missing", section: "Creative")
+    art.profiles = ["creative"]
+    var home = item("cask", "spotify", "missing", section: "Everyday")
+    home.profiles = ["everyday"]
+    var choice = AppChoice(items: [dev, art, home, item("cask", "iina", "missing", section: "Essentials")])
+    choice.choose(profiles: ["developer", "creative"])
+    #expect(choice.toSkip == ["cask:spotify"])
+    choice.choose(profiles: [])
+    #expect(choice.toSkip.isEmpty)
+}
+
 @Test func tipsFindTappedFormulaeByShortName() {
     let tip = Tips.tip(for: Item(name: "FelixKratz/formulae/sketchybar", kind: "brew", state: "missing"))
     #expect(tip?.guide?.absoluteString == "https://zoolcoder.github.io/zc-care/toolbox/sketchybar.html")

@@ -31,6 +31,7 @@ public enum Fix: Equatable, Sendable {
 
     static func pane(for detail: String) -> URL {
         let id = switch detail {
+        case let d where d.contains("Time Machine"): "com.apple.Time-Machine-Settings.extension"
         case let d where d.contains("Lock Screen"): "com.apple.Lock-Screen-Settings.extension"
         case let d where d.contains("Software Update"): "com.apple.Software-Update-Settings.extension"
         case let d where d.contains("AirDrop & Handoff"): "com.apple.AirDrop-Handoff-Settings.extension"
