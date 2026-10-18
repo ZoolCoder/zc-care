@@ -21,6 +21,10 @@ Usage:
   zc-care mcp                     stdio MCP server for agents
   zc-care remove   -target t kind:name
                                 uninstall an item and drop it from t's manifest; mas:ID for an undeclared app
+  zc-care init     -profile p[,p] [-role r] [-from-mac] [-dir d] [-force] [-json]
+                                write a starter config for this Mac; -list shows the profiles
+  zc-care profile  [-json] [-clear] [name...]
+                                show or set who this Mac is for; targets with profiles follow it
   zc-care skip     [-undo] [-json] [kind:name...]
                                 list or change the packages this machine does not install
   zc-care version
