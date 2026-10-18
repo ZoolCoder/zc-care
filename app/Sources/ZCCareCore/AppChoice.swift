@@ -60,9 +60,16 @@ public struct AppChoice: Sendable, Equatable {
     /// Picks what a profile gets: the sections tagged for it and the ones
     /// tagged for no one in particular. Nil picks everything.
     public mutating func choose(profile: String?) {
+        choose(profiles: profile.map { [$0] })
+    }
+
+    /// Picks what a Mac for these profiles gets: the sections tagged for
+    /// one of them and the untagged ones. Nil or none picks everything.
+    public mutating func choose(profiles: Set<String>?) {
+        let profiles = profiles ?? []
         for item in choosable {
             let tags = item.profiles ?? []
-            if let profile, !tags.isEmpty, !tags.contains(profile) {
+            if !profiles.isEmpty, !tags.isEmpty, profiles.isDisjoint(with: tags) {
                 picked.remove(item.resource)
             } else {
                 picked.insert(item.resource)

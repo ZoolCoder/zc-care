@@ -9,8 +9,8 @@ struct AppPickerView: View {
     let close: () -> Void
     @State private var phase = Phase.loading
     @State private var choice: AppChoice?
-    /// The profile the picks started from; nil is everything.
-    @State private var profile: String?
+    /// The profiles the picks started from; none is everything.
+    @State private var profiles: Set<String> = []
 
     enum Phase: Equatable {
         case loading, picking, installing, done
@@ -90,20 +90,30 @@ struct AppPickerView: View {
         .padding(.vertical, 20)
     }
 
-    /// Who this Mac is for; each choice re-ticks the list, which stays
-    /// editable.
+    /// Who this Mac is for, one or several; each change re-ticks the
+    /// list, which stays editable.
     private func profilePicker(_ choice: AppChoice) -> some View {
-        Picker("This Mac is for", selection: Binding { profile } set: { new in
-            profile = new
-            self.choice?.choose(profile: new)
-        }) {
-            Text("Everything").tag(String?.none)
-            ForEach(choice.profiles, id: \.self) { Text($0.capitalized).tag(String?.some($0)) }
+        HStack(spacing: 6) {
+            chip("Everything", on: profiles.isEmpty) { profiles = [] }
+            ForEach(choice.profiles, id: \.self) { name in
+                chip(name.capitalized, on: profiles.contains(name)) {
+                    if profiles.remove(name) == nil { profiles.insert(name) }
+                }
+            }
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 420)
         .padding(.horizontal, 32)
         .padding(.bottom, 14)
+    }
+
+    private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            choice?.choose(profiles: profiles)
+        } label: {
+            Label(title, systemImage: on ? "checkmark.circle.fill" : "circle")
+        }
+        .buttonStyle(.bordered)
+        .tint(on ? Theme.good : nil)
     }
 
     private func summary(_ choice: AppChoice) -> String {
@@ -123,6 +133,10 @@ struct AppPickerView: View {
                 return
             }
             choice = loaded
+            // The skip list already holds the Mac's pick: the chips show
+            // who it is for without re-ticking.
+            let mine = (try? await store.setupCLI?.machineProfiles()) ?? []
+            profiles = Set(mine).intersection(loaded.profiles)
             phase = loaded.items.isEmpty ? .failed("Your config declares no packages.") : .picking
         } catch {
             phase = .failed(error.localizedDescription)
