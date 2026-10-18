@@ -40,7 +40,23 @@ Needs Go {go-version} or later.
 
 == Write a config
 
-Start from `zc-care.example.yaml`. It declares a target for each provider
+The quickest start is `zc-care init`. It writes a starter config for who the
+Mac is for: `everyday`, `developer`, `creative`, or several. Add `-role work`
+or `-role personal`, and `-from-mac` to keep the apps this Mac already has.
+It installs nothing; plan and apply come next. `zc-care init -list` shows the
+profiles. ZC Care's *Set Up This Mac* does the same without a terminal.
+
+[source,console]
+----
+$ zc-care init -profile developer -role work -from-mac
+wrote /Users/me/.config/zc-care/zc-care.yaml
+wrote /Users/me/.config/zc-care/Brewfile
+wrote /Users/me/.config/zc-care/mise.toml
+this Mac is for developer, work; 11 packages of other profiles are on its skip list
+next: zc-care plan -config /Users/me/.config/zc-care/zc-care.yaml, then apply
+----
+
+To write your own, start from `zc-care.example.yaml`. It declares a target for each provider
 and points at the sample manifests in `example/`. Point it at your own dotfiles
 repository instead. xref:configuration.adoc[Writing a config] lists every key.
 
