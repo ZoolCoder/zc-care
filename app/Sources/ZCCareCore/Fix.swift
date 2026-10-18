@@ -10,9 +10,17 @@ public enum Fix: Equatable, Sendable {
     /// Something to read; nothing to run.
     case info(String)
 
+    /// The checks whose detail is a fixed sudo command in the doctor's own
+    /// table. Other details carry text from outside, such as a listening
+    /// process's name or an MCP server's, which must never run as root.
+    static let rootFixable: Set<String> = [
+        "security firewall", "security firewall stealth mode", "security Gatekeeper",
+        "security automatic update checks", "security File Sharing off", "security Touch ID for sudo",
+    ]
+
     public init(for check: Check) {
         let detail = check.detail ?? ""
-        if check.isSecurity, detail.contains("sudo ") {
+        if Fix.rootFixable.contains(check.name), detail.contains("sudo ") {
             self = .command(detail.replacingOccurrences(of: "sudo ", with: ""))
         } else if check.isSecurity, detail.contains("System Settings") {
             self = .settings(Fix.pane(for: detail), detail)
