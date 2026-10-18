@@ -44,12 +44,15 @@ targets:
         NSAutomaticQuoteSubstitutionEnabled: false
         NSAutomaticDashSubstitutionEnabled: false
 
-  # macos-everyday: tap to click, and a Dock without recent apps.
+  # macos-everyday: tap to click on the built-in and Magic Trackpad, and a
+  # Dock without recent apps.
   - name: macos-everyday
     provider: settings
     profiles: [everyday]
     defaults:
       com.apple.AppleMultitouchTrackpad:
+        Clicking: true
+      com.apple.driver.AppleBluetoothMultitouch.trackpad:
         Clicking: true
       com.apple.dock:
         show-recents: false
