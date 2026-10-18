@@ -4,6 +4,27 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
+## Unreleased
+
+### ZC Care
+
+- **Set Up This Mac**: a Setup Assistant for a Mac without a config. Pick
+  who it is for (Everyday, Developer, Creative) and Personal or Work, then
+  fix the failing security checks behind one password dialog. A developer
+  also gets git's name and email, an SSH key that signs commits, and GitHub.
+  `zccare://setup` opens it.
+- **Choose Apps** picks several profiles at once, starting from the Mac's
+  own.
+
+### CLI
+
+- `zc-care init` writes a starter config for chosen profiles, puts other
+  profiles' packages on the skip list, and with `-from-mac` keeps the apps
+  the Mac has.
+- `zc-care profile` shows and sets who a Mac is for. A target's new
+  `profiles` key limits it to Macs with one of them.
+- `doctor` checks that Time Machine has a backup disk.
+
 ## v0.1.0 — 2026-10-18
 
 The first release of ZC Care, a menu bar app that sets up, cleans and watches
