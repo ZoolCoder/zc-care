@@ -81,7 +81,7 @@ public enum AIClutter {
     /// What a spot names on disk: the folder, or the entries it picks.
     private static func items(_ spot: Spot) -> [URL] {
         let url = URL(fileURLWithPath: spot.path)
-        guard FileManager.default.fileExists(atPath: spot.path) else { return [] }
+        guard OwnFolder.check(spot.path) else { return [] }
         guard let pick = spot.pick else { return [url] }
         let all = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         return all.filter(pick)

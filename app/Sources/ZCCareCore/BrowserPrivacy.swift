@@ -89,6 +89,7 @@ public enum BrowserPrivacy {
     }
 
     private static func entries(_ path: String) -> [URL] {
-        (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: nil)) ?? []
+        guard OwnFolder.check(path) else { return [] }
+        return (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: nil)) ?? []
     }
 }
