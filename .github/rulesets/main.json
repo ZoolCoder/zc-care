@@ -51,10 +51,6 @@
           {
             "context": "plugin",
             "integration_id": 15368
-          },
-          {
-            "context": "release-config",
-            "integration_id": 15368
           }
         ],
         "strict_required_status_checks_policy": false
