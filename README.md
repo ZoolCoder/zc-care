@@ -4,6 +4,8 @@
 
 # ZC Care
 
+[![release](https://img.shields.io/github/v/release/ZoolCoder/zc-care)](https://github.com/ZoolCoder/zc-care/releases/latest)
+[![downloads](https://img.shields.io/github/downloads/ZoolCoder/zc-care/total)](https://github.com/ZoolCoder/zc-care/releases)
 [![ci](https://github.com/ZoolCoder/zc-care/actions/workflows/ci.yml/badge.svg)](https://github.com/ZoolCoder/zc-care/actions/workflows/ci.yml)
 [![docs](https://img.shields.io/badge/docs-manual-informational)](https://zoolcoder.github.io/zc-care/)
 [![license](https://img.shields.io/github/license/ZoolCoder/zc-care)](LICENSE)
@@ -17,6 +19,17 @@ or everyday use, and installs the apps you pick. After that it shows what
 is missing or out of date and puts it right when you say so. It also
 cleans junk, uninstalls apps with their leftovers and watches the Mac's
 health.
+
+```console
+$ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew install --cask zc-care
+```
+
+Free and open source, MIT. macOS 14 or later.
+
+<p align="center">
+  <img src="app/screenshots/care-smart.png" alt="ZC Care's Smart Care: scan the whole Mac and clean up in one click" width="80%">
+</p>
 
 Under it runs **zc-care**, a command-line engine that manages the
 whole setup of the Mac:
