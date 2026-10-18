@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/zoolcoder/zc-care/internal/sh"
@@ -71,5 +73,21 @@ func TestOpenMacFailsWithFixes(t *testing.T) {
 	}
 	if !got["FileVault disk encryption"].OK {
 		t.Error("FileVault should still pass")
+	}
+}
+
+// The app runs a check's sudo fix as root only for these names
+// (Fix.rootFixable in app/Sources/ZCCareCore/Fix.swift); a new sudo fix
+// must be added there too.
+func TestSudoFixesAreTheAppsRootFixable(t *testing.T) {
+	want := []string{"firewall", "firewall stealth mode", "Gatekeeper", "automatic update checks", "File Sharing off", "Touch ID for sudo"}
+	var got []string
+	for _, r := range checker(t, map[string]string{}, "").Run(context.Background()) {
+		if strings.Contains(r.Detail, "sudo ") && r.Name != "servers on every network interface" {
+			got = append(got, r.Name)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("sudo fixes = %q, want %q", got, want)
 	}
 }
