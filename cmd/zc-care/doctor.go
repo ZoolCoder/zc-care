@@ -88,7 +88,7 @@ func addShadows(r *doctor.Report, cfg config.Config) {
 		return
 	}
 	for _, t := range cfg.Targets {
-		if t.Provider != "tools" {
+		if t.Provider != "tools" || !t.For(cfg.Profiles) {
 			continue
 		}
 		shadows, err := tools.Shadowed(context.Background(), runner, filepath.Dir(cfg.Resolve(t).File), exec.LookPath)

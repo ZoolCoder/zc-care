@@ -61,15 +61,25 @@ func New(cfg config.Config, providers Providers, names []string) (*Engine, error
 }
 
 // Select returns the named targets with their paths resolved, in config
-// order. An unknown name is an error, not an empty plan.
+// order, leaving out those for other profiles than this machine's. An
+// unknown name is an error, not an empty plan, and so is a name for
+// another profile.
 func Select(cfg config.Config, names []string) ([]config.Target, error) {
 	for _, n := range names {
-		if _, ok := cfg.Find(n); !ok {
+		t, ok := cfg.Find(n)
+		if !ok {
 			return nil, fmt.Errorf("no target named %q in the config", n)
+		}
+		if !t.For(cfg.Profiles) {
+			return nil, fmt.Errorf("target %s is for %s; this machine is %s (zc-care profile changes it)",
+				n, strings.Join(t.Profiles, ", "), strings.Join(cfg.Profiles, ", "))
 		}
 	}
 	var out []config.Target
 	for _, t := range cfg.Targets {
+		if !t.For(cfg.Profiles) {
+			continue
+		}
 		if len(names) == 0 || slices.Contains(names, t.Name) {
 			t = cfg.Resolve(t)
 			out = append(out, t)
