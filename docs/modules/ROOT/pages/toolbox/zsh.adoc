@@ -1,0 +1,34 @@
+= zsh, antidote and plugins
+:description: zsh with antidote: the shell, its plugins, aliases and helper functions.
+
+zsh is the login shell. antidote loads its plugins from a plain list and compiles them into one file, so the shell starts fast. The plugins add the things you feel on every keystroke: suggestions, highlighting and fuzzy completion.
+
+== On the workstation
+
+* `antidote`, `starship`, `fzf` and the plugins come from the Brewfile; `.zshrc` and `~/.config/zsh/*.zsh` come from the config repo's chezmoi source.
+* Plugins, in load order: Oh My Zsh's git, docker-compose, kubectl, gradle, sudo, extract, colored-man-pages, copypath and copybuffer; fzf-tab; zsh-you-should-use; zsh-autopair; zsh-autosuggestions; fast-syntax-highlighting.
+* The ZoolCoder theme colours fzf, eza, bat and the highlighting, and follows light and dark mode.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Tab |Completion as a fuzzy menu with previews (fzf-tab)
+|Esc Esc |Put `sudo` in front of the last command
+|Ctrl+O |Copy the typed command line
+|`update` |Pull zc-care and the config, rebuild, apply, upgrade packages and runtimes, then run the doctor
+|`wtf` |Claude explains why the last command failed and puts a fixed command on the prompt; `wtf ci` explains the branch's last failed Actions run
+|`aic` |Claude writes a conventional commit message for the staged changes; you edit it before it commits
+|`aipr` |Claude writes the pull request title and body from the branch; you edit it, then it pushes and opens the PR
+|`gt [query]` |Pick one Gradle test class with fzf and run only it
+|`mkcd`, `killport`, `serve`, `ports` |Make and enter a folder, free a port, serve this folder over HTTP, list listening ports
+|===
+
+== See also
+
+* xref:toolbox/starship.adoc[Starship]
+* xref:toolbox/fzf.adoc[fzf]
+* xref:toolbox/atuin.adoc[Atuin]
+* https://getantidote.github.io[zsh, antidote and plugins website]

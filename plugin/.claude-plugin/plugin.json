@@ -1,0 +1,26 @@
+{
+  "name": "zc-care",
+  "version": "0.1.0",
+  "description": "Declarative reconcile: plan and apply what a YAML file declares, verify every write, report drift, with an MCP server; zc-care doctor checks the install.",
+  "author": {
+    "name": "Abdallah Emad (ZoolCoder)",
+    "url": "https://github.com/zoolcoder"
+  },
+  "homepage": "https://github.com/zoolcoder/zc-care",
+  "repository": "https://github.com/zoolcoder/zc-care",
+  "license": "MIT",
+  "keywords": [
+    "declarative",
+    "drift",
+    "agent-skills",
+    "mcp"
+  ],
+  "mcpServers": {
+    "zc-care": {
+      "command": "zc-care",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

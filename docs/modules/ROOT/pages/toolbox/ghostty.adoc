@@ -1,0 +1,32 @@
+= Ghostty
+:description: Ghostty, the terminal: GPU-rendered, native on macOS, with a drop-down quick terminal.
+
+Ghostty is the terminal every shell, tmux session and Claude Code session runs in. It is fast, it draws with the GPU, and it behaves like a Mac app: native tabs, splits, notifications and the menu bar. It is the first thing you open on the workstation.
+
+== On the workstation
+
+* Installed by the `ghostty` cask; the config is `assets/theme/dot_config/ghostty/config`, applied by the `theme` target.
+* Always dark, with the ZoolCoder colour theme and JetBrains Mono Nerd Font at 14 pt.
+* A glass look: 92% opacity with a blur, so the wallpaper shows faintly.
+* A notification when a command that ran over a minute finishes while you look elsewhere.
+* A bell frames its split and plays a short sound, so you see which Claude Code session is waiting.
+* 50 MB of scrollback, copy on select, and the Option key as Alt.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Cmd+` |Drop-down quick terminal from any app
+|Cmd+Shift+C |Claude Code in a split on the right, continuing this folder's last conversation
+|Cmd+Shift+O |Glass on or off, for screen sharing
+|Cmd+1 to Cmd+8 |Jump to a tab; new tabs open at the end so the numbers stay put
+|===
+
+== See also
+
+* xref:toolbox/tmux.adoc[tmux]
+* xref:toolbox/zsh.adoc[zsh, antidote and plugins]
+* xref:toolbox/claude-code.adoc[Claude Code and AI tools]
+* https://ghostty.org[Ghostty website]

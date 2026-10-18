@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# A blue-to-ice gradient around the focused window and surface grey for the rest, in the bar's ZoolCoder colours.
+source "$HOME/.config/sketchybar/colors.sh"
+borders style=round width=5.0 hidpi=on active_color="gradient(top_left=$ACCENT,bottom_right=$BLUE)" inactive_color=$SURFACE1

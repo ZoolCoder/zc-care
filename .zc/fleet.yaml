@@ -1,0 +1,6 @@
+# zoolfleet manifest: what the practice rules read (zoolfleet rules).
+version: 1
+kind: go
+license: MIT
+owner: ZoolCoder
+class: oss

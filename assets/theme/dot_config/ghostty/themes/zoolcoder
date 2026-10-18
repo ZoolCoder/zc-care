@@ -1,0 +1,23 @@
+# ZoolCoder: deep-space ink, signal blue, the colours of zoolcoder.com.
+palette = 0=#161a22
+palette = 1=#ff7a7e
+palette = 2=#5fd38a
+palette = 3=#f5b44a
+palette = 4=#3d7bff
+palette = 5=#b79cff
+palette = 6=#7fd4f5
+palette = 7=#b9bfc8
+palette = 8=#3a4150
+palette = 9=#ff9a9d
+palette = 10=#7fe0a3
+palette = 11=#ffd27a
+palette = 12=#9cc3ff
+palette = 13=#cdbfff
+palette = 14=#a5e3fa
+palette = 15=#f3f5f7
+background = #05060a
+foreground = #f3f5f7
+cursor-color = #9cc3ff
+cursor-text = #05060a
+selection-background = #1c2a4a
+selection-foreground = #f3f5f7

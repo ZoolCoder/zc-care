@@ -1,0 +1,18 @@
+= SketchyBar and JankyBorders
+:description: SketchyBar, the menu bar replacement, and JankyBorders around the focused window.
+
+SketchyBar replaces the macOS menu bar with one you script. It shows the focused app, CPU, memory, power and temperatures, battery, the clock, and how many things ZC Care says need you. JankyBorders draws a coloured border around the focused window, so you always know where keys go.
+
+== On the workstation
+
+* Installed from the FelixKratz tap; both run as services from the `services` target.
+* Config and plugins in `assets/theme/dot_config/sketchybar`; JankyBorders in `assets/theme/dot_config/borders`.
+* The `macos` target hides the macOS menu bar so the two do not overlap.
+* Temperatures and power come from macmon, without sudo.
+* The `zccare` item shows ZC Care's count of open items; clicking it opens the panel.
+
+== See also
+
+* xref:app.adoc[ZC Care]
+* xref:toolbox/karabiner.adoc[Karabiner-Elements and the Hyper key]
+* https://felixkratz.github.io/SketchyBar/[SketchyBar and JankyBorders website]

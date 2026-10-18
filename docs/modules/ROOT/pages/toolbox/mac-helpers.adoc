@@ -1,0 +1,21 @@
+= Mac helpers
+:description: asimov, pam-reattach, mkcert and the other helpers that fix small Mac annoyances.
+
+Command-line helpers that make the Mac behave better for development.
+
+== On the workstation
+
+* **asimov:** keeps `node_modules`, Gradle `build` and other rebuildable folders out of Time Machine; runs once a day.
+* **pam-reattach:** Touch ID for `sudo` also works inside tmux.
+* **mkcert:** trusted HTTPS certificates for local development.
+* **terminal-notifier:** notifications from scripts, such as the weekly update.
+* **mas:** installs App Store apps from the Brewfile.
+* **fileicon:** sets a custom icon on a folder or an app from the command
+  line (`fileicon set ~/Developer icon.png`).
+* **A weekly update** launch agent runs `update` and notifies you.
+
+== See also
+
+* xref:toolbox/system.adoc[btop, macmon and fastfetch]
+* xref:app.adoc[ZC Care]
+* https://github.com/stevegrunwell/asimov[Mac helpers website]

@@ -1,0 +1,148 @@
+<!doctype html>
+<!-- zc-care screensaver in the ZoolCoder Orbit identity, for
+     WebViewScreenSaver. The saver lets a page read only its own folder, so the
+     fonts sit next to it. Open with ?light for paper, ?still for no motion. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>zc-care screensaver</title>
+<style>
+  @font-face{font-family:"Unbounded";src:url(fonts/unbounded-latin-wght-normal.woff2) format("woff2-variations");font-weight:200 900}
+  @font-face{font-family:"JetBrains Mono";src:url(fonts/jetbrains-mono-latin-wght-normal.woff2) format("woff2-variations");font-weight:100 800}
+  :root{--ground:#05060A;--ink:#F3F5F7;--blade:#9CC3FF;--acc:#3D7BFF;--dot:rgba(156,195,255,.18);--ring:rgba(243,245,247,.11);--ring-hot:rgba(156,195,255,.5);--star:#F3F5F7;--glow:rgba(61,123,255,.30);--label:rgba(243,245,247,.45)}
+  :root.light{--ground:#F7F7F4;--ink:#111318;--blade:#2457E6;--acc:#2457E6;--dot:rgba(17,19,24,.09);--ring:rgba(17,19,24,.12);--ring-hot:rgba(36,87,230,.5);--star:#111318;--glow:rgba(36,87,230,.12);--label:rgba(17,19,24,.5)}
+  html,body{margin:0;height:100%;background:var(--ground);overflow:hidden;cursor:none}
+  svg{display:block;width:100vw;height:100vh}
+  .twinkle{animation:twinkle var(--t,6s) ease-in-out var(--d,0s) infinite}
+  @keyframes twinkle{0%,100%{opacity:var(--o,.6)}50%{opacity:.08}}
+  #glow{animation:breathe 9s ease-in-out infinite;transform-box:fill-box;transform-origin:center}
+  @keyframes breathe{0%,100%{opacity:.8;transform:scale(1)}50%{opacity:1;transform:scale(1.06)}}
+  .still .twinkle,.still #glow{animation:none}
+  @media (prefers-reduced-motion:reduce){.twinkle,#glow{animation:none}}
+</style>
+</head>
+<body>
+<svg viewBox="0 0 2560 1600" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="glowfill" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="var(--glow)"/>
+      <stop offset="1" stop-color="var(--glow)" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="fade" cx="50%" cy="50%" r="60%">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset=".7" stop-color="#fff" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
+      <circle cx="14" cy="14" r="1.6" fill="var(--dot)"/>
+    </pattern>
+    <mask id="gridmask"><rect width="2560" height="1600" fill="url(#fade)"/></mask>
+    <symbol id="mark" viewBox="109 97 1040 1040">
+      <path fill="var(--ink)" fill-rule="evenodd" d="M 382.500 256.693 C 283.394 261.901, 192.564 327.761, 156.559 420.519 C 154.002 427.109, 151.481 433.530, 150.959 434.788 C 148.980 439.551, 144.110 459.981, 142.088 472 C 138.527 493.163, 138.052 502.799, 138.026 554.412 L 138 604.324 140.472 608.542 C 145.047 616.349, 140.936 616, 228.270 615.998 C 304.843 615.995, 323.139 615.419, 341.926 612.417 C 379.994 606.335, 423.684 590.048, 457.500 569.332 C 461.900 566.637, 467.686 563.097, 470.358 561.466 C 537.790 520.299, 595.933 425.774, 606.581 340.002 C 608.304 326.130, 609.589 282.210, 608.554 272.610 C 607.648 264.215, 603.271 258.536, 596.500 256.972 C 592.905 256.141, 397.835 255.888, 382.500 256.693 M 188.021 649.073 C 184.451 650.559, 182.059 652.967, 179.847 657.302 C 177.073 662.737, 177.497 883.431, 180.315 901 C 189.333 957.227, 206.949 993.978, 241.462 1028.569 C 275.933 1063.117, 314.458 1081.741, 362.211 1086.942 C 375.669 1088.408, 591.804 1088.403, 595.685 1086.936 C 600.516 1085.111, 603.837 1081.091, 605.052 1075.599 C 606.928 1067.117, 605.732 932.989, 603.638 917 C 591.841 826.940, 543.956 746.017, 474.500 698.764 C 436.349 672.808, 395.464 657.877, 342 650.373 C 327.961 648.403, 192.380 647.258, 188.021 649.073 M 920 648.682 C 857.785 653.286, 798.246 678.735, 751 720.918 C 735.495 734.762, 733.313 736.929, 721.725 749.980 C 686.076 790.136, 663.334 833.066, 653.114 879.500 C 648.656 899.758, 647.788 908.779, 647.294 940 L 646.812 970.500 649.156 973.908 C 650.445 975.782, 652.770 978.257, 654.323 979.408 L 657.146 981.500 780.323 981.803 C 904.723 982.108, 919.016 981.802, 936.643 978.451 C 1027.399 961.198, 1101.066 885.083, 1116.656 792.456 C 1118.308 782.640, 1118.500 775.152, 1118.500 720.500 L 1118.500 659.500 1116.299 655.962 C 1115.089 654.016, 1112.328 651.428, 1110.163 650.212 L 1106.228 648 1015.364 648.175 C 965.389 648.271, 922.475 648.499, 920 648.682"/>
+      <path fill="var(--blade)" fill-rule="evenodd" d="M 655.020 146.752 C 653.106 147.713, 650.495 150.063, 649.219 151.974 L 646.897 155.448 647.247 248.974 L 647.598 342.500 650.292 357.500 C 654.902 383.174, 658.229 395.172, 666.236 415 C 706.327 514.287, 790.477 587.237, 890.124 609.090 C 919.159 615.457, 917.329 615.360, 1015.828 615.745 L 1106.156 616.098 1110.573 613.510 C 1119.187 608.462, 1118.501 619.157, 1118.495 490 C 1118.490 386.115, 1118.326 374.341, 1116.729 363 C 1110.750 320.547, 1100.893 292.232, 1080.175 258 C 1041.505 194.107, 976.232 153.425, 900.576 146.063 C 893.572 145.381, 848.187 145.001, 774.076 145.002 C 666.038 145.003, 658.273 145.117, 655.020 146.752 M 624.632 469.786 C 624.326 470.282, 623.110 475.145, 621.929 480.594 C 618.689 495.553, 609.576 525.357, 605.140 535.500 C 583.685 584.560, 549.924 609.463, 484.500 624.485 C 469.282 627.980, 468 628.486, 468 631 C 468 633.474, 469.494 634.094, 482.500 637.017 C 566.545 655.903, 598.550 687.089, 620.314 771.302 C 624.297 786.714, 624.619 787.500, 626.963 787.500 C 629.690 787.500, 629.303 788.486, 633.468 770.909 C 652.665 689.897, 686.553 656.662, 769.500 637.498 C 783.575 634.246, 786.969 632.984, 786.969 631 C 786.969 628.965, 784.068 627.638, 775.909 625.941 C 690.606 608.203, 656.334 574.910, 635.975 490 C 633.667 480.375, 631.446 471.825, 631.038 471 C 630.202 469.304, 625.482 468.410, 624.632 469.786"/>
+    </symbol>
+  </defs>
+
+  <rect width="2560" height="1600" fill="var(--ground)"/>
+  <rect width="2560" height="1600" fill="url(#grid)" mask="url(#gridmask)"/>
+  <g id="stars"></g>
+
+  <!-- The hero drifts slowly round the centre, so nothing sits still for
+       hours; its orbits turn and their nodes ride them. -->
+  <g id="hero" transform="translate(1280 760)">
+    <ellipse id="glow" rx="820" ry="820" fill="url(#glowfill)"/>
+    <g id="orbits"></g>
+    <use href="#mark" x="-170" y="-170" width="340" height="340"/>
+  </g>
+
+  <g id="clock" transform="translate(140 1330)">
+    <text id="time" font-family="Unbounded" font-size="120" font-weight="700" letter-spacing="-2" fill="var(--ink)">00:00</text>
+    <text id="date" y="62" font-family="JetBrains Mono" font-size="24" font-weight="500" letter-spacing="3.8" fill="var(--label)">—</text>
+  </g>
+  <text x="2420" y="1392" text-anchor="end" font-family="JetBrains Mono" font-size="22" font-weight="500" letter-spacing="3.5" fill="var(--label)">ZOOLCODER · ZC CARE</text>
+</svg>
+<script>
+  const q = location.search;
+  if (q.includes("light")) document.documentElement.classList.add("light");
+  const still = q.includes("still") || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (still) document.documentElement.classList.add("still");
+
+  const ns = "http://www.w3.org/2000/svg";
+  const el = (name, attrs, parent) => {
+    const e = document.createElementNS(ns, name);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    parent.appendChild(e);
+    return e;
+  };
+  let seed = 20261015;
+  const rand = () => (seed = (seed * 1664525 + 1013904223) % 4294967296) / 4294967296;
+
+  // Stars: most hold still, about one in six twinkles on its own clock.
+  const stars = document.getElementById("stars");
+  for (let i = 0; i < 300; i++) {
+    const big = rand() < .06, o = big ? .8 : .15 + rand() * .4;
+    const s = el("circle", {cx: (rand() * 2560).toFixed(1), cy: (rand() * 1600).toFixed(1),
+      r: (big ? 1.8 + rand() * 1.2 : .6 + rand() * .9).toFixed(2), fill: "var(--star)", opacity: o.toFixed(2)}, stars);
+    if (big || rand() < .16) {
+      s.classList.add("twinkle");
+      s.style.setProperty("--o", o.toFixed(2));
+      s.style.setProperty("--t", (4 + rand() * 6).toFixed(1) + "s");
+      s.style.setProperty("--d", (-rand() * 10).toFixed(1) + "s");
+    }
+  }
+
+  // Orbits round the mark. One carries the accent, as one blade does in the
+  // mark. Each node keeps its own speed; inner orbits run faster.
+  const orbits = document.getElementById("orbits");
+  const rings = [
+    {rx: 290, ry: 105, tilt: -18, nodes: 2, speed: .11},
+    {rx: 460, ry: 175, tilt: -14, nodes: 3, speed: .07, hot: true},
+    {rx: 660, ry: 255, tilt: -22, nodes: 2, speed: .045},
+    {rx: 900, ry: 355, tilt: -17, nodes: 2, speed: .03, dashed: true},
+  ];
+  const riders = [];
+  rings.forEach((ring, n) => {
+    const g = el("g", {}, orbits);
+    el("ellipse", {rx: ring.rx, ry: ring.ry, fill: "none", stroke: ring.hot ? "var(--ring-hot)" : "var(--ring)",
+      "stroke-width": ring.hot ? 2 : 1.5, "stroke-dasharray": ring.dashed ? "2 10" : "none"}, g);
+    for (let k = 0; k < ring.nodes; k++) {
+      const node = el("g", {}, g);
+      if (ring.hot) el("circle", {r: 14, fill: "none", stroke: "var(--acc)", "stroke-width": 2, opacity: .5}, node);
+      el("circle", {r: ring.hot ? 7 : 5, fill: ring.hot ? "var(--acc)" : "var(--ink)", opacity: ring.hot ? 1 : .7}, node);
+      riders.push({ring, node, a0: n * 1.3 + k * (Math.PI * 2 / ring.nodes) + .6});
+    }
+    ring.g = g;
+  });
+
+  const hero = document.getElementById("hero");
+  function frame(ms) {
+    const t = ms / 1000;
+    // A slow figure-eight over about seven minutes keeps pixels moving.
+    const dx = still ? 0 : Math.sin(t / 67) * 260, dy = still ? 0 : Math.sin(t / 41) * 90;
+    hero.setAttribute("transform", `translate(${(1280 + dx).toFixed(1)} ${(760 + dy).toFixed(1)})`);
+    for (const ring of rings) {
+      const tilt = ring.tilt + (still ? 0 : Math.sin(t / 50 + ring.rx) * 4);
+      ring.g.setAttribute("transform", `rotate(${tilt.toFixed(2)})`);
+    }
+    for (const {ring, node, a0} of riders) {
+      const a = a0 + (still ? 0 : t * ring.speed);
+      node.setAttribute("transform", `translate(${(ring.rx * Math.cos(a)).toFixed(1)} ${(ring.ry * Math.sin(a)).toFixed(1)})`);
+    }
+    if (!still) requestAnimationFrame(frame);
+  }
+  frame(0);
+  if (!still) requestAnimationFrame(frame);
+
+  const time = document.getElementById("time"), date = document.getElementById("date");
+  function tick() {
+    const now = new Date();
+    time.textContent = now.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+    date.textContent = now.toLocaleDateString("en-GB", {weekday: "long", day: "numeric", month: "long"}).toUpperCase();
+    setTimeout(tick, 1000 - now.getMilliseconds());
+  }
+  tick();
+  document.fonts.ready.then(() => document.body.dataset.ready = "1");
+</script>
+</body>
+</html>

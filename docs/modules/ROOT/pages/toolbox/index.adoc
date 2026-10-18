@@ -1,0 +1,152 @@
+= The toolbox
+:description: Every tool and app the reference workstation installs and configures, what each is for, and the keys that matter.
+
+zc-care does not choose your tools; your config does. This section
+describes the setup it was built for: a macOS developer workstation for Go,
+Java, Vue and Flutter work with Claude Code at its centre. Each page says what
+a tool is for, how the workstation sets it up, and the keys and commands worth
+knowing. Take what you like into your own Brewfile.
+
+Every tool here is declared in a Brewfile or `mise.toml` with a comment saying
+why it is there, so `zc-care list` shows the same reasons:
+
+[source,console]
+----
+$ zc-care list -kind cask,brew
+----
+
+The colours, terminal, prompt and bar themes live in this repository under
+`assets/theme`. The shell, git, app settings and keyboard config live in a
+private config repository, applied by the `dotfiles` provider. See
+xref:new-machine.adoc[] for that layout.
+
+== How the pieces fit
+
+[listing]
+----
+Karabiner (Hyper+T)  ->  Ghostty  ->  tmux (dev)  ->  Claude Code | lazygit | zsh
+                                                   starship · atuin · fzf · zoxide
+SketchyBar  <-  macmon, ZC Care         JankyBorders around the focused window
+Raycast     ->  repos, branches, zccare:// URLs
+----
+
+A typical start: Hyper+D opens Ghostty running `dev`, you pick a repository,
+and tmux opens Claude Code, lazygit and a shell in it. ZC Care in the menu bar
+says when packages are outdated or something drifted, and ZC Care keeps the
+disk clean. See xref:app.adoc[].
+
+== Terminal and shell
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/ghostty.adoc[Ghostty] |Ghostty, the terminal: GPU-rendered, native on macOS, with a drop-down quick terminal.
+|xref:toolbox/tmux.adoc[tmux] |tmux, the session manager: panes, windows, popups and the dev layout.
+|xref:toolbox/zsh.adoc[zsh, antidote and plugins] |zsh with antidote: the shell, its plugins, aliases and helper functions.
+|xref:toolbox/starship.adoc[Starship] |Starship, the prompt: folder, git state, pull request and versions at a glance.
+|xref:toolbox/atuin.adoc[Atuin] |Atuin, shell history: searchable, per folder, and free of secrets.
+|===
+
+== Command line
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/fzf.adoc[fzf] |fzf, the fuzzy finder behind completion, the session picker and dev.
+|xref:toolbox/zoxide.adoc[zoxide] |zoxide, a smarter cd that learns the folders you use.
+|xref:toolbox/eza.adoc[eza] |eza, ls with icons, git status and trees.
+|xref:toolbox/bat.adoc[bat] |bat, cat with syntax highlighting and git changes; also the man page pager.
+|xref:toolbox/fd-ripgrep.adoc[fd and ripgrep] |fd and ripgrep, fast find and grep that respect .gitignore.
+|xref:toolbox/jq-yq.adoc[jq and yq] |jq and yq, query and edit JSON and YAML from the command line.
+|xref:toolbox/yazi.adoc[Yazi] |Yazi, a terminal file manager with previews.
+|xref:toolbox/media.adoc[ffmpeg, sox, jpegoptim, pngquant and poppler] |Convert and shrink video, audio, images and PDFs.
+|xref:toolbox/cli-helpers.adoc[just, xh, hyperfine and other helpers] |Project recipes, HTTP calls, benchmarks, command examples, Python scripts and shell linting.
+|xref:toolbox/keys-mail.adoc[GnuPG, oathtool and mailctl] |Signatures, one-time codes and mail accounts kept in a file.
+|===
+
+== Git and GitHub
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/git-tools.adoc[git, delta, difftastic and git-absorb] |git and its helpers: delta diffs, structural diffs, automatic fixups and secret scanning.
+|xref:toolbox/lazygit.adoc[lazygit] |lazygit, git in a terminal UI.
+|xref:toolbox/gitleaks.adoc[gitleaks] |gitleaks, the secret scanner that runs before every commit.
+|xref:toolbox/gh.adoc[GitHub CLI] |gh, GitHub from the terminal: pull requests, issues, Actions and auth.
+|===
+
+== Runtimes and dotfiles
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/mise.adoc[mise] |mise, the runtime manager: Java, Node, Python and Gradle versions.
+|xref:toolbox/chezmoi.adoc[chezmoi] |chezmoi, the dotfiles engine behind the dotfiles provider.
+|xref:toolbox/direnv.adoc[direnv] |direnv, per-folder environment variables.
+|xref:toolbox/go.adoc[Go, gopls, delve and golangci-lint] |The Go toolchain, its language server, debugger and linter.
+|xref:toolbox/languages.adoc[jdtls, typescript-language-server and CocoaPods] |The Java and TypeScript language servers, and CocoaPods for Flutter on iOS.
+|===
+
+== Containers and data
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/containers.adoc[Colima, Docker and friends] |Colima, Docker, lazydocker, dive and the Kubernetes tools.
+|xref:toolbox/postgresql.adoc[PostgreSQL, pgcli and TablePlus] |A local PostgreSQL 17 server, pgcli and TablePlus.
+|xref:toolbox/cloud.adoc[Cloud CLIs] |AWS, Google Cloud, Hetzner, Cloudflare Tunnel, Fly.io, Neon, Supabase and the other deploy tools.
+|===
+
+== Desktop
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/sketchybar.adoc[SketchyBar and JankyBorders] |SketchyBar, the menu bar replacement, and JankyBorders around the focused window.
+|xref:toolbox/karabiner.adoc[Karabiner-Elements and the Hyper key] |Karabiner-Elements: Caps Lock as Escape and Hyper, and Hyper shortcuts for apps.
+|xref:toolbox/raycast.adoc[Raycast] |Raycast, the launcher, with clipboard history and script commands.
+|xref:toolbox/chrome.adoc[Google Chrome] |Chrome, the default browser, with a small set of extensions.
+|xref:toolbox/everyday-apps.adoc[Everyday apps] |Shottr, Handy, Bruno, Obsidian, Proxyman, the meeting apps and the fonts.
+|===
+
+== Editors
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/vscode.adoc[Visual Studio Code] |VS Code, the editor, with settings that follow the system theme.
+|xref:toolbox/editors.adoc[IntelliJ IDEA and Neovim] |IntelliJ IDEA through JetBrains Toolbox, and Neovim in the terminal.
+|===
+
+== AI
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/claude-code.adoc[Claude Code and AI tools] |Claude Code, Codex, the AI desktop apps, CodexBar, Ollama, and how the workstation wires them in.
+|===
+
+== Keeping the Mac well
+
+[%header,cols="1,3"]
+|===
+|Tool |What it is for
+
+|xref:toolbox/system.adoc[btop, macmon and fastfetch] |btop, macmon and fastfetch: what the Mac is doing.
+|xref:toolbox/mac-helpers.adoc[Mac helpers] |asimov, pam-reattach, mkcert and the other helpers that fix small Mac annoyances.
+|===
+
+== The menu bar app
+
+ZC Care are part of zc-care itself, not a separate install.
+The panel shows the Mac's vitals, the plan, outdated packages, `doctor`
+findings and services. ZC Care cleans junk and AI clutter, uninstalls apps
+with their leftovers and finds idle dependencies. See xref:app.adoc[].

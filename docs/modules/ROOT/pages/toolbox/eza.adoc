@@ -1,0 +1,24 @@
+= eza
+:description: eza, ls with icons, git status and trees.
+
+eza is a modern `ls`. It shows icons, file types in colour, and each file's git status, and it can print a tree.
+
+== On the workstation
+
+* Installed by the `eza` formula; `assets/theme/dot_config/eza` holds the light and dark themes.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`ls`, `ll`, `la` |List, long list, list hidden files
+|`lt3` |A tree three levels deep, folders first
+|===
+
+== See also
+
+* xref:toolbox/bat.adoc[bat]
+* xref:toolbox/yazi.adoc[Yazi]
+* https://eza.rocks[eza website]

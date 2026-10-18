@@ -1,0 +1,24 @@
+= bat
+:description: bat, cat with syntax highlighting and git changes; also the man page pager.
+
+bat prints files with syntax highlighting, line numbers and git change marks. It is also the pager for man pages, so they are coloured and searchable.
+
+== On the workstation
+
+* Installed by the `bat` formula; its themes are in `assets/theme/dot_config/bat`.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`bat file` |Show a file with highlighting
+|`catp` |The same, by its alias
+|===
+
+== See also
+
+* xref:toolbox/eza.adoc[eza]
+* xref:toolbox/fd-ripgrep.adoc[fd and ripgrep]
+* https://github.com/sharkdp/bat[bat website]

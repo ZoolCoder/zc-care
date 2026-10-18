@@ -1,0 +1,16 @@
+= Visual Studio Code
+:description: VS Code, the editor, with settings that follow the system theme.
+
+VS Code is the main editor, next to IntelliJ IDEA for Java and Neovim in the terminal. Its settings are managed, so a new Mac opens it exactly as the old one had it.
+
+== On the workstation
+
+* Installed by the `visual-studio-code` cask; `settings.json` comes from the config repo.
+* Catppuccin Latte in light mode and Mocha in dark mode, following the system.
+* JetBrains Mono Nerd Font with ligatures, no minimap, coloured bracket pairs.
+* Language servers for Go, Java and TypeScript come from the Brewfile, so editors and AI tools share them.
+
+== See also
+
+* xref:toolbox/editors.adoc[IntelliJ IDEA and Neovim]
+* https://code.visualstudio.com[Visual Studio Code website]

@@ -1,0 +1,40 @@
+= jdtls, typescript-language-server and CocoaPods
+:description: The Java and TypeScript language servers for editors and AI agents, and CocoaPods for Flutter's iOS builds.
+
+Language servers give an editor or an AI agent what an IDE knows: where a
+symbol is defined, who calls it, and what does not compile. The workstation
+installs them once, from Homebrew, so every tool uses the same copy.
+CocoaPods fetches the iOS libraries a Flutter app depends on.
+
+== On the workstation
+
+* Installed by the `jdtls`, `typescript-language-server` and `cocoapods`
+  formulae.
+* Claude Code uses them through the `jdtls-lsp` and `typescript-lsp`
+  plugins from `claude-plugins-official`; `gopls-lsp` uses gopls from the
+  xref:toolbox/go.adoc[Go tools].
+* jdtls runs on the Java that mise makes active.
+* Flutter runs `pod install` itself when it builds for iOS.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`/plugin install jdtls-lsp@claude-plugins-official` |Give Claude Code the Java language server
+|`/plugin install typescript-lsp@claude-plugins-official` |Give Claude Code the TypeScript language server
+|`cd ios && pod install --repo-update` |Fetch a Flutter app's iOS pods with fresh specs
+|`pod outdated` |List pods with newer versions
+|===
+
+When a Flutter iOS build fails over pods after a Flutter upgrade, remove
+`ios/Pods` and `ios/Podfile.lock`, then build again.
+
+== See also
+
+* xref:toolbox/claude-code.adoc[Claude Code and AI tools]
+* xref:toolbox/editors.adoc[IntelliJ IDEA and Neovim]
+* https://github.com/eclipse-jdtls/eclipse.jdt.ls[Eclipse JDT Language Server]
+* https://github.com/typescript-language-server/typescript-language-server[typescript-language-server]
+* https://guides.cocoapods.org[CocoaPods guides]

@@ -1,0 +1,64 @@
+.Start here
+* xref:index.adoc[What ZC Care is]
+* xref:getting-started.adoc[Getting started]
+* xref:configuration.adoc[Writing a config]
+* xref:new-machine.adoc[A new Mac in one command]
+
+.Use it
+* xref:providers.adoc[Providers]
+* xref:commands.adoc[Commands]
+* xref:app.adoc[ZC Care]
+* xref:agents.adoc[Agents and MCP]
+
+.The toolbox
+* xref:toolbox/index.adoc[Overview]
+* Terminal and shell
+** xref:toolbox/ghostty.adoc[Ghostty]
+** xref:toolbox/tmux.adoc[tmux]
+** xref:toolbox/zsh.adoc[zsh and plugins]
+** xref:toolbox/starship.adoc[Starship]
+** xref:toolbox/atuin.adoc[Atuin]
+* Command line
+** xref:toolbox/fzf.adoc[fzf]
+** xref:toolbox/zoxide.adoc[zoxide]
+** xref:toolbox/eza.adoc[eza]
+** xref:toolbox/bat.adoc[bat]
+** xref:toolbox/fd-ripgrep.adoc[fd and ripgrep]
+** xref:toolbox/jq-yq.adoc[jq and yq]
+** xref:toolbox/yazi.adoc[Yazi]
+** xref:toolbox/media.adoc[Media tools]
+** xref:toolbox/cli-helpers.adoc[just, xh and helpers]
+** xref:toolbox/keys-mail.adoc[GnuPG, oathtool, mailctl]
+* Git and GitHub
+** xref:toolbox/git-tools.adoc[git and diff tools]
+** xref:toolbox/lazygit.adoc[lazygit]
+** xref:toolbox/gitleaks.adoc[gitleaks]
+** xref:toolbox/gh.adoc[GitHub CLI]
+* Runtimes and dotfiles
+** xref:toolbox/mise.adoc[mise]
+** xref:toolbox/chezmoi.adoc[chezmoi]
+** xref:toolbox/direnv.adoc[direnv]
+** xref:toolbox/go.adoc[Go tools]
+** xref:toolbox/languages.adoc[Language servers]
+* Containers and data
+** xref:toolbox/containers.adoc[Colima and Docker]
+** xref:toolbox/postgresql.adoc[PostgreSQL]
+** xref:toolbox/cloud.adoc[Cloud CLIs]
+* Desktop
+** xref:toolbox/sketchybar.adoc[SketchyBar]
+** xref:toolbox/karabiner.adoc[Karabiner and Hyper]
+** xref:toolbox/raycast.adoc[Raycast]
+** xref:toolbox/chrome.adoc[Google Chrome]
+** xref:toolbox/everyday-apps.adoc[Everyday apps]
+* Editors and AI
+** xref:toolbox/vscode.adoc[VS Code]
+** xref:toolbox/editors.adoc[IntelliJ and Neovim]
+** xref:toolbox/claude-code.adoc[Claude Code and AI]
+* Keeping the Mac well
+** xref:toolbox/system.adoc[System monitors]
+** xref:toolbox/mac-helpers.adoc[Mac helpers]
+
+.The project
+* xref:extending.adoc[Adding a provider]
+* xref:security.adoc[Threat model]
+* xref:roadmap.adoc[Roadmap]

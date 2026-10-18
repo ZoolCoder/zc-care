@@ -1,0 +1,23 @@
+= Everyday apps
+:description: Shottr, Handy, Bruno, Obsidian, Proxyman, the meeting apps and the fonts.
+
+Small apps that each do one job well.
+
+== On the workstation
+
+* **Shottr:** screenshots to annotate, blur or read text from (Hyper+S).
+* **Handy:** system-wide dictation with a local Whisper model; open source.
+* **Bruno:** an API client whose collections are files in git.
+* **Obsidian:** Markdown notes in a local folder.
+* **Proxyman:** inspect and change HTTP and HTTPS traffic.
+* **TablePlus:** a database GUI.
+* **AnyDesk:** remote desktop, to help or be helped.
+* **Microsoft Teams and Zoom:** company chat and video meetings.
+* **JetBrains Mono Nerd Font:** the font of the terminal, editors and bar,
+  with the icons that eza, starship and SketchyBar draw.
+* **Cairo:** a font for Arabic text.
+
+== See also
+
+* xref:toolbox/raycast.adoc[Raycast]
+* https://shottr.cc[Everyday apps website]

@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- The GitHub social preview. Draw it again with:
+     chrome --headless=new --hide-scrollbars --window-size=1280,640 \
+       --screenshot=.github/social-preview.png .github/social-preview.html
+     then upload it under Settings, General, Social preview. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; width: 1280px; height: 640px; overflow: hidden; }
+  body {
+    font-family: -apple-system, "SF Pro Display", "Helvetica Neue", sans-serif;
+    color: #f3f5fa;
+    background: radial-gradient(circle at 85% 30%, #1e3f9e 0%, #0e1a3d 45%, #08090d 100%);
+  }
+  .card {
+    position: absolute; inset: 0 560px 0 0; padding: 64px 0 64px 72px;
+    display: flex; flex-direction: column; justify-content: center; gap: 26px;
+  }
+  .brand { display: flex; align-items: center; gap: 22px; }
+  .brand img { width: 84px; height: 84px; }
+  h1 { margin: 0; font-size: 64px; letter-spacing: -1.5px; font-weight: 700; }
+  p { margin: 0; max-width: 620px; font-size: 30px; line-height: 1.35; color: #b9c6e4; }
+  .chips { display: flex; flex-wrap: wrap; gap: 12px; max-width: 640px; }
+  .shot {
+    position: absolute; right: -40px; top: 90px; width: 600px; border-radius: 14px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .6); transform: perspective(1400px) rotateY(-12deg);
+  }
+  .chips span {
+    font-size: 22px; padding: 8px 18px; border-radius: 999px;
+    background: rgba(61, 123, 255, .14); border: 1px solid rgba(61, 123, 255, .45);
+  }
+</style>
+</head>
+<body>
+<img class="shot" src="../docs/modules/ROOT/images/care-cleanup.png" alt="">
+<div class="card">
+  <div class="brand"><img src="mark-dark.png" alt=""><h1>ZC Care</h1></div>
+  <p>Set up your Mac from one config, keep it that way, and keep it clean. Built on <span style="white-space:nowrap">zc-care</span>.</p>
+  <div class="chips">
+    <span>Choose your apps</span><span>Developer or everyday</span><span>Cleanup</span>
+    <span>Homebrew</span><span>chezmoi</span><span>mise</span><span>MCP</span>
+  </div>
+</div>
+</body>
+</html>

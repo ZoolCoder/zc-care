@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# ZoolCoder bar that follows light and dark mode: front app on the left, status on the right.
+export PATH="/opt/homebrew/bin:$PATH"
+PLUGIN_DIR="$CONFIG_DIR/plugins"
+
+source "$CONFIG_DIR/colors.sh"
+
+sketchybar --bar position=top height=36 color=$BASE blur_radius=30 padding_left=8 padding_right=8 y_offset=2 corner_radius=12 margin=8
+
+sketchybar --default \
+  icon.font="JetBrainsMono Nerd Font:Bold:15.0" \
+  label.font="JetBrainsMono Nerd Font:Bold:13.0" \
+  icon.color=$TEXT label.color=$TEXT \
+  padding_left=3 padding_right=3 \
+  icon.padding_left=10 icon.padding_right=4 label.padding_left=4 label.padding_right=10 \
+  background.color=$SURFACE background.corner_radius=9 background.height=26
+
+sketchybar --add item front_app left \
+  --set front_app icon.drawing=off label.padding_left=10 label.color=$ACCENT script="$PLUGIN_DIR/front_app.sh" \
+  --subscribe front_app front_app_switched
+
+sketchybar --add item clock right --set clock icon=󰃰 icon.color=$ACCENT update_freq=10 script="$PLUGIN_DIR/clock.sh" \
+  --add item battery right --set battery icon.color=$GREEN update_freq=120 script="$PLUGIN_DIR/battery.sh" \
+  --subscribe battery system_woke power_source_change \
+  --add item cpu right --set cpu icon=󰻠 icon.color=$BLUE update_freq=5 script="$PLUGIN_DIR/cpu.sh" \
+  --add item memory right --set memory icon=󰍛 icon.color=$PEACH update_freq=15 script="$PLUGIN_DIR/memory.sh" \
+  --add item sensors right --set sensors icon=󰔏 icon.color=$ACCENT update_freq=10 script="$PLUGIN_DIR/sensors.sh"
+
+# What needs attention on this Mac, counted by the ZC Care app (app/); a
+# click opens its panel. Hidden while the app has never run.
+sketchybar --add event zccare_changed \
+  --add item zccare right --set zccare icon=󰌢 script="$PLUGIN_DIR/zccare.sh" click_script="open -g zccare://panel" \
+  --subscribe zccare zccare_changed system_woke
+
+# macOS posts this notification on every switch between light and dark mode.
+sketchybar --add event theme_changed AppleInterfaceThemeChangedNotification \
+  --add item theme left --set theme drawing=off script="$PLUGIN_DIR/theme.sh" --subscribe theme theme_changed
+
+# Extra items for one Mac, with the colours above, go in ~/.config/sketchybar/local.sh.
+# shellcheck source=/dev/null
+[ -f "$CONFIG_DIR/local.sh" ] && source "$CONFIG_DIR/local.sh"
+
+sketchybar --update

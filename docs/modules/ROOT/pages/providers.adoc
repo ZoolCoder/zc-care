@@ -1,0 +1,298 @@
+= Providers
+:description: What each zc-care provider reads, what it runs, and what it leaves to you.
+
+A provider reads the machine and returns actions. It never writes during a
+plan. Each one also counts what is in place, for `status`, `doctor` and
+ZC Care.
+
+[#packages]
+== packages
+
+Installs what a manifest declares. *It never uninstalls*: a package you drop
+from the manifest stays installed, because removing software is your call.
+
+[cols="1,2,2,2"]
+|===
+| Manager | Manifest | Reads installed | Installs with
+
+| `brew`
+| A Brewfile: `tap`, `brew`, `cask` and `mas` entries
+| `brew list --formula`, `brew list --cask`, `brew tap`, `mas list`
+| `brew tap`, `brew install`, `brew install --cask --adopt`, `sudo mas install ID`
+
+|===
+
+For `list` and the Inventory page, versions and descriptions come from
+`brew info --json=v2 --installed` and `mas list`. If the details cannot be
+read, items still list, without versions.
+
+Newer versions and undeclared packages come from:
+
+[cols="1,2,2,2"]
+|===
+| Manager | Newer versions | Installed on purpose | Upgrades with
+
+| `brew`
+| `brew outdated --json=v2`, skipping pinned formulae; `mas outdated`
+| `brew leaves --installed-on-request`, `brew list --cask`, `brew tap`, `mas list`
+| `brew upgrade`, `brew upgrade --cask`, `mas upgrade ID`
+
+|===
+
+These reads are best effort: if one fails, items
+still list without it.
+
+* With `upgrade: true`, the plan has one `UPDATE` per outdated declared
+  package, such as `upgrade with brew, 3.7c to 3.8`. Without it, nothing is
+  upgraded. A manager that cannot report newer versions gets one `MANUAL`
+  step instead.
+* `capture` writes a Brewfile (`tap`, `brew`, `cask` and `mas` lines) or a
+  package list from the "installed on purpose" reads. Dependencies are left
+  out, since the manager pulls them in again.
+
+* Taps are installed before the formulae that need them.
+* Other Brewfile entries, such as `vscode` or `go`, are `MANUAL`: the plan
+  names them, and you install them yourself.
+* `mas` entries are `MANUAL` until `mas` is installed.
+* If the manager itself is missing, the plan is one `MANUAL` step to install
+  it.
+* An app installed outside the manager is not seen. Its cask is installed
+  with `--adopt`, so Homebrew takes over the app already there; if the app
+  differs from the cask, Homebrew refuses, and you delete the app or remove
+  the entry.
+
+[#dotfiles]
+== dotfiles
+
+Applies a https://www.chezmoi.io[chezmoi] source directory. Use chezmoi's
+naming (`dot_zshrc`, `private_`, `executable_`, `.tmpl`) and its templates
+for per-machine differences. Its secrets support keeps passwords out of the
+repository.
+
+The plan is `chezmoi status`:
+
+[cols="1,1,3"]
+|===
+| chezmoi | Plan | Meaning
+
+| `A` | `CREATE` | The file is not there yet.
+| `M` | `UPDATE` | The file differs from the source.
+| `D` | `DELETE` | The source removes it, with chezmoi's `remove_` prefix.
+| `R` | `UPDATE` | A `run_` script will run.
+|===
+
+In the inventory each file names the app it configures: the folder under
+`.config`, `.local/share`, `Library/Application Support` or `AppData`, else
+the file's own name (`.zshrc` is `zsh`, `.gitconfig` is `git`). A login item
+under `Library/LaunchAgents` is `launchd`.
+
+A file edited since chezmoi last wrote it says so in the plan:
+`changed outside chezmoi, apply overwrites it`. Copy your edit into the source
+first if you want to keep it.
+
+Apply runs `chezmoi apply --force` for exactly the planned paths and their
+parent directories, nothing else. `--force` stands in for chezmoi's own
+overwrite prompt, because you already reviewed the plan.
+
+zc-care ships one source of its own, `assets/theme`: the ZoolCoder
+colours for Ghostty, tmux, starship, SketchyBar, JankyBorders, bat, btop, eza,
+yazi, lazygit and fastfetch, each with a dark and a light variant. Its shell
+settings, such as `BAT_THEME_DARK` and `FZF_DEFAULT_OPTS`, sit in
+`~/.config/zoolcoder/theme.zsh`. The source creates `~/.zshrc.local` to load
+it, once: an existing `~/.zshrc.local` is left alone and needs the line itself,
+and an existing `.zshrc` needs one line, `source ~/.zshrc.local`. After apply, reload
+what is running: `sketchybar --reload`, `~/.config/borders/bordersrc`, and
+`tmux source-file ~/.config/tmux/tmux.conf`.
+
+With `mode: symlink`, each file is a link into the source directory, so an
+edit in place lands in the repository. A file chezmoi must render, such as a
+template or a private file, is still copied.
+
+[#tools]
+== tools
+
+Installs the runtimes a https://mise.jdx.dev[mise] config pins. Only the tools
+declared in that file count. Tools from your global mise config or a parent
+directory's config are ignored.
+
+* The plan lists one `CREATE` per `tool@version` that is not installed, such
+  as `java@temurin-25`.
+* Apply runs `mise install` in the config's directory.
+* In the inventory, each runtime shows the version mise resolved next to the
+  one requested, such as `24.21.0` for `lts`, and the newer version
+  `mise outdated` reports. Versions installed but asked for by no config in
+  this target, such as a global tool or an old node, show as `not declared`.
+* With `upgrade: true`, the plan has one `UPDATE` per outdated runtime. Apply
+  runs `mise upgrade` for that `tool@request` in the config's directory, so a
+  pin such as `3.13` moves only within `3.13`.
+* `capture` writes a `[tools]` table of every installed version, using the
+  request when mise knows it.
+* mise refuses to read a config it does not trust. The plan then shows a
+  `MANUAL` step: read the file, then run `mise trust`.
+* `doctor` checks that the shell runs each command from mise, not from
+  another copy earlier on `PATH`, such as Homebrew's `node`. The fix is to
+  activate mise last in the shell profile.
+
+[#desktop]
+== desktop
+
+Sets how a Mac looks: the desktop picture, the page the
+https://github.com/liquidx/webviewscreensaver[WebViewScreenSaver] screen saver
+shows, and the accent colour.
+
+* *Wallpaper.* macOS keeps one picture for every Space on every display, in
+  its wallpaper store,
+  `~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`.
+  System Events sees only the Spaces in view, so the plan reads the store
+  itself, with a small JavaScript for Automation script run by `osascript`. If
+  any Space shows another picture, the plan has one `UPDATE`. Apply sets the
+  picture through System Events, rewrites every Space in the store, and
+  restarts `WallpaperAgent` so the desktops redraw. The first run asks you to
+  let your terminal control System Events. Another tool that also sets the
+  wallpaper, such as a login agent, will undo this; turn it off.
+* *Accent.* `accent` is one of `blue`, `purple`, `pink`, `red`, `orange`,
+  `yellow`, `green` or `graphite`. The plan reads `AppleAccentColor` with
+  `defaults`; apply writes it and the matching `AppleHighlightColor`. Apps
+  show the new colour once they restart; log out to see it everywhere.
+* *Screen saver.* The page, with the fonts and images its CSS loads from its
+  folder inlined, becomes one `data:` URL. The plan compares it with the
+  saver's default page, `WVSSDefaultAddressURL` in the saver's `Info.plist`,
+  read with `plutil`. If they differ, apply writes it there with `plutil` and
+  signs the saver again, ad hoc, with `codesign`. The saver shows its default
+  page while its own list of pages, set in its Options, is empty.
+* If WebViewScreenSaver is not installed, in `~/Library/Screen Savers` or
+  `/Library/Screen Savers`, the plan is a `MANUAL` step: run
+  `assets/screensaver/build-saver.sh`. It builds the saver from source with
+  Xcode and installs it for you. The Homebrew cask is disabled, because the
+  release build fails the Gatekeeper check; a local build is not quarantined.
+* Choosing WebViewScreenSaver as the screen saver is yours to do, once, in
+  System Settings, Screen Saver. macOS keeps that choice where no tool should
+  write it.
+* A file that does not exist, such as a wallpaper not rendered yet, is a
+  `MANUAL` step.
+
+The saver runs sandboxed: it cannot read files outside its bundle, and macOS
+keeps its preferences in a container no terminal may open. That is why the
+page travels inside the saver itself. Query options such as `?light` do not
+reach a `data:` URL, so the saver shows the page's default, dark look.
+
+[#settings]
+== settings
+
+Keeps macOS preferences at the values the config declares: the keys
+`defaults` reads and writes.
+
+[source,yaml]
+----
+- name: macos
+  provider: settings
+  defaults:
+    NSGlobalDomain:
+      KeyRepeat: 2
+      NSWindowResizeTime: 0.001
+    com.apple.dock:
+      autohide: true
+    com.apple.screencapture:
+      location: ~/Screenshots
+----
+
+* The plan reads each key with `defaults read`. A key that is not set is a
+  `CREATE`; one with another value is an `UPDATE`. Apply writes it with the
+  type of the YAML value: `-bool`, `-int`, `-float` or `-string`.
+* The Dock, Finder and the screenshot settings are read only when their
+  process starts, so a change to `com.apple.dock`, `com.apple.finder` or
+  `com.apple.screencapture` adds an action that restarts it.
+* A key the config stops declaring keeps its value. Some keys need a logout
+  to take effect.
+
+[#services]
+== services
+
+Keeps background services running: Homebrew services and launchd agents. It
+starts what is stopped and never stops anything.
+
+[source,yaml]
+----
+- name: services
+  provider: services
+  services: [sketchybar, borders, colima]
+  agents: [~/Library/LaunchAgents/local.weekly-update.plist]
+----
+
+* A service is in place when `brew services list` shows it `started`, or
+  `scheduled` for one that runs on a timer. Otherwise apply runs
+  `brew services restart`, which starts it at every login and recovers one
+  that failed.
+* An agent is in place when `launchctl print gui/<uid>/<label>` finds it; the
+  label is the file name without `.plist`. Otherwise apply loads it with
+  `launchctl bootstrap`. The plist can come from a `dotfiles` target listed
+  earlier in the config, which writes it first.
+* A changed plist is not reloaded. Reload it from a chezmoi `run_onchange_`
+  script that hashes the plist.
+
+[#agents]
+== agents
+
+Declares, once, what every AI coding agent gets: MCP servers, a rules file,
+skills, and the models Ollama serves. It writes them into Claude Code, Codex,
+Cursor and Gemini CLI. It adds and updates, and never removes a server, skill
+or model the file does not name.
+
+[source,yaml]
+----
+- name: ai
+  provider: agents
+  file: agents.yaml
+----
+
+`agents.yaml`:
+
+[source,yaml]
+----
+clients: [claude, codex, cursor, gemini]   # leave out for all four
+servers:
+  context7:
+    command: npx
+    args: [-y, "@upstash/context7-mcp@2.1.0"]   # pin a version; doctor warns otherwise
+  github:
+    url: https://api.githubcopilot.com/mcp/
+    headers: {Authorization: "Bearer ${GITHUB_TOKEN}"}
+rules: AGENTS.md          # relative to agents.yaml
+skills: [skills/review]   # folders holding a SKILL.md
+models: [qwen3:8b, nomic-embed-text]
+----
+
+[cols="1,2,2,2"]
+|===
+|Client |MCP servers |Rules |Skills
+
+|claude |`~/.claude.json` |`~/.claude/CLAUDE.md` |`~/.claude/skills`
+|codex |`~/.codex/config.toml` |`~/.codex/AGENTS.md` |`~/.codex/skills`
+|cursor |`~/.cursor/mcp.json` |kept in Cursor's settings |none
+|gemini |`~/.gemini/settings.json` |`~/.gemini/GEMINI.md` |none
+|===
+
+* A server is set by name in `mcpServers`; every other key in the file stays
+  as it was. Each file is replaced in one rename, read again just before the
+  write, so an agent writing it in between keeps its change.
+* Codex reads TOML. Its servers live in a marked block of `config.toml`. A
+  server Codex already declares outside the block is a `MANUAL` step, since a
+  table declared twice breaks the file. An env value written `+${NAME}+` becomes
+  an `env_vars` entry, which Codex passes through from your shell.
+* The rules file lands in a marked block, so what you wrote around it stays.
+* A skill is in place when every file in its folder matches.
+* A model is in place when `ollama list` shows it; otherwise apply runs
+  `ollama pull`. `ollama serve` must be running. `list` shows each model.
+* Keep keys out of the file: write `+${NAME}+` and keep the value in the
+  keychain or a password manager. `doctor` warns about plain-text keys.
+
+[#localdir]
+== localdir
+
+Keeps a directory holding the files written inline in the config. Writes go
+through `os.Root`, so a symlink or `..` cannot lead a write outside the
+directory. With `prune`, files the config does not list are deleted, after
+you confirm.
+
+It is useful for a handful of small files, and it is the worked example for
+xref:extending.adoc[writing your own provider].

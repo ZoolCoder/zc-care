@@ -1,0 +1,69 @@
+= Threat model
+:description: What zc-care protects against, and what it does not.
+
+== What it protects
+
+* *Nothing is applied that was not shown.* A saved plan refuses to apply when
+  the machine changed since. ZC Care plans again before applying. The
+  dotfiles provider applies only the planned paths.
+* *Deletions need a person.* The CLI and ZC Care ask, and the MCP server
+  cancels.
+* *Nothing is uninstalled.* The packages provider only installs.
+* *Nothing is upgraded unless a target asks.* `upgrade: true` is per target,
+  and each upgrade is a planned `UPDATE` you review first.
+* *Capture never replaces a file.* It writes standard output, or a new file;
+  replacing one needs `-force`.
+* *Untrusted mise configs stay untrusted.* Trusting one is a `MANUAL` step,
+  never automatic.
+* *Writes stay inside a target.* `localdir` writes through `os.Root`: a
+  symlink or `..` cannot lead a write out of the directory.
+* *The protocol stream stays clean.* Under `mcp`, installers get empty input
+  and their output is captured, never written to the protocol stream.
+* *An agent's plan goes stale.* The MCP server refuses a saved plan older
+  than an hour, and writes every tool call to `mcp-audit.jsonl` in its state
+  folder. Every apply, from the terminal, ZC Care or an agent, lands in
+  `zc-care history`.
+
+== What doctor checks
+
+`zc-care doctor` reads, and changes nothing. A weak setting is a
+warning, not a failure: the choice is yours.
+
+* *macOS:* FileVault, the firewall and stealth mode, a password after sleep,
+  Gatekeeper, System Integrity Protection, automatic updates, File Sharing,
+  Remote Login, Screen Sharing, automatic login, AirDrop open to everyone,
+  Touch ID for `sudo`, and servers listening on every interface.
+* *Every system:* SSH private keys without a passphrase, git commits left
+  unsigned, and secrets in the shell history. `gitleaks` scans
+  `~/.zsh_history`, `~/.bash_history`, the fish history and Atuin's, with
+  `--redact`: the report names the rule and the count, never the secret.
+* *AI agents:* API keys written in plain text in the MCP configs of Claude
+  Code, Claude Desktop, Cursor, Gemini, Windsurf and Codex; MCP servers that
+  `npx`, `bunx` or `uvx` start without a version; Claude Code rules that allow
+  any shell command, and `bypassPermissions`.
+
+== What it does not
+
+* *A config or manifest you did not write.* A Brewfile can name any package,
+  a chezmoi source can run scripts, and a mise config can install any tool.
+  Review them as you would a script.
+* *The package sources.* Homebrew and mise verify what they download; `zc-care` adds nothing to that.
+* *`sudo`.* Installs that run `sudo` ask for your password in the terminal,
+  or, with no terminal, in a macOS dialog that only you can answer. The
+  dialog is a script in the user cache folder; the password goes straight to
+  `sudo` and is never stored or seen by an agent.
+* *An attacker who already has your shell.*
+
+== Verifying a release
+
+Each release is built by GitHub Actions from its tag: one
+`ZCCare_<version>.zip`, the app with the CLI inside. It carries SLSA build
+provenance, which names the commit and workflow that built it:
+
+[source,sh]
+----
+gh attestation verify ZCCare_<version>.zip --repo zoolcoder/zc-care
+----
+
+Report a problem through the repository's security policy, never a public
+issue.

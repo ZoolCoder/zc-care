@@ -1,0 +1,25 @@
+= btop, macmon and fastfetch
+:description: btop, macmon and fastfetch: what the Mac is doing.
+
+btop shows processes, CPU, memory, disks and network in one screen. macmon reads Apple Silicon power, temperatures, GPU and Neural Engine use without sudo, and feeds the bar. fastfetch prints a summary of the system.
+
+== On the workstation
+
+* `btop`, `macmon` and `fastfetch` formulae, each themed in `assets/theme/dot_config`.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`btop` |Everything the Mac is doing
+|`macmon` |Power and temperatures
+|`dust` |Which folders use the disk
+|===
+
+== See also
+
+* xref:toolbox/sketchybar.adoc[SketchyBar and JankyBorders]
+* xref:app.adoc[ZC Care]
+* https://github.com/aristocratos/btop[btop, macmon and fastfetch website]

@@ -1,0 +1,56 @@
+= Go tools
+:description: Go, gopls, delve and golangci-lint: the Go toolchain and the tools around it.
+
+Go builds zc-care itself. Homebrew installs the toolchain and three
+tools that editors and AI agents lean on: gopls, the language server; delve,
+the debugger; and golangci-lint, the linter that also enforces which package
+may import which.
+
+== On the workstation
+
+* Installed by the `go`, `gopls`, `delve` and `golangci-lint` formulae.
+* Code generators a project needs, such as sqlc or oapi-codegen, are pinned
+  with a `tool` directive in that project's `go.mod` and run through
+  `go tool`, never installed globally.
+* A project drives everything through `make`: `make lint`, `make test`,
+  `make build`. The targets wire up the flags that raw commands miss.
+* VS Code and Claude Code find `gopls` on `PATH`, so both get the same
+  definitions, references and diagnostics.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`go test ./internal/plan -run TestName` |Run one test
+|`go test -race ./...` |Run every test with the race detector
+|`go tool <name>` |Run a tool pinned in `go.mod`
+|`go get -tool example.com/cmd@v1.2.3` |Pin a tool in `go.mod`
+|`golangci-lint run` |Lint with the project's `.golangci.yml`
+|`dlv test ./internal/plan` |Debug the tests of one package
+|`dlv debug ./cmd/app -- plan` |Debug a program with its arguments
+|`gopls check file.go` |Print a file's diagnostics, as an editor sees them
+|===
+
+== With zc-care
+
+The repository's `.golangci.yml` turns on `depguard` with rules such as
+`plan-performs-no-io`: the plan package may not import `net/http` or run a
+command. `make lint` fails when one of these import boundaries is crossed,
+before review sees it.
+
+[source,console]
+----
+$ make lint
+go vet ./...
+0 issues.
+----
+
+== See also
+
+* xref:toolbox/vscode.adoc[VS Code]
+* xref:toolbox/mise.adoc[mise]
+* https://go.dev/doc[Go documentation]
+* https://golangci-lint.run[golangci-lint]
+* https://github.com/go-delve/delve[delve]

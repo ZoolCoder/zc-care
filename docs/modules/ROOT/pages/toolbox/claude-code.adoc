@@ -1,0 +1,33 @@
+= Claude Code and AI tools
+:description: Claude Code, Codex, the AI desktop apps, CodexBar, Ollama, and how the workstation wires them in.
+
+Claude Code is a first-class part of the workstation. It opens in a Ghostty split or a tmux pane in the folder you are in, its sessions show in the bar when they wait for you, and its limits sit in the menu bar. zc-care itself is a Claude Code plugin, so an agent can plan and apply changes to the machine, with your yes.
+
+== On the workstation
+
+* Codex, Claude, ChatGPT and GitHub Copilot desktop apps come from the Brewfile; Ollama runs models locally.
+* CodexBar shows Claude Code and Codex session and weekly limits with reset countdowns.
+* claude-squad runs several Claude Code sessions side by side (`cs`).
+* A setup script installs the zc-care plugin and Claude's notification hook.
+* ZC Care's Cleanup clears what AI tools leave behind and never touches their chats or the version in use.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Cmd+Shift+C (Ghostty) |Claude Code in a split, continuing here
+|Ctrl+Space a / A (tmux) |Claude Code in a window / popup
+|`cc` `cr` |Continue the last session / pick one
+|`cpj` |Pick a repository and open Claude there in tmux
+|`cu` |Token and cost reports
+|`wtf` `aic` `aipr` |Explain a failure, write a commit message, write a pull request
+|===
+
+== See also
+
+* xref:toolbox/tmux.adoc[tmux]
+* xref:toolbox/ghostty.adoc[Ghostty]
+* xref:app.adoc[ZC Care]
+* https://claude.com/claude-code[Claude Code and AI tools website]

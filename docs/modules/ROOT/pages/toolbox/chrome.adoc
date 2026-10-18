@@ -1,0 +1,23 @@
+= Google Chrome
+:description: Chrome, the default browser, with a small set of extensions.
+
+Chrome is the default browser and the one DevTools work happens in.
+
+== On the workstation
+
+* Installed by the `google-chrome` cask; `defaultbrowser` makes it the default from a script.
+* Extensions: uBlock Origin Lite, Bitwarden, JSON Formatter, Vue.js devtools, Vimium and Dark Reader.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Hyper+B |Open Chrome
+|===
+
+== See also
+
+* xref:toolbox/karabiner.adoc[Karabiner-Elements and the Hyper key]
+* https://www.google.com/chrome/[Google Chrome website]

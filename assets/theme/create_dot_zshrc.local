@@ -1,0 +1,2 @@
+# Machine-specific shell settings. zc-care's theme target creates this file once and never overwrites it; the line below loads its colours.
+[[ -f "$HOME/.config/zoolcoder/theme.zsh" ]] && source "$HOME/.config/zoolcoder/theme.zsh"

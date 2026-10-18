@@ -1,0 +1,57 @@
+= jq and yq
+:description: jq and yq, query and edit JSON and YAML from the command line.
+
+jq filters JSON: pick fields, select items, reshape the output. yq does the same for YAML with the same expression language, and converts between YAML and JSON. Together they read every `-json` output of zc-care and its YAML config.
+
+== On the workstation
+
+* Installed by the `jq` and `yq` formulae. `yq` is Mike Farah's Go version.
+* `gh` takes the same expressions with `--jq`, so a GitHub query needs no pipe.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`jq . file.json` |Pretty-print JSON
+|`jq -r '.[].name'` |Print a field of every item, without quotes
+|`jq '.[] \| select(.x > 1)'` |Keep the items that match
+|`jq -s '.[0] * .[1]' a.json b.json` |Merge two JSON files, the second winning
+|`yq '.targets[].name' file.yaml` |Query YAML
+|`yq -i '.key = "value"' file.yaml` |Edit YAML in place
+|`yq -o json file.yaml` |Convert YAML to JSON
+|===
+
+== With zc-care
+
+The targets that are not fully in place:
+
+[source,console]
+----
+$ zc-care status -json | jq -r '.[] | select(.in_place < .declared) | .summary'
+41 of 43 dotfiles in place
+----
+
+Each planned change on one line:
+
+[source,console]
+----
+$ zc-care plan -json | jq -r '.actions[] | "\(.op) \(.target) \(.resource)"'
+UPDATE macos com.apple.finder FXPreferredViewStyle
+----
+
+The targets that use a provider:
+
+[source,console]
+----
+$ yq '.targets[] | select(.provider == "packages") | .name' zc-care.yaml
+brew
+----
+
+== See also
+
+* xref:toolbox/gh.adoc[GitHub CLI]
+* xref:commands.adoc[Commands]
+* https://jqlang.org[jq website]
+* https://mikefarah.gitbook.io/yq[yq website]

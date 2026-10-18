@@ -1,0 +1,45 @@
+= GnuPG, oathtool and mailctl
+:description: GnuPG for the projects that still sign with it, oathtool for one-time codes, and mailctl for mail accounts kept in a file.
+
+Three tools for keys and accounts: GnuPG for signatures and encrypted files,
+oathtool for the six-digit codes of two-factor login, and mailctl for
+mailboxes, aliases and mail DNS kept in a YAML file.
+
+== On the workstation
+
+* Installed by the `gnupg` and `oath-toolkit` formulae, and `mailctl` from
+  the `zoolcoder/tap` tap.
+* Sign commits with an SSH key rather than GPG: `doctor` checks for it and
+  prints the commands. GnuPG is for the projects and downloads that still use
+  it.
+* oath-toolkit installs the command `oathtool`.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`gpg --verify file.sig file` |Check a download against its signature
+|`gpg --list-secret-keys` |List your own keys
+|`gpg -d file.gpg` |Decrypt a file
+|`oathtool --totp -b -` |Print the current code for a base32 secret read from standard input
+|`mailctl plan` |Show what would change in the mail accounts
+|`mailctl apply` |Make those changes
+|`mailctl audit` |Check MX, SPF, DKIM and DMARC records and deliverability
+|===
+
+Give `oathtool` its secret on standard input, from a password manager or a
+file only you can read. A secret typed as an argument lands in the shell
+history.
+
+mailctl works like zc-care: `plan` first, then `apply`. It deletes
+nothing at the provider unless you pass `-prune`, and it deletes mailboxes
+only with `-prune-mailboxes` as well.
+
+== See also
+
+* xref:toolbox/git-tools.adoc[git tools], for commit signing
+* xref:security.adoc[Security], for the `doctor` checks on keys
+* https://gnupg.org/documentation/[GnuPG documentation]
+* https://www.nongnu.org/oath-toolkit/[OATH Toolkit]

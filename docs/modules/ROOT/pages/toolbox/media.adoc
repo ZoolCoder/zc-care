@@ -1,0 +1,47 @@
+= Media tools
+:description: ffmpeg, sox, jpegoptim, pngquant and poppler: convert and shrink video, audio, images and PDFs.
+
+Five command-line tools for the media that ends up in a repository or a
+message: video and audio with ffmpeg and sox, images with jpegoptim and
+pngquant, and PDFs with poppler.
+
+== On the workstation
+
+* Installed by the `ffmpeg`, `sox`, `jpegoptim`, `pngquant` and `poppler`
+  formulae.
+* poppler brings `pdftotext`, `pdftoppm` and `pdfinfo`.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`ffmpeg -i in.mov -c:v libx264 -crf 23 out.mp4` |Convert a screen recording to a small MP4
+|`ffmpeg -i in.mp4 -vf "fps=12,scale=800:-1" out.gif` |Make a GIF for a README or a pull request
+|`ffmpeg -i in.mp4 -vn -c:a copy out.m4a` |Take the audio out of a video
+|`sox in.wav -r 16000 -c 1 out.wav` |Resample audio to 16 kHz mono, as speech models expect
+|`jpegoptim --max=85 --strip-all *.jpg` |Shrink JPEGs and drop their metadata
+|`pngquant --quality=65-80 --strip --ext .png --force *.png` |Shrink PNGs in place and drop their metadata
+|`pdftotext -layout in.pdf -` |Print a PDF's text, keeping its columns
+|`pdftoppm -png -r 150 in.pdf page` |Render each page to a PNG
+|`pdfinfo in.pdf` |Show a PDF's pages, size and producer
+|===
+
+== With zc-care
+
+The screenshots in these docs are PNGs. Before committing one, shrink it:
+
+[source,console]
+----
+$ pngquant --quality=65-80 --strip --ext .png --force docs/modules/ROOT/images/*.png
+----
+
+`--strip` drops metadata, such as which machine and app made the image.
+
+== See also
+
+* xref:toolbox/everyday-apps.adoc[Everyday apps], for Shottr
+* https://ffmpeg.org/documentation.html[ffmpeg documentation]
+* https://pngquant.org[pngquant]
+* https://poppler.freedesktop.org[poppler]

@@ -1,0 +1,16 @@
+= Starship
+:description: Starship, the prompt: folder, git state, pull request and versions at a glance.
+
+Starship draws the prompt. It shows where you are and what state the repository is in, so you rarely need `git status` to know whether you are mid-rebase or ahead of the remote.
+
+== On the workstation
+
+* Installed by the `starship` formula; `assets/theme/dot_config/starship.toml` holds the layout and colours.
+* Shows the system, the host over SSH, the folder, the git branch, a rebase or merge in progress, changed and ahead/behind counts, lines added and removed, the open pull request, the age of the last commit, and the Node, Java and package versions in use.
+* A red mark after a command that failed, and the time a slow one took.
+
+== See also
+
+* xref:toolbox/zsh.adoc[zsh, antidote and plugins]
+* xref:toolbox/gh.adoc[GitHub CLI]
+* https://starship.rs[Starship website]

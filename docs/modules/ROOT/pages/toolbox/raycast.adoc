@@ -1,0 +1,28 @@
+= Raycast
+:description: Raycast, the launcher, with clipboard history and script commands.
+
+Raycast replaces Spotlight as the launcher: apps, files, clipboard history, window layouts and small scripts, all from one shortcut.
+
+== On the workstation
+
+* Installed by the `raycast` cask.
+* Script commands from the config repo: *Open Repo*, *Copy Branch* and *Kube Context*.
+* It can open ZC Care through `zccare://` URLs.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Raycast hotkey |Open Raycast
+|Open Repo |Pick a repository and open it
+|Copy Branch |Copy the current git branch
+|Kube Context |Switch the Kubernetes context
+|===
+
+== See also
+
+* xref:toolbox/karabiner.adoc[Karabiner-Elements and the Hyper key]
+* xref:app.adoc[ZC Care]
+* https://www.raycast.com[Raycast website]

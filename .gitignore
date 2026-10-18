@@ -1,0 +1,39 @@
+/bin/
+# SwiftPM build output, app
+.build/
+/dist/
+.DS_Store
+coverage.out
+
+# The live config: each user keeps their own.
+/zc-care.yaml
+*.secrets
+*.pem
+.env
+.dev.vars
+
+# A binary built with a bare `go build`. Anchored: a bare name would also hide
+# every new file under cmd/zc-care/.
+/zc-care
+
+# docs toolchain
+/node_modules/
+/build/
+/.cache/
+# Ruby gems for the PDF build. Not vendor/: Go would treat it as a vendor
+# directory.
+/.bundle/
+
+# plugin eval runs
+/plugin/evals/results/
+
+/design/
+.webscan/
+
+# local workspace: links unpublished sibling modules
+go.work
+go.work.sum
+
+# 5K wallpapers; assets/wallpaper/render.sh draws them. The laptop ones are
+# committed, so the desktop provider can point at them.
+/assets/wallpaper/zc-care-5k-*.png

@@ -1,0 +1,24 @@
+= IntelliJ IDEA and Neovim
+:description: IntelliJ IDEA through JetBrains Toolbox, and Neovim in the terminal.
+
+IntelliJ IDEA is the editor for Java and Spring Boot; JetBrains Toolbox installs and updates it. Neovim covers quick edits in the terminal, and `vim` and `vi` open it.
+
+== On the workstation
+
+* `jetbrains-toolbox` cask and `neovim` formula.
+* IntelliJ's editor and terminal fonts are set to JetBrains Mono Nerd Font by a setup script.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Hyper+I |Open IntelliJ IDEA
+|`vim file` |Neovim
+|===
+
+== See also
+
+* xref:toolbox/vscode.adoc[Visual Studio Code]
+* https://www.jetbrains.com/toolbox-app/[IntelliJ IDEA and Neovim website]

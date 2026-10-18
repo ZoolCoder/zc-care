@@ -1,0 +1,68 @@
+# zc-care config. Copy to zc-care.yaml (ignored by git) or
+# ~/.config/zc-care/zc-care.yaml, point the paths at your own
+# dotfiles repo, then run `zc-care plan`. Plan only reads; apply asks.
+#
+# Relative paths are relative to this file's directory; ~ is your home.
+version: 1
+
+targets:
+  # packages installs what a Brewfile declares, App Store apps too, and
+  # never uninstalls.
+  - name: brew
+    provider: packages
+    file: example/Brewfile
+    # upgrade: true         # also upgrade what has a newer version
+
+  # dotfiles applies a chezmoi source directory to your home directory. Use
+  # chezmoi's naming (dot_zshrc, private_, .tmpl) and its templates for
+  # per-machine differences.
+  - name: dotfiles
+    provider: dotfiles
+    source: example/home
+    # destination: ~        # the default
+    # mode: symlink         # link instead of copy; edits land in the repo
+
+  # tools installs the runtimes a mise config pins. Only tools declared in
+  # this file count, not ones from your global mise config.
+  - name: runtimes
+    provider: tools
+    file: example/mise.toml
+    # upgrade: true         # also upgrade runtimes within their pins
+
+  # desktop sets the macOS desktop picture on every Space, the page the
+  # WebViewScreenSaver screen saver shows, and the accent colour. The
+  # ZoolCoder art ships in assets/.
+  - name: look
+    provider: desktop
+    wallpaper: assets/wallpaper/zc-care-laptop-dark.png
+    screensaver: assets/screensaver/index.html
+    accent: blue
+
+  # settings keeps macOS preferences, the keys `defaults` reads and writes.
+  - name: macos
+    provider: settings
+    defaults:
+      NSGlobalDomain:
+        KeyRepeat: 2
+        ApplePressAndHoldEnabled: false
+      com.apple.dock:
+        autohide: true
+
+  # services keeps Homebrew services running and launchd agents loaded.
+  - name: services
+    provider: services
+    services: [colima]
+    # agents: [~/Library/LaunchAgents/local.backup.plist]
+
+  # ai declares the MCP servers, rules, skills and Ollama models every AI
+  # agent gets: Claude Code, Codex, Cursor and Gemini CLI.
+  # - name: ai
+  #   provider: agents
+  #   file: agents.yaml
+
+  # theme is a second chezmoi source: the ZoolCoder colours for Ghostty, tmux,
+  # starship, SketchyBar, JankyBorders, bat, btop, eza, yazi, lazygit and
+  # fastfetch. ~/.zshrc.local loads its shell settings.
+  - name: theme
+    provider: dotfiles
+    source: assets/theme

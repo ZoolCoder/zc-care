@@ -1,0 +1,31 @@
+= git, delta, difftastic and git-absorb
+:description: git and its helpers: delta diffs, structural diffs, automatic fixups and secret scanning.
+
+The workstation installs a current git and a few helpers that make it easier to read and to keep clean.
+
+== On the workstation
+
+* `git` from Homebrew, newer than the one Xcode ships.
+* delta shows diffs side by side with syntax highlighting, in git and lazygit; `assets/theme/dot_config/git/zoolcoder-delta.gitconfig` holds its colours.
+* difftastic compares by syntax, not by lines (`git dft`).
+* git-absorb turns staged changes into fixup commits for the commits they belong to.
+* Global git hooks run a gitleaks scan before every commit, then the repository's own hook.
+* git maintenance runs in the background on the repositories you use.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`gs` `gd` `gds` `glog` |status, diff, staged diff, the last 20 commits as a graph
+|`git dft` |A structural diff
+|`git absorb` |Create fixup commits for what is staged
+|===
+
+== See also
+
+* xref:toolbox/lazygit.adoc[lazygit]
+* xref:toolbox/gh.adoc[GitHub CLI]
+* xref:toolbox/gitleaks.adoc[gitleaks]
+* https://dandavison.github.io/delta/[git, delta, difftastic and git-absorb website]

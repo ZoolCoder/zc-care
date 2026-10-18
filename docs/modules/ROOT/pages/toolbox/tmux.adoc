@@ -1,0 +1,36 @@
+= tmux
+:description: tmux, the session manager: panes, windows, popups and the dev layout.
+
+tmux keeps work sessions alive and splits one terminal into panes. On the workstation it is how a repository becomes a workspace: Claude Code, lazygit and a shell side by side, one session per repo or branch.
+
+== On the workstation
+
+* Installed by the `tmux` formula; the config and its theme are in `assets/theme/dot_config/tmux`.
+* The prefix is Ctrl+Space, easier to reach than Ctrl+B.
+* New panes and windows open in the current folder.
+* The `dev` shell function builds the standard layout (see below).
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Ctrl+Space {vbar} or - |Split side by side or one above the other
+|Ctrl+Space h j k l |Move between panes; H J K L resize
+|Alt+h j k l |Move between panes without the prefix
+|Alt+1 to Alt+4 |Jump to a window
+|Ctrl+Space g |lazygit in a popup
+|Ctrl+Space a / A |Claude Code in a new window / in a popup
+|Ctrl+Space s |Pick a session with fzf, with a live preview
+|Ctrl+Space r |Reload the config
+|`dev [repo] [branch]` |Pick a repo under ~/Developer and open it with Claude Code, lazygit and a shell. With a branch, it opens a git worktree for it.
+|`ta` `tn` `tls` `tk` |Attach, new, list, kill sessions
+|===
+
+== See also
+
+* xref:toolbox/ghostty.adoc[Ghostty]
+* xref:toolbox/lazygit.adoc[lazygit]
+* xref:toolbox/claude-code.adoc[Claude Code and AI tools]
+* https://github.com/tmux/tmux[tmux website]

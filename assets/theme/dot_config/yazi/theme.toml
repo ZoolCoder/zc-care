@@ -1,0 +1,4 @@
+# Follows the terminal: ZoolCoder Dark in dark mode, ZoolCoder Light in light mode; both flavors sit in flavors/.
+[flavor]
+dark = "zoolcoder-dark"
+light = "zoolcoder-light"

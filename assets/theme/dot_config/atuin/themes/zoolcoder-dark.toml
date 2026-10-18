@@ -1,0 +1,12 @@
+[theme]
+name = "zoolcoder-dark"
+
+[colors]
+AlertInfo = "#5fd38a"
+AlertWarn = "#f5b44a"
+AlertError = "#ff7a7e"
+Annotation = "#3d7bff"
+Base = "#f3f5f7"
+Guidance = "#a9b0ba"
+Important = "#ff7a7e"
+Title = "#3d7bff"

@@ -1,0 +1,93 @@
+= Agents and MCP
+:description: The zc-care MCP server, Claude Code plugin, skills and adapters for other agents.
+
+== MCP server
+
+`zc-care mcp` serves these tools over standard input and output:
+
+[cols="1,3"]
+|===
+| `status` | Live state per target. Read-only.
+| `list` | Every declared item with its state, version, newer version and app, then what is installed but not declared. Takes `state` and `kind` filters. Read-only.
+| `add` | Declare a package or runtime in one target's manifest, with its why and section. Edits the manifest only.
+| `remove` | Uninstall a package and drop it from the manifest. Destructive: only once the user okayed it.
+| `capture` | The manifest one target would declare to match this machine. Writes nothing. Read-only.
+| `validate` | Check the config offline. Read-only.
+| `plan` | Plan and save it. Returns a `plan_id`. Changes nothing.
+| `apply` | Apply a saved plan by `plan_id`. Refuses when live state moved.
+| `doctor` | Install health, security settings and AI agent configs. Read-only.
+| `history` | What was applied, newest first, and from where. Read-only.
+| `drift` | What the last daily drift check found. Read-only.
+|===
+
+`apply` takes only the id of a plan the server saved, never a plan body. A
+plan that deletes is cancelled and the reply names the terminal command for
+the user to run.
+
+* *Plans expire.* A saved plan older than an hour is refused; the agent plans
+  again and shows the user the new one.
+* *Every call is logged.* Each tool call, its arguments and whether it worked
+  go to `~/.local/state/zc-care/mcp-audit.jsonl`. An apply also lands
+  in `zc-care history` as applied from an agent.
+* *Tools say what they do.* Each tool carries MCP annotations: read-only
+  tools say so, `add` edits a file, `remove` is destructive, and `apply`
+  changes the machine. A client can ask before the ones that write.
+* *Resources.* The server offers the config (`zc-care://config`), the
+  last 50 applies (`zc-care://history`) and each target's manifest
+  (`zc-care://manifest/<target>`), so an agent reads them without a
+  tool call.
+* *Prompts.* Each skill is also an MCP prompt, for clients without skills.
+
+== Claude Code plugin
+
+The repository is a plugin marketplace. The plugin lives in `plugin/`: its
+`skills/`, `commands/` and `hooks/`, and the MCP server `zc-care mcp`.
+
+[source,console]
+----
+$ claude plugin marketplace add zoolcoder/zc-care
+$ claude plugin install zc-care
+----
+
+* `setup` installs the binary, writes a config and runs `doctor`.
+* `plan-apply` plans, explains, asks for a yes, and applies that plan by id.
+* `add-software` turns "install X" or "I need a tool for Y" into a manifest
+  entry: it picks the package, writes it with `add` under a section with a
+  why, then plans and applies after a yes. Nothing is installed by hand, so
+  the next machine gets it too.
+* `review` reads `doctor` and `list`, then reports what is new in the tools
+  you rely on, what is broken or drifted, and up to three ideas. It changes
+  nothing until you pick.
+* Slash commands: `/zc-care:plan`, `/zc-care:apply`,
+  `/zc-care:doctor`, `/zc-care:add <tool or need>` and
+  `/zc-care:review`.
+* The `PreToolUse` hook asks before any `apply` with `-yes` or without a
+  saved plan file.
+
+== What is new after an update
+
+`review` reports features worth trying in the versions you moved to. It reads
+the release notes between the old and the new version, from GitHub releases
+when the homepage is on GitHub, and keeps only what touches each item's why.
+
+To know what an update moved, upgrade with `zc-care upgrade`. It
+saves the outdated list to `~/.local/state/zc-care/upgrades/`, then
+runs `apply -upgrade`; `review` reads the newest file there.
+
+[source,console]
+----
+$ zc-care upgrade             # everything outdated
+$ zc-care upgrade -only brew:tmux
+----
+
+== One setup for every agent
+
+The xref:providers.adoc#agents[`agents` provider] writes the same MCP
+servers, rules and skills into Claude Code, Codex, Cursor and Gemini CLI, and
+pulls the Ollama models you name. A new machine gets them with the rest of
+`apply`.
+
+== Other agents
+
+`plugin/adapters/` holds the same rules for Codex, Cursor, Gemini CLI, Copilot and
+cloud agents.

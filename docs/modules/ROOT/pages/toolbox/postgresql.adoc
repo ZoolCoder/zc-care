@@ -1,0 +1,24 @@
+= PostgreSQL, pgcli and TablePlus
+:description: A local PostgreSQL 17 server, pgcli and TablePlus.
+
+A local database server for development, a friendly command-line client and a GUI. The server runs as a Homebrew service only when you start it.
+
+== On the workstation
+
+* `postgresql@17`, `pgcli`, `pgbadger` and the `tableplus` cask from the Brewfile.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`pgstart` `pgstop` `pgstatus` |Start, stop, check the server
+|`pg` |pgcli, with completion and highlighting
+|`pglog` `pgreport` |Follow the log, or turn it into a pgbadger report
+|===
+
+== See also
+
+* xref:toolbox/containers.adoc[Colima, Docker and friends]
+* https://www.pgcli.com[PostgreSQL, pgcli and TablePlus website]

@@ -1,0 +1,78 @@
+= Writing a config
+:description: Every key of the zc-care config file, per provider.
+
+The config is found in this order: `-config`, `$ZC_CARE_CONFIG`,
+`./zc-care.yaml`, then `~/.config/zc-care/zc-care.yaml`.
+`-config -` reads standard input.
+
+Keep the config in your dotfiles repository next to the manifests it names.
+Relative paths are relative to the config file, and `~` is your home
+directory, so the same file works on every Mac.
+
+[source,yaml]
+----
+version: 1
+targets:
+  - name: brew
+    provider: packages
+    file: packages/Brewfile
+
+  - name: dotfiles
+    provider: dotfiles
+    source: home
+    mode: symlink
+
+  - name: runtimes
+    provider: tools
+    file: mise.toml
+----
+
+== Every target
+
+[cols="1,3"]
+|===
+| Key | Meaning
+
+| `version` | Always `1`. A future format bumps it.
+| `name` | Lowercase kebab case, unique. `-target` selects by it.
+| `provider` | `packages`, `dotfiles`, `tools`, `desktop`, `settings`, `services`, `agents` or `localdir`.
+|===
+
+== Per provider
+
+[cols="1,1,3"]
+|===
+| Provider | Key | Meaning
+
+| `packages` | `file` | Required. The Brewfile, with `mas` lines for App Store apps.
+| | `upgrade` | Also plan an `UPDATE` for each declared package with a newer version. Off by default.
+| `dotfiles` | `source` | Required. The chezmoi source directory.
+| | `destination` | Where the files land. Empty means your home directory.
+| | `mode` | `file` copies (the default); `symlink` links back into the source.
+| `tools` | `file` | Required. The mise config file whose tools to install.
+| | `upgrade` | Also plan an `UPDATE` for each runtime with a newer version that its request allows. Off by default.
+| `desktop` | `wallpaper` | The picture to show on every desktop.
+| | `screensaver` | The web page for WebViewScreenSaver to show. Set this, `wallpaper`, `accent`, or any of them.
+| | `accent` | The macOS accent colour: `blue`, `purple`, `pink`, `red`, `orange`, `yellow`, `green` or `graphite`.
+| `settings` | `defaults` | Required. A macOS preferences domain, such as `com.apple.dock` or `NSGlobalDomain`, to its keys and values: a bool, an integer, a number or a string. A string starting with `~/` is a path in your home directory.
+| `services` | `services` | Homebrew services to keep running. Set this, `agents`, or both.
+| | `agents` | launchd agent plists to keep loaded, the label being the file name without `.plist`.
+| `localdir` | `path` | Required. The directory to keep.
+| | `files` | File name to content. Names must stay inside `path`.
+| | `prune` | Also delete files in `path` the config does not list.
+|===
+
+xref:providers.adoc[Providers] describes what each one reads and runs.
+
+== Mistakes are errors
+
+An unknown key is an error, not a warning: a typo should not silently mean the
+default. A key a provider ignores, such as `mode` on a `packages` target, is
+an error too. `validate` reports every problem at once:
+
+[source,console]
+----
+$ zc-care validate
+zc-care.yaml: target brew: file is required for provider packages
+target dotfiles: source is required for provider dotfiles
+----

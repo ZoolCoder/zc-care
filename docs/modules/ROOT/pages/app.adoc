@@ -1,0 +1,164 @@
+= ZC Care
+:description: ZC Care, the Mac app over zc-care: it picks a new Mac's apps, keeps the setup in place, and cleans, protects and tunes the Mac.
+
+ZC Care is the Mac app over `zc-care`. On a new Mac it picks which
+apps to install. It shows what the engine would change, the Mac's vitals and
+updates in a menu bar panel, and opens the Care window, which keeps the
+setup in place and cleans, protects and tunes the Mac. Each change ZC Care
+makes is one you approve first.
+
+It lives in `app/`, a Swift package for macOS 14 and later.
+
+== Install
+
+From the Homebrew tap. The app carries the `zc-care` CLI and the cask
+links it onto PATH; ZC Care runs its own copy, so the two always match:
+
+[source,console]
+----
+$ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew install --cask zc-care
+----
+
+Each release builds ZC Care for Apple silicon and Intel and signs it ad hoc,
+not yet with a Developer ID, so macOS blocks the first start: open it once
+from the Finder with Control-click, *Open*. `gh attestation verify
+ZCCare_<version>.zip --repo zoolcoder/zc-care` checks the zip was built
+by the release workflow.
+
+From a clone of the repository:
+
+[source,console]
+----
+$ make app-install
+installed ~/Applications/ZCCare.app; open it once, then tick Open at login
+----
+
+`make app` builds `bin/app.noindex/ZCCare.app`, signed ad hoc. `make app-install` copies
+it to `~/Applications`. An app opened from the Finder gets no shell
+environment, so if `ZC_CARE_CONFIG` is set, `app-install` hands that
+path to the app once. *Choose Config…* in the panel changes it later.
+
+== The panel
+
+Click the menu bar mark, or press ⌃⌥Z, to open the panel. Its tabs:
+
+[cols="1,3"]
+|===
+| Tab | Shows
+
+| Mac | Disk, memory, CPU, battery, network and sensors, the largest junk folders to free up, and advice. Each tile opens a detail.
+| Overview | Each target with what is in place and missing, *Apply* per target, and *All Items*, which opens My Workstation.
+| Updates | Outdated packages and runtimes, with *Update* per item and *Update All…*.
+| Health | `doctor` findings with *Fix*, *Copy Fix* and *Ignore*.
+| Services | Homebrew services and launchd agents, with *Start*, *Run Now* and their logs.
+|===
+
+The gear opens Settings (⌘,): notifications, the ⌃⌥Z hotkey, the weekly
+Smart Care scan, opening at login, Full Disk Access, the config file and
+ignored health checks. On first launch a Welcome window offers the same
+choices; each can be skipped. If SketchyBar is installed, ZC Care hands it the
+count of open items for its `zccare` item.
+
+== The Care window
+
+*Smart Care* or *Open ZC Care* in the panel opens a window with one module per job. A
+module opens on an intro that says what it does. Its *Scan* reads the Mac;
+nothing changes until you press a module's clean or remove button and confirm.
+
+image::care-cleanup.png[ZC Care's Cleanup module, with System Junk and AI Clutter cards]
+
+[cols="1,3"]
+|===
+| Module | Does
+
+| Smart Care | Scans everything at once and sums it up in cards: junk, clutter, updates and health. *Run* cleans up, then updates.
+| Cleanup | Clears caches, logs, build output, npx packages and Mail downloads. Clears *AI clutter*: Claude Code temp files and old versions, and the caches and logs of Claude, Cursor, ChatGPT, Windsurf, Codex, Gemini CLI and Chrome DevTools MCP. Empties the Trash.
+| Protection | Gatekeeper's verdict on each app, the apps that run in the background, the privacy permissions apps hold, and each browser's history, cookies and cache, cleared only while that browser is closed.
+| Performance | Login items, background apps and maintenance tasks: free RAM, flush DNS, thin Time Machine snapshots, reindex Spotlight, and clean Homebrew, Docker and simulators.
+| Applications | Every app with its size and last use. Uninstalls an app with what it keeps in the Library. *Adopt* replaces an app installed by hand with its Homebrew cask and declares it. Finds what removed apps left behind.
+| My Clutter | Large files, duplicates, similar images, old downloads and installers. Similar images are photos Vision finds alike; the one with the most pixels stays.
+| Space Lens | A map of what fills your home folder.
+| Cloud Cleanup | Files iCloud Drive, Google Drive, OneDrive and Dropbox keep downloaded on the Mac. *Remove Download* frees the space; the file stays in the cloud and downloads again when opened. macOS asks once before ZC Care may read iCloud Drive.
+| Developer | Dependencies of projects untouched for 90 days, such as `node_modules` and virtualenvs, and local AI models from Ollama, LM Studio and Hugging Face.
+| My Workstation | What the config declares and what is in place: coverage, each target with its items and *Apply*, the drift check, every item to search, and what was applied, from ZC Care, the terminal or an agent. *Choose Apps…* opens the app picker.
+| My Tools | Every tool as a searchable card, including *Screen Cleaning Mode*, which blacks out the screens and locks the keyboard until you click *Done*.
+| My Activity | Mac health, disk use, the space ZC Care freed by kind, recommendations from the last scan, and recent activity.
+|===
+
+image::care-tools.png[ZC Care's My Tools grid]
+
+== Choose Apps
+
+The first time ZC Care runs, and whenever you press *Choose Apps…* in My
+Workstation or Settings, it lists every package the config declares, under
+the Brewfile's sections. At the top you pick who the Mac is for:
+
+* *Everything* ticks every package.
+* A profile, such as *Developer* or *Everyday*, ticks the sections tagged for
+  it and the sections tagged for no one in particular.
+
+You can untick or tick any package after. *Install* puts what you left out on
+this Mac's skip list, takes what you picked again off it, and applies the
+rest. Installed packages stay installed. The config does not change, so the
+next Mac can pick differently. When the install is done, ZC Care shows the
+first keys and commands to try with each app, with a link to its toolbox
+page.
+
+The profiles are tags in a section's heading, in brackets:
+
+[source,ruby]
+----
+# Containers [developer]
+brew "colima"   # Docker engine in a light VM
+# AI [developer, everyday]
+cask "claude"
+# Apps
+cask "google-chrome"
+----
+
+`zc-care skip` lists the skip list; `skip kind:name` adds to it and
+`skip -undo kind:name` takes off. `bootstrap.sh` opens the picker on a new
+Mac; see xref:new-machine.adoc[].
+
+`zccare://care` opens the window, and `zccare://care/<module>` opens a module
+by the start of its name, such as `zccare://care/cleanup`.
+`zccare://panel/<tab>` opens a panel tab.
+
+=== What it never touches
+
+* Chats, settings and sessions of AI tools: `~/.claude/projects`,
+  `~/.codex/sessions` and the Claude Code version `~/.local/bin/claude`
+  runs.
+* A Claude Code temp folder used in the last day: a running session owns it.
+* Caches of apps that are open.
+
+=== Where it goes
+
+Junk, caches and AI clutter are deleted: each tool makes them again. Files,
+apps, leftovers, dependencies and models go to the Trash, where you can put
+them back. A Homebrew app is uninstalled through `zc-care remove`,
+so it also leaves the Brewfile. Maintenance tasks that need an administrator
+ask for your password in a macOS dialog.
+
+ZC Care keeps its last scan in `~/Library/Caches/dev.zoolcoder.zccare` and the
+activity log in `~/Library/Application Support/dev.zoolcoder.zccare`, outside
+the caches it clears.
+
+=== Permissions
+
+Reading the privacy permissions needs Full Disk Access for ZC Care. An ad hoc
+signed build is a new app to macOS, so each rebuild asks again. Emptying the
+Trash asks once to let ZC Care control the Finder.
+
+== Develop
+
+[source,console]
+----
+$ make app-test      # swift test, the ZCCareCore tests
+$ make app           # bin/app.noindex/ZCCare.app
+$ make app-icon      # redraw the icons from app/icon/mark.svg
+----
+
+`ZCCareCore` holds the logic, with no UI, and is what the tests cover. `ZCCare`
+is the SwiftUI app over it. CI builds and tests both on a macOS runner.

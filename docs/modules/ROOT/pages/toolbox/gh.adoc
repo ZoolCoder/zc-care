@@ -1,0 +1,25 @@
+= GitHub CLI
+:description: gh, GitHub from the terminal: pull requests, issues, Actions and auth.
+
+gh handles the GitHub side of the work without a browser: opening and checking pull requests, watching CI and reading logs. It is also how git authenticates to GitHub.
+
+== On the workstation
+
+* Installed by the `gh` formula; `bootstrap.sh` logs you in on a new Mac.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`prc` `prv` `prl` |Create a pull request, open it in the browser, list them
+|`gh run watch` |Follow a CI run
+|`aipr` |Let Claude write the pull request, then open it
+|===
+
+== See also
+
+* xref:toolbox/git-tools.adoc[git, delta, difftastic and git-absorb]
+* xref:toolbox/claude-code.adoc[Claude Code and AI tools]
+* https://cli.github.com[GitHub CLI website]

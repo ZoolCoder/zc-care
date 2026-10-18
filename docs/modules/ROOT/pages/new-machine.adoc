@@ -1,0 +1,114 @@
+= A new Mac in one command
+:description: Keep your machine's config in its own repo, then set up a new Mac from it with bootstrap.sh.
+
+zc-care is the tool; your machine's setup lives in a second repo, a
+_config repo_, which you can keep private. A new Mac then needs one command.
+
+== The config repo
+
+A config repo holds a `zc-care.yaml` and the files its targets point
+at. Paths in the config are relative to it, so the repo works wherever it is
+cloned. A layout that works well:
+
+[source]
+----
+zc-care.yaml   targets: packages, home, theme, runtimes, look
+Brewfile              every app and command-line tool
+mise.toml             runtimes
+home/                 chezmoi source for ~, with run_onchange_ scripts
+apps/, scripts/       data and scripts the run scripts use
+----
+
+[source,yaml]
+----
+version: 1
+targets:
+  - name: packages
+    provider: packages
+    file: Brewfile
+  - name: home
+    provider: dotfiles
+    source: home
+  - name: theme
+    provider: dotfiles
+    source: ../zc-care/assets/theme
+  - name: runtimes
+    provider: tools
+    file: mise.toml
+  - name: look
+    provider: desktop
+    wallpaper: ../zc-care/assets/wallpaper/zc-care-laptop-dark.png
+    screensaver: ../zc-care/assets/screensaver/index.html
+    accent: blue
+----
+
+The packages come first, so the targets after them find chezmoi and mise.
+
+=== Setup steps that are not files
+
+Some setup is a command, not a file: loading a launch agent, writing macOS
+defaults, creating a signing key. Put each one in a chezmoi
+https://www.chezmoi.io/user-guide/use-scripts-to-perform-actions/[run script]
+in `home/`, named `run_onchange_after_NN-name.sh.tmpl`. chezmoi runs it after
+the files are written, and again only when its content changes. To rerun it
+when a data file changes, put the file's hash in a comment:
+
+[source,bash]
+----
+#!/usr/bin/env bash
+# macos.sh {{ include "../scripts/macos.sh" | sha256sum }}
+"{{ .chezmoi.sourceDir | dir }}/scripts/macos.sh"
+----
+
+`{{ .chezmoi.sourceDir | dir }}` is the config repo itself. The plan shows each
+pending script as an `UPDATE` with chezmoi's `R` status. Scripts run attached
+to your terminal, so they can ask a question, such as the git identity.
+
+=== The runtimes config
+
+mise reads its global config from `~/.config/mise/config.toml`. Link it to the
+repo's `mise.toml` with a chezmoi symlink template,
+`home/dot_config/mise/symlink_config.toml.tmpl`, holding
+`{{ .chezmoi.sourceDir | dir }}/mise.toml`. Then a tool you add with `mise use -g`
+lands in the repo.
+
+== bootstrap.sh
+
+On a new Mac, in Terminal.app:
+
+[source,console]
+----
+$ curl -fsSL https://raw.githubusercontent.com/ZoolCoder/zc-care/main/bootstrap.sh | bash -s -- OWNER/CONFIG-REPO
+----
+
+It:
+
+. installs Homebrew, which also installs the Xcode command line tools
+. installs git, gh, chezmoi and mise
+. logs you in to GitHub, so git can clone a private config repo
+. clones zc-care and the config repo into `~/Developer/Tools`, keeping
+  either if it is already there
+. installs ZC Care with its cask, which puts the `zc-care` CLI it
+  carries on PATH; before a release has the cask, it builds both from the
+  clone with `make app-install`
+. trusts the config's `mise.toml`
+. opens ZC Care's app picker: every package in the config is
+  ticked, with the comment that says why it is there. Untick what this Mac
+  does not need and press Install; ZC Care installs the rest and shows the
+  first keys and commands to try with each. What you left out goes on this
+  Mac's skip list (`~/.config/zc-care/skip`, kept by
+  `zc-care skip`), so plan, apply and drift stop asking for it, and
+  your other Macs still get it. Settings > Choose Apps opens the picker again.
+. shows the plan, applies it, and applies again if anything is left, such as
+  runtimes planned before mise arrived
+
+It is safe to run again. `ZC_TOOL_FROM` and `ZC_CONFIG_FROM` clone from
+somewhere else, such as a local copy in a VM test. Without a terminal, or
+with `ZC_NO_PICKER` set, it skips the picker and installs everything.
+
+== Keeping Macs in step
+
+Change the config repo, `zc-care plan`, `zc-care apply`, commit
+and push. On another Mac, pull and apply. A shell function that pulls both
+repos, rebuilds ZC Care when it changed, and applies keeps this to one
+word.

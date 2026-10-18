@@ -1,0 +1,22 @@
+= direnv
+:description: direnv, per-folder environment variables.
+
+direnv loads a project's `.envrc` when you enter its folder and unloads it when you leave, so each project gets its own variables without polluting the shell.
+
+== On the workstation
+
+* Installed by the `direnv` formula and hooked into zsh.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`direnv allow` |Trust this folder's .envrc after reading it
+|===
+
+== See also
+
+* xref:toolbox/mise.adoc[mise]
+* https://direnv.net[direnv website]

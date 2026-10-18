@@ -1,0 +1,62 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  # Run on a tag by hand, gh workflow run release.yml --ref v1.2.3, when the
+  # tag push started nothing.
+  workflow_dispatch:
+
+permissions:
+  contents: write        # create the release and push the cask branch
+  pull-requests: write   # open the cask pull request into develop
+  id-token: write        # the provenance attestation
+  attestations: write    # store the provenance with GitHub
+
+jobs:
+  zc-care:
+    # ZC Care, with the zc-care CLI inside: a universal .app on the
+    # release, and a cask for it in a pull request into develop.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: Build
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          # The CLI the app carries, for both architectures like the app.
+          for arch in arm64 amd64; do
+            CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X main.version=$version" -o "dist/cli-$arch" ./cmd/zc-care
+          done
+          lipo -create -output dist/zc-care dist/cli-arm64 dist/cli-amd64
+          UNIVERSAL=1 VERSION=$version CLI=dist/zc-care app/package.sh dist/ZCCare.app
+          ditto -c -k --keepParent dist/ZCCare.app "dist/ZCCare_${version}.zip"
+          app/cask.sh "$version" "$(shasum -a 256 "dist/ZCCare_${version}.zip" | cut -d' ' -f1)" > "$RUNNER_TEMP/zc-care.rb"
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/ZCCare_*.zip
+      - name: Release and open the cask pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "dist/ZCCare_${VERSION}.zip"
+          branch="chore/zc-care-cask-${VERSION}"
+          git switch -c "$branch" origin/develop
+          mkdir -p Casks
+          cp "$RUNNER_TEMP/zc-care.rb" Casks/zc-care.rb
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Casks/zc-care.rb
+          git commit -m "chore(brew): zc-care cask for ${GITHUB_REF_NAME}"
+          git push origin "$branch"
+          gh pr create --base develop --head "$branch" \
+            --title "chore(brew): zc-care cask for ${GITHUB_REF_NAME}" \
+            --body "The ZC Care cask for ${GITHUB_REF_NAME}, from the release workflow."

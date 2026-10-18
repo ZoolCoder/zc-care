@@ -1,0 +1,90 @@
+= Getting started
+:description: Install ZC Care and the tools zc-care drives on your Mac, then plan and apply.
+
+== Install the tools it drives
+
+`zc-care` runs Homebrew, chezmoi and mise. Install the ones your
+config uses. A missing one shows up in the plan as a `MANUAL` step, so you can
+also start with `plan` and follow it.
+
+[source,console]
+----
+$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+$ brew install chezmoi mise mas
+----
+
+== Install zc-care
+
+ZC Care carries the CLI, and its cask puts `zc-care` on PATH. To build
+the CLI alone, install with Go, or run `make install` in a clone.
+
+[tabs]
+====
+Homebrew::
++
+[source,console]
+----
+$ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew install --cask zc-care
+----
+
+Go::
++
+[source,console,subs=attributes+]
+----
+$ go install github.com/zoolcoder/zc-care/cmd/zc-care@latest
+----
++
+Needs Go {go-version} or later.
+====
+
+== Write a config
+
+Start from `zc-care.example.yaml`. It declares a target for each provider
+and points at the sample manifests in `example/`. Point it at your own dotfiles
+repository instead. xref:configuration.adoc[Writing a config] lists every key.
+
+[source,console]
+----
+$ mkdir -p ~/.config/zc-care
+$ cp zc-care.example.yaml ~/.config/zc-care/zc-care.yaml
+$ zc-care validate
+/Users/me/.config/zc-care/zc-care.yaml: 6 target(s), valid
+----
+
+== Plan, then apply
+
+[source,console]
+----
+$ zc-care plan -out plan.json
+CREATE  brew      brew:chezmoi  install with brew
+CREATE  dotfiles  .gitconfig    add
+MANUAL  runtimes  trust         mise does not trust .../mise.toml; review it, then run mise trust .../mise.toml
+
+1 of these cannot be automated and are yours to do.
+$ zc-care apply plan.json
+done  CREATE brew brew:chezmoi
+done  CREATE dotfiles .gitconfig
+applied and verified
+----
+
+Installs run attached to your terminal, so `sudo`, a license prompt or the App
+Store sign-in can ask you directly.
+
+== Check the machine
+
+[source,console]
+----
+$ zc-care doctor
+ok    binary           /opt/homebrew/bin/zc-care
+ok    system           macbook darwin/arm64
+ok    config           /Users/me/.config/zc-care/zc-care.yaml, 6 target(s)
+ok    program brew     /opt/homebrew/bin/brew
+ok    program chezmoi  /opt/homebrew/bin/chezmoi
+ok    program mise     /opt/homebrew/bin/mise
+warn  target brew      78 of 80 packages installed (brew)
+ok    target dotfiles  2 of 2 dotfiles in place
+ok    target runtimes  7 of 7 tools installed
+----
+
+On a Mac, xref:app.adoc[ZC Care] shows the same in a window: *My Workstation* has every target, every item and what was applied.

@@ -1,0 +1,24 @@
+= lazygit
+:description: lazygit, git in a terminal UI.
+
+lazygit makes the git operations that are fiddly on the command line quick: staging single hunks, interactive rebase, fixups, cherry-picks and resolving conflicts. It sits in the `dev` layout next to Claude Code, so you review what an agent changed before you commit it.
+
+== On the workstation
+
+* Installed by the `lazygit` formula; diffs go through delta.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`lazygit` |Open it in this repository
+|Ctrl+Space g |Open it in a tmux popup
+|===
+
+== See also
+
+* xref:toolbox/git-tools.adoc[git, delta, difftastic and git-absorb]
+* xref:toolbox/tmux.adoc[tmux]
+* https://github.com/jesseduffield/lazygit[lazygit website]

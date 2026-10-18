@@ -1,0 +1,27 @@
+= fzf
+:description: fzf, the fuzzy finder behind completion, the session picker and dev.
+
+fzf turns any list into a type-to-filter picker. The workstation uses it everywhere a list would otherwise be typed by hand: tab completion, tmux sessions, repositories, test classes.
+
+== On the workstation
+
+* Installed by the `fzf` formula; coloured by the ZoolCoder theme.
+* Used by fzf-tab, `dev`, `cpj`, `gt` and the tmux session picker.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Ctrl+T |Insert a file path
+|Alt+C |cd into a folder
+|`**` then Tab |Fuzzy completion of a path or a process
+|===
+
+== See also
+
+* xref:toolbox/zsh.adoc[zsh, antidote and plugins]
+* xref:toolbox/zoxide.adoc[zoxide]
+* xref:toolbox/tmux.adoc[tmux]
+* https://github.com/junegunn/fzf[fzf website]

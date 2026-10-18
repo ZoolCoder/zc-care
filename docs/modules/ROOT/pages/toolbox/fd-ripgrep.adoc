@@ -1,0 +1,25 @@
+= fd and ripgrep
+:description: fd and ripgrep, fast find and grep that respect .gitignore.
+
+fd finds files by name and ripgrep finds text inside them. Both skip what `.gitignore` ignores and are many times faster than `find` and `grep`, which matters in large repositories.
+
+== On the workstation
+
+* Installed by the `fd` and `ripgrep` formulae.
+* `rg` is aliased to `rg --smart-case`: lowercase searches ignore case, mixed case does not.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`fd name` |Find files whose name matches
+|`rg text` |Search the repository for text
+|===
+
+== See also
+
+* xref:toolbox/fzf.adoc[fzf]
+* xref:toolbox/bat.adoc[bat]
+* https://github.com/BurntSushi/ripgrep[fd and ripgrep website]

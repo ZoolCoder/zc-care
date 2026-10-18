@@ -1,0 +1,168 @@
+import Foundation
+
+/// Dependency folders a package manager fills inside a project: they come
+/// back with the next install, so a project left alone does not need them.
+public enum ProjectDependencies {
+    /// Each kind and the file beside it that proves it is one: a folder
+    /// called target is only Rust's or Maven's when a manifest sits next to it.
+    static let kinds: [String: [String]] = [
+        "node_modules": [],
+        ".venv": ["pyvenv.cfg"],
+        "venv": ["pyvenv.cfg"],
+        "target": ["../Cargo.toml", "../pom.xml"],
+    ]
+
+    /// The folders where code usually lives, those that exist.
+    public static func roots(home: String) -> [URL] {
+        ["Developer", "Projects", "Code", "code", "src", "dev", "workspace", "git", "repos", "Documents/GitHub"]
+            .map { URL(fileURLWithPath: home + "/" + $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// Dependency folders of projects not touched for `days`, biggest first;
+    /// `modified` is when the project itself last changed.
+    public static func find(roots: [URL], olderThan days: Int = 90, now: Date = .now, depth: Int = 6) -> [LargeFile] {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86400)
+        var found: [LargeFile] = []
+        for root in roots {
+            walk(root, depth: depth) { folder in
+                let touched = lastTouched(project: folder.deletingLastPathComponent(), skipping: folder.lastPathComponent)
+                guard touched < cutoff else { return }
+                found.append(LargeFile(url: folder, size: DiskUsage.allocated(folder), modified: touched))
+            }
+        }
+        return found.sorted { $0.size > $1.size }
+    }
+
+    /// The folders whose project a running command points into: a dev
+    /// server or a script there still loads its dependencies.
+    public static func running(_ folders: [LargeFile], commands: [String]) -> [LargeFile] {
+        folders.filter { AIClutter.used($0.url.deletingLastPathComponent(), by: commands) }
+    }
+
+    /// Calls `hit` for each dependency folder, and does not go into one.
+    private static func walk(_ folder: URL, depth: Int, hit: (URL) -> Void) {
+        guard depth > 0 else { return }
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]
+        let children = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
+        for child in children {
+            let v = try? child.resourceValues(forKeys: Set(keys))
+            guard v?.isDirectory == true, v?.isSymbolicLink != true, v?.isPackage != true else { continue }
+            let name = child.lastPathComponent
+            if let proofs = kinds[name] {
+                if proofs.isEmpty || proofs.contains(where: { FileManager.default.fileExists(atPath: child.appendingPathComponent($0).path) }) {
+                    hit(child)
+                }
+                continue
+            }
+            guard !name.hasPrefix(".") else { continue }
+            walk(child, depth: depth - 1, hit: hit)
+        }
+    }
+
+    /// The newest change among the project's own entries and those of its
+    /// folders: editing src/app.ts changes neither src nor the project.
+    /// .git counts, as a commit or a pull is work on it.
+    static func lastTouched(project: URL, skipping: String) -> Date {
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isDirectoryKey]
+        func entries(_ folder: URL) -> [URL] {
+            ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: Array(keys))) ?? [])
+                .filter { $0.lastPathComponent != ".DS_Store" }
+        }
+        var newest = Date.distantPast
+        for entry in entries(project) where entry.lastPathComponent != skipping {
+            let v = try? entry.resourceValues(forKeys: keys)
+            newest = max(newest, v?.contentModificationDate ?? .distantPast)
+            guard v?.isDirectory == true, !entry.lastPathComponent.hasPrefix("."), kinds[entry.lastPathComponent] == nil else { continue }
+            for inner in entries(entry) {
+                newest = max(newest, (try? inner.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast)
+            }
+        }
+        return newest
+    }
+}
+
+/// A local AI model on disk: what Ollama, LM Studio and Hugging Face keep.
+public struct AIModel: Codable, Sendable, Equatable, Identifiable {
+    public enum Source: String, Codable, Sendable { case ollama = "Ollama", lmStudio = "LM Studio", huggingFace = "Hugging Face" }
+
+    public var name: String
+    public var source: Source
+    public var size: Int64
+    public var modified: Date?
+    /// What removing it trashes: the model's folder, or an Ollama manifest
+    /// and the blobs no other model shares.
+    public var paths: [URL]
+
+    public var id: String { source.rawValue + " " + name }
+}
+
+public enum AIModels {
+    public static func find(home: String) -> [AIModel] {
+        (ollama(root: URL(fileURLWithPath: home + "/.ollama/models"))
+            + huggingFace(hub: URL(fileURLWithPath: home + "/.cache/huggingface/hub"))
+            + lmStudio(folders: [home + "/.lmstudio/models", home + "/.cache/lm-studio/models"].map(URL.init(fileURLWithPath:))))
+            .sorted { $0.size > $1.size }
+    }
+
+    private struct Manifest: Decodable {
+        struct Layer: Decodable { var digest: String; var size: Int64 }
+        var config: Layer?
+        var layers: [Layer]
+        var all: [Layer] { (config.map { [$0] } ?? []) + layers }
+    }
+
+    /// manifests/<registry>/<namespace>/<model>/<tag>, each naming its
+    /// blobs by digest; blobs/sha256-<hex> holds them. A blob two models
+    /// share stays until the last one goes.
+    static func ollama(root: URL) -> [AIModel] {
+        guard let files = FileManager.default.enumerator(at: root.appendingPathComponent("manifests"), includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
+        var read: [(url: URL, manifest: Manifest)] = []
+        for case let url as URL in files where (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+            guard let data = try? Data(contentsOf: url), let m = try? JSONDecoder().decode(Manifest.self, from: data) else { continue }
+            read.append((url, m))
+        }
+        var users: [String: Int] = [:]
+        for (_, m) in read { for d in Set(m.all.map(\.digest)) { users[d, default: 0] += 1 } }
+        return read.map { url, m in
+            // The enumerator may answer with /private/var for /var: count from the end.
+            let parts = url.pathComponents.suffix(3)
+            let name = (parts.first == "library" ? "" : parts.first! + "/") + parts.dropFirst().joined(separator: ":")
+            let own = Set(m.all.map(\.digest)).filter { users[$0] == 1 }
+                .map { root.appendingPathComponent("blobs/" + $0.replacingOccurrences(of: ":", with: "-")) }
+            let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            return AIModel(name: name, source: .ollama, size: m.all.reduce(0) { $0 + $1.size },
+                           modified: modified, paths: [url] + own.sorted { $0.path < $1.path })
+        }
+    }
+
+    /// hub/models--<org>--<name>, a folder per model.
+    static func huggingFace(hub: URL) -> [AIModel] {
+        folders(in: hub).compactMap { url in
+            let folder = url.lastPathComponent
+            guard folder.hasPrefix("models--") else { return nil }
+            let name = folder.dropFirst("models--".count).replacingOccurrences(of: "--", with: "/")
+            return model(name, .huggingFace, url)
+        }
+    }
+
+    /// models/<publisher>/<model>, a folder per model.
+    static func lmStudio(folders roots: [URL]) -> [AIModel] {
+        roots.flatMap { root in
+            folders(in: root).flatMap { publisher in
+                folders(in: publisher).map { model(publisher.lastPathComponent + "/" + $0.lastPathComponent, .lmStudio, $0) }
+            }
+        }
+    }
+
+    private static func model(_ name: String, _ source: AIModel.Source, _ url: URL) -> AIModel {
+        let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        return AIModel(name: name, source: source, size: DiskUsage.allocated(url), modified: modified, paths: [url])
+    }
+
+    private static func folders(in url: URL) -> [URL] {
+        let all = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey],
+                                                                options: [.skipsHiddenFiles])) ?? []
+        return all.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+    }
+}

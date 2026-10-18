@@ -1,0 +1,25 @@
+= Atuin
+:description: Atuin, shell history: searchable, per folder, and free of secrets.
+
+Atuin replaces the shell's history file with a database you search on Ctrl+R. It remembers the folder, the exit code and how long each command took, so finding "that docker command I ran in this repo last week" takes a second.
+
+== On the workstation
+
+* Installed by the `atuin` formula; its config comes from the config repo and its theme from `assets/theme/dot_config/atuin`.
+* Commands that look like they hold a secret are never saved.
+* With `atuin login`, history syncs between your Macs, end-to-end encrypted; without it, it stays on this machine.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Ctrl+R |Search all history; Ctrl+R again switches to this host, this session or this folder
+|===
+
+== See also
+
+* xref:toolbox/zsh.adoc[zsh, antidote and plugins]
+* xref:toolbox/fzf.adoc[fzf]
+* https://atuin.sh[Atuin website]

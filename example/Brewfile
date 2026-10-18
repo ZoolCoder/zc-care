@@ -1,0 +1,8 @@
+# Homebrew bundle format: tap, brew, cask and mas entries are installed.
+tap "felixkratz/formulae"
+brew "git"
+brew "chezmoi"
+brew "mise"
+brew "felixkratz/formulae/sketchybar"
+cask "ghostty"
+mas "Bitwarden", id: 1352778147

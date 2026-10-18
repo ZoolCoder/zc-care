@@ -1,0 +1,100 @@
+= What ZC Care and zc-care are
+:description: ZC Care sets up a Mac from one config, keeps it that way and keeps it clean; zc-care is the engine under it.
+
+xref:app.adoc[ZC Care] is a Mac app. On a new Mac it asks who the Mac is
+for, a developer or everyday use, and installs the apps you pick. After that
+it shows what is missing or out of date and puts it right when you say so.
+It also cleans junk, uninstalls apps with their leftovers and watches the
+Mac's health.
+
+Under it runs `zc-care`, the engine. One YAML file says what a
+Mac needs: the packages, the dotfiles, the language runtimes.
+`zc-care` reads what this machine has, prints the difference, and
+only if you ask, closes it. Every apply is checked by planning again.
+
+[source,console]
+----
+$ zc-care plan
+CREATE  brew      cask:ghostty           install with brew
+CREATE  brew      mas:uBlock Origin Lite install with mas
+UPDATE  dotfiles  .gitconfig             update; changed outside chezmoi, apply overwrites it
+CREATE  runtimes  java@temurin-25        install with mise
+----
+
+== What it manages
+
+[cols="1,2,2"]
+|===
+| Provider | Reads | Changes with
+
+| xref:providers.adoc#packages[`packages`]
+| A Brewfile, App Store apps included
+| `brew`, `mas`
+
+| xref:providers.adoc#dotfiles[`dotfiles`]
+| A chezmoi source directory
+| `chezmoi apply`, one path at a time
+
+| xref:providers.adoc#tools[`tools`]
+| A mise config file
+| `mise install`
+
+| xref:providers.adoc#desktop[`desktop`]
+| A wallpaper and a screen saver page
+| `osascript`, WebViewScreenSaver
+
+| xref:providers.adoc#settings[`settings`]
+| macOS preferences
+| `defaults`
+
+| xref:providers.adoc#services[`services`]
+| Homebrew services and launchd agents
+| `brew services`, `launchctl`
+
+| xref:providers.adoc#localdir[`localdir`]
+| Files written inline in the config
+| Direct writes inside one directory
+|===
+
+It does not reimplement these tools. chezmoi already handles templates,
+secrets and per-machine differences, and mise already resolves versions.
+`zc-care` adds one plan across all of them, ZC Care, and the same
+rules for every surface.
+
+== One config, every Mac
+
+ZC Care is for macOS only. The same file sets up each of your Macs, and
+chezmoi templates cover what differs between them:
+
+[source,yaml]
+----
+targets:
+  - {name: brew,     provider: packages, file: packages/Brewfile}
+  - {name: dotfiles, provider: dotfiles, source: home}
+  - {name: runtimes, provider: tools,    file: mise.toml}
+----
+
+== The loop
+
+. *Plan* asks each provider what is missing and lists actions: `CREATE`,
+  `UPDATE`, `DELETE` and `MANUAL`. Planning writes nothing.
+. *Apply* runs the actions in order, then plans again. A change that ran but
+  did not take is reported as still outstanding, never as done.
+. *Saved plans* pin what was reviewed. `plan -out` writes the plan, and
+  `apply FILE` refuses when the machine changed since.
+. *MANUAL* is what no tool should do for you, such as installing the package
+  manager itself or trusting a mise config. The plan says what to run.
+
+== Four surfaces, one contract
+
+The CLI is the contract. xref:app.adoc[ZC Care], the
+xref:agents.adoc[MCP server], the agent skills and scripts all go through the
+same plan and apply, with the same refusals.
+
+ZC Care's Care window also cleans junk and what AI tools leave behind,
+uninstalls apps with their leftovers and finds what fills the disk.
+
+== A new Mac
+
+Keep the config in its own repo, and a new Mac needs one command. See
+xref:new-machine.adoc[].

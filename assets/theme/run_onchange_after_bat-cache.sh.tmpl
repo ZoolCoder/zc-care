@@ -1,0 +1,5 @@
+#!/bin/sh
+# bat reads new themes only from its cache; rebuilt when a theme changes.
+# ZoolCoder Dark: {{ include "dot_config/bat/themes/ZoolCoder Dark.tmTheme" | sha256sum }}
+# ZoolCoder Light: {{ include "dot_config/bat/themes/ZoolCoder Light.tmTheme" | sha256sum }}
+command -v bat >/dev/null && bat cache --build >/dev/null

@@ -1,0 +1,233 @@
+= Roadmap: zc-care
+:description: How ZC Care and its zc-care CLI, on top of chezmoi, replaced aurora-mac, and what comes next.
+
+aurora-mac set up a Mac with about 850 lines of shell. Its successor,
+*zc-care*, sets up a Mac from one repo, and ZC Care is the app on top
+of it. Linux and Windows support was built, then dropped: one system is
+easier to get right and to keep right.
+
+== Decisions
+
+[%header,cols="1,3"]
+|===
+|Question |Decision
+
+|Engine
+|chezmoi applies the dotfiles. A thin Go CLI does the glue that chezmoi does not do.
+
+|Platforms
+|macOS only. Linux and Windows providers were built in phases 2 and 3, then removed in the move to `zc-care` to keep one system well maintained.
+
+|Repository
+|New repo `github.com/ZoolCoder/zc-workstation`, MIT, with the CLI `zc-workstation`. Both are now `zc-care`.
+
+|Scaffold
+|Generated from go-tool-template with `zoolfleet new` (class `oss`, license MIT), so it gets the plan/apply engine, `doctor`, MCP, skills, evals, Antora docs and release workflows that the other tools already share.
+|===
+
+== Found on GitHub
+
+Searched first, so that the new code is only the glue nobody else provides.
+
+[%header,cols="2,1,1,4"]
+|===
+|Project |License |Verdict |Why
+
+|https://github.com/twpayne/chezmoi[twpayne/chezmoi] (Go, ~22k stars)
+|MIT
+|Adopt
+|Dotfiles on macOS, Linux and Windows. Per-OS templates, `run_onchange_` scripts, secrets from password managers, and a symlink mode. It replaces `link()` in `install.sh` and every per-OS branch we would otherwise write. Used as an external binary, not as a library.
+
+|https://github.com/jdx/mise[jdx/mise] (~35k stars)
+|MIT
+|Keep
+|Already manages Java, Node and Python, and works on all three systems. Its `aqua` and `github` backends can also install CLI tools (starship, lazygit, yazi, delta, atuin) the same way everywhere, which shrinks the per-OS package lists.
+
+|go-tool-template (private) and https://github.com/zoolcoder/toolshell[toolshell]
+|MIT
+|Adopt
+|Our own. Provider/plan/apply engine, `toolshell/doctor` checks, MCP server, admin UI, docs and release pipeline.
+
+|https://github.com/charmbracelet/huh[charmbracelet/huh]
+|MIT
+|Adopt
+|The pick list for `catalog`. It replaces fzf, so the picker also works in a Windows console.
+
+|https://github.com/goreleaser/goreleaser[goreleaser]
+|MIT
+|Adopt
+|Builds the binaries and publishes a Homebrew tap formula, a Scoop/winget manifest and Linux packages.
+
+|https://github.com/topgrade-rs/topgrade[topgrade-rs/topgrade]
+|GPL-3.0
+|Optional
+|Upgrades every package manager on a machine. `update` calls it only when it is installed, as a separate program. It is never vendored or linked, so its GPL does not reach this repo.
+
+|https://github.com/comtrya/comtrya[comtrya], https://github.com/volllly/rotz[rotz], https://github.com/SuperCuber/dotter[dotter]
+|MIT
+|Skip
+|Rust tools that overlap with chezmoi. They are smaller and younger, and comtrya says it is early in its development.
+
+|https://github.com/yadm-dev/yadm[yadm], dotbot
+|GPL-3.0 / MIT
+|Skip
+|Symlinks plus shell commands, with weaker Windows support than chezmoi.
+
+|Package manager wrappers (pm, pkm, tux)
+|various
+|Skip
+|Shell, Unix only. The package provider is ours, about 200 lines of Go.
+|===
+
+== How it fits together
+
+[listing]
+----
+zc-care/
+  cmd/zc-care/      CLI: init, plan, apply, update, doctor, catalog, mcp
+  internal/provider/
+    dotfiles/              runs chezmoi (source: home/)
+    packages/              brew + Brewfile, mas
+    tools/                 mise install
+    settings/              macOS defaults
+    services/              Homebrew services, launchd agents
+  home/                    chezmoi source state
+  packages/
+    Brewfile
+  docs/                    Antora
+----
+
+* `plan` shows what each provider would create, update or delete, and changes nothing.
+* `apply` runs a plan after a person says yes, from the CLI, the UI or an agent through MCP.
+* `doctor` replaces `doctor.sh`, built on `toolshell/doctor`, and adds `--json` for agents and CI.
+* `update` replaces the `update` alias: pull the repo and the overlay, `apply`, upgrade (topgrade when installed), then `doctor`.
+* The overlay stays a separate private repo. It is a second chezmoi source with its own state file and its own package manifests, applied after the public one. The path moves to `~/.config/zc-care/overlay`.
+* The scripts in `bin/` (git-tidy, gh-summary, prompt-pr, ci-watch, catalog) stay shell scripts under `home/`.
+
+== Where it stands
+
+[%header,cols="2,1,3"]
+|===
+|Piece |State |Notes
+
+|Engine, CLI, MCP server, dashboard
+|Done
+|From go-tool-template. The dashboard shows coverage, missing items and the programs each target needs.
+
+|`packages`: brew and mas
+|Done
+|Installs only, never uninstalls. Read-only status matches the aurora-mac Brewfile: 78 of 80 installed.
+
+|`dotfiles` through chezmoi
+|Done
+|Applies only the planned paths. `mode: symlink` is supported, which settles the copy-or-link risk below.
+
+|`tools` through mise
+|Done
+|Untrusted configs stay a `MANUAL` step.
+
+|`settings` and `services` providers
+|Done
+|macOS `defaults`, Homebrew services and launchd agents.
+
+|Security checks in `doctor`
+|Done
+|`doctor.sh`'s FileVault, firewall, screen lock, Gatekeeper, SIP, update, File Sharing, Touch ID and exposed-server checks, as warnings with their fix.
+
+|`list`, `capture`, upgrades
+|Done
+|`list` shows outdated and undeclared packages and runtimes in about two seconds. `capture` writes a Brewfile or mise config from the machine. `upgrade: true` plans upgrades per target.
+
+|aurora-mac config moved to a private config repo
+|Done
+|A private zc-care-config repo holds the Brewfile, the mise config and a chezmoi `home/` source, so nothing personal enters this repo.
+
+|aurora-mac steps beyond links
+|Done
+|The git identity, hooks and signing key, app settings (VS Code, IntelliJ, Chrome, CodexBar), `gradle.properties`, git maintenance and Claude Notify are chezmoi `run_onchange_` scripts in the config repo; macOS defaults and background services are `settings` and `services` targets.
+
+|`add`, `remove`, `-upgrade` and `-only`
+|Done
+|`add` declares an item with why it is there. `remove` uninstalls and drops it from the manifest. `sudo` asks in a macOS dialog when there is no terminal.
+
+|`bootstrap.sh`, theme and `desktop` provider
+|Done
+|A new Mac in one command from the config repo. The ZoolCoder theme, wallpaper and screen saver.
+
+|ZC Care menu bar app
+|Done
+|The panel over the CLI, and a window that cleans junk and AI clutter, uninstalls apps, finds clutter, similar images and idle dependencies, frees cloud files, and logs what it freed. Every item shows before it is deleted, and trashed items can be put back. See xref:app.adoc[].
+
+|CI
+|Done
+|`ci.yml` tests the CLI and builds and tests ZC Care on macOS runners.
+
+|The toolbox
+|Done
+|A manual page per tool in the reference setup: what it is for, how it is configured, its keys. See xref:toolbox/index.adoc[].
+
+|Repository hardening
+|Done
+|Git flow with `develop`, rulesets for `main`, `develop` and `v*` tags, pinned actions, CodeQL and govulncheck, applied by `scripts/harden.sh`.
+
+|Releases
+|Done
+|ZC Care, with the CLI inside, and its `zc-care` cask. Before `zc-care`, goreleaser also shipped CLI binaries, Linux packages and Windows zips.
+|===
+
+== Next
+
+The concrete tasks are in
+https://github.com/ZoolCoder/zc-care/blob/develop/TODO.md[TODO.md]. In
+order:
+
+. *Release.* Run `bootstrap.sh` from the cask on a clean macOS VM.
+. *ZC Care distribution.* A Developer ID signature and notarisation, so Full
+  Disk Access survives an update.
+
+== Phases
+
+Each phase ends with a check that proves it, not a date.
+
+[%header,cols="1,3,2"]
+|===
+|Phase |Work |Done when
+
+|0. Scaffold
+|`zoolfleet new go-tool-template` as zc-care (oss, MIT). Push the empty repo, with CI green.
+|`make lint test build` passes in CI.
+
+|1. macOS parity
+|Move the config folders into `home/` as chezmoi source state. Write the dotfiles, packages, tools, settings and services providers. Port `doctor.sh` checks and `catalog`. Port the overlay. Release through a Homebrew tap.
+|On a clean macOS VM, `zc-care apply` gives the same result as `install.sh`. `doctor` is clean on both of your Macs. aurora-mac is no longer used.
+
+|2 and 3. Linux and Windows
+|Built, then removed: ZC Care is macOS only.
+|Dropped.
+
+|4. Retire aurora-mac
+|Archive the repo on GitHub with a pointer to zc-care. Rename aurora-mac-overlay to zc-care-overlay. Update CLAUDE.md and memory paths.
+|Nothing on any machine still reads `~/Developer/Tools/aurora-mac`.
+|===
+
+== Docs
+
+The docs move to zc-care with the code and change shape:
+
+* *Generated reference.* The command reference comes from the CLI's help, and the package list comes from the manifests, so neither can drift.
+* *Split by purpose.* Tutorials (first setup), how-to (add a package, add a dotfile, write an overlay), reference (commands, manifests, providers) and explanation (why chezmoi, the threat model).
+* *Workstation notes.* Claude Code, Git, Flutter, PostgreSQL, disk management and maintenance stay as notes modules.
+* *No personal paths.* Before the repo goes public, the five pages that still name personal paths are made generic. The personal detail moves to the overlay.
+* *Published.* The template's `docs.yml` workflow publishes the site to GitHub Pages.
+
+== Risks
+
+* *chezmoi copies files by default.* Editing `~/.zshrc` directly no longer edits the repo. Either use `chezmoi edit` and `chezmoi re-add`, or set `mode = "symlink"` for the files that you edit often. Decide this in phase 1.
+* *Two dotfile engines in phase 1.* Until parity, aurora-mac and zc-care must not both manage one machine. Test zc-care on a VM, then switch each Mac once.
+
+== Not planned
+
+* Managing servers or fleets of machines. That is Ansible's job.
+* Nix or home-manager.
+* Linux and Windows.
+* Applying a plan without a person's yes.

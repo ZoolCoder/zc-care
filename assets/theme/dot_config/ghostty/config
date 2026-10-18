@@ -1,0 +1,62 @@
+# Always dark, whatever macOS uses; zoolcoder/theme.zsh and tmux/theme.sh pick dark too when they run in Ghostty.
+theme = zoolcoder
+window-theme = dark
+font-family = JetBrainsMono Nerd Font Mono
+font-size = 14
+# Ligatures (=> != ===) are on by default; a little more line height and thicker strokes read better on Retina.
+adjust-cell-height = 8%
+font-thicken = true
+window-colorspace = display-p3
+# The working folder under the window title.
+window-subtitle = working-directory
+# Glass look: the desktop shows faintly through a blurred background.
+background-opacity = 0.92
+background-blur = 20
+# Cmd+Shift+O switches the glass off and on, for screen sharing or a busy wallpaper.
+keybind = cmd+shift+o=toggle_background_opacity
+# Cmd+Shift+C: Claude in a split on the right, in this folder, continuing its last conversation here.
+keybind = cmd+shift+c=new_split:right
+keybind = chain=text:claude --continue || claude\n
+window-padding-x = 14
+window-padding-y = 10
+window-padding-balance = true
+mouse-hide-while-typing = true
+window-save-state = always
+macos-option-as-alt = true
+copy-on-select = clipboard
+# zsh/zshrc writes the tab title, the same way in a tab and in a tmux pane; a second writer here would fight it and Claude's title.
+# ssh-terminfo installs Ghostty's terminfo on hosts you ssh into, so colours and keys work there too.
+shell-integration-features = no-cursor,sudo,no-title,ssh-env,ssh-terminfo
+# Drop-down terminal from anywhere; needs Accessibility permission for Ghostty.
+keybind = global:cmd+grave_accent=toggle_quick_terminal
+quick-terminal-position = top
+quick-terminal-screen = mouse
+quick-terminal-autohide = true
+# Brighter faint text keep dim output, such as Claude's secondary lines, readable.
+faint-opacity = 0.8
+# The native macOS tab bar. The "tabs" style is Ghostty's own tab bar inside the titlebar, which it has not tested
+# on newer macOS; on macOS 27 it draws wrong and its tabs do not switch.
+macos-titlebar-style = transparent
+# Several sessions side by side: new tabs go to the end, so Cmd+1 to Cmd+8 keep pointing at the same session.
+window-new-tab-position = end
+# A bell also frames its split, so in a tab with several sessions you see which one waits.
+bell-features = attention,title,border,audio
+bell-audio-path = sounds/attention.aiff
+bell-audio-volume = 0.3
+# A zoomed split stays zoomed when you move on to the next one.
+split-preserve-zoom = navigation
+cursor-style = bar
+cursor-style-blink = false
+unfocused-split-opacity = 0.85
+# The glowing cursor trail is off: its shader redraws the whole window on every frame, which kept WindowServer
+# at a third of a CPU core while Ghostty was in front. Uncomment both lines to have it back.
+# custom-shader = shaders/cursor-glow.glsl
+# custom-shader-animation = true
+# A notification when a command that ran over a minute finishes while you look elsewhere; a click focuses its tab.
+notify-on-command-finish = unfocused
+notify-on-command-finish-action = no-bell,notify
+notify-on-command-finish-after = 1m
+# Keep a long history to scroll back through build and test output.
+scrollback-limit = 50000000
+# Ghostty downloads its updates and installs them on the next restart.
+auto-update = download

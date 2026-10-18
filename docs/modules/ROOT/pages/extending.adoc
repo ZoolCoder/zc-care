@@ -1,0 +1,96 @@
+= Adding a provider
+:description: How to add a provider to zc-care, and how to test it without touching the machine.
+
+A provider turns a target into actions. It is one interface:
+
+[source,go]
+----
+type Provider interface {
+	Plan(ctx context.Context, t config.Target) ([]plan.Action, error)
+	Status(ctx context.Context, t config.Target) (string, error)
+}
+----
+
+Five optional interfaces feed ZC Care, `doctor`, `list`, `capture` and `add`:
+
+[source,go]
+----
+// Measure counts what is in place, for the progress bars.
+type Measurer interface {
+	Measure(ctx context.Context, t config.Target) (Live, error)
+}
+
+// Programs lists what the provider runs, for the Programs panel.
+type Requirer interface {
+	Programs(t config.Target) []string
+}
+
+// Items lists every declared item, for list and the Inventory page.
+type Lister interface {
+	Items(ctx context.Context, t config.Target) ([]Item, error)
+}
+
+// Capture writes the manifest that matches this machine, for capture.
+type Capturer interface {
+	Capture(ctx context.Context, t config.Target) ([]byte, error)
+}
+
+// Add declares one entry in the manifest, for add. It edits the file only.
+type Adder interface {
+	Add(t config.Target, e Entry) error
+}
+----
+
+A line-based manifest gets sections and whys from `internal/manifest`:
+`manifest.Notes` reads them for `Items`, and `manifest.Insert` and
+`manifest.Line` write an entry for `Add`.
+
+== Steps
+
+. Add a package under `internal/provider/`. `tools` is the smallest that
+  drives another program; `localdir` writes files itself.
+. Add its name to `config.Providers`, and its fields and checks to
+  `Target.validateFields`.
+. Register it in `engine.With`.
+. Document it in xref:providers.adoc[Providers].
+
+== Run programs through sh.Runner
+
+A provider that runs other programs takes an `sh.Runner`, never `os/exec`
+directly:
+
+* `Output` reads, and its error carries the program's stderr.
+* `Run` installs, attached to the command's streams. Under `mcp`, those are
+  buffers, never the protocol stream.
+* `Has` checks `PATH`.
+
+Tests use `sh.Fake`. It answers commands from a table and records what `Run`
+was given, so a test never touches the machine:
+
+[source,go]
+----
+r := &sh.Fake{
+	Programs: []string{"mise"},
+	Out:      map[string]string{"mise ls --json -C /cfg": `{...}`},
+}
+actions, err := tools.New(r).Plan(ctx, target)
+_ = actions[0].Do(ctx)
+// r.Ran[0] == "mise install -C /cfg java@temurin-25"
+----
+
+A test against the real program skips when the program is missing. The
+dotfiles tests run chezmoi in temporary directories this way.
+
+== Rules
+
+. *Plan writes nothing.* Read live state, compare, and return actions. Every
+  write lives in an action's `Do`.
+. *Apply does what the plan showed.* Act on the planned item only. The
+  dotfiles provider applies one path, not the whole source.
+. *Say what breaks.* `Detail` is what a person reads to decide. Never put a
+  value that could be a secret in it.
+. *`MANUAL` has no `Do`.* Use it for what no tool should do, and say what a
+  person must do instead.
+. *Writes are verified.* The engine plans again after apply. A provider whose
+  write is accepted but not kept shows up as still outstanding; do not hide
+  that by caching.

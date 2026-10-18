@@ -1,0 +1,22 @@
+= Yazi
+:description: Yazi, a terminal file manager with previews.
+
+Yazi browses folders in the terminal with previews of text, images and archives. Quitting it leaves the shell in the folder you ended up in.
+
+== On the workstation
+
+* Installed by the `yazi` formula; `assets/theme/dot_config/yazi` holds its config and the ZoolCoder flavour.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`y` |Open Yazi; quit with q to cd where you were
+|===
+
+== See also
+
+* xref:toolbox/eza.adoc[eza]
+* https://yazi-rs.github.io[Yazi website]

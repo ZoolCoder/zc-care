@@ -1,0 +1,66 @@
+= just, xh, hyperfine and other helpers
+:description: just, xh, hyperfine, tlrc, uv, wget, Bash 5 and ShellCheck: small command-line tools for everyday work.
+
+Small tools that each replace a longer command or a lookup: run a project's
+recipes, call an HTTP API, time two commands against each other, see how a
+command is used, run a Python script with its packages, download a file, and
+check a shell script.
+
+== On the workstation
+
+* Installed by the `just`, `xh`, `hyperfine`, `tlrc`, `uv`, `wget`, `bash`
+  and `shellcheck` formulae.
+* tlrc installs the command `tldr`.
+* `bash` is Bash 5. macOS ships Bash 3.2, so a script that needs
+  associative arrays or `mapfile` starts with `#!/usr/bin/env bash` and finds
+  Homebrew's.
+* uv runs Python scripts and tools without a virtualenv made by hand; mise
+  keeps the Python versions.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`just` / `just -l` |Run the default recipe of the `justfile` / list the recipes
+|`just --choose` |Pick a recipe with fzf
+|`xh :8080/healthz` |GET from localhost, with the response coloured
+|`xh POST :8080/items name=demo count:=3` |POST JSON: `=` for a string, `:=` for a raw value
+|`xh -b example.com/api` |Print only the response body
+|`hyperfine --warmup 3 'cmd a' 'cmd b'` |Time two commands and say which is faster
+|`hyperfine --export-markdown bench.md 'cmd'` |Save the result as a Markdown table
+|`tldr tar` / `tldr -u` |Short examples for a command / update the pages
+|`uv run --with requests script.py` |Run a script with a package, no virtualenv to set up
+|`uvx ruff check .` |Run a Python tool once without installing it
+|`uv tool install ruff` |Install a Python tool on `PATH`
+|`wget -c URL` |Resume a download that stopped
+|`shellcheck -x script.sh` |Lint a script, following the files it sources
+|===
+
+== With zc-care
+
+Before committing a change to a shell script, such as `bootstrap.sh` or the
+files in `scripts/`, lint it:
+
+[source,console]
+----
+$ shellcheck -x bootstrap.sh scripts/*.sh
+----
+
+To check that a change made `plan` faster, time both builds:
+
+[source,console]
+----
+$ hyperfine --warmup 2 'old/zc-care plan' 'bin/zc-care plan'
+----
+
+== See also
+
+* xref:toolbox/fzf.adoc[fzf], which `just --choose` uses
+* xref:toolbox/mise.adoc[mise], for Python versions
+* https://just.systems/man/en/[just manual]
+* https://github.com/ducaale/xh[xh]
+* https://github.com/sharkdp/hyperfine[hyperfine]
+* https://docs.astral.sh/uv/[uv]
+* https://www.shellcheck.net[ShellCheck]

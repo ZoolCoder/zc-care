@@ -1,0 +1,28 @@
+= mise
+:description: mise, the runtime manager: Java, Node, Python and Gradle versions.
+
+mise installs and switches language runtimes per project. Enter a folder with a `.nvmrc`, `.sdkmanrc` or `.python-version` and the right version is on PATH; no SDKMAN, nvm or pyenv needed.
+
+== On the workstation
+
+* Installed by the `mise` formula; the `runtimes` target applies `mise.toml` through the `tools` provider.
+* Pins Temurin 25, 21 and 17, GraalVM Community 25, Gradle, Node LTS and Python 3.13.
+* Reads the version files projects already have.
+* A config mise does not trust yet is a `MANUAL` step, never trusted for you.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`mise use java@21` |Pin a version in this folder
+|`mise ls` |What is installed and active
+|`zc-care list -kind runtime` |Runtimes with their state and why
+|===
+
+== See also
+
+* xref:toolbox/chezmoi.adoc[chezmoi]
+* xref:toolbox/direnv.adoc[direnv]
+* https://mise.jdx.dev[mise website]

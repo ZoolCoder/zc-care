@@ -1,0 +1,28 @@
+= Colima, Docker and friends
+:description: Colima, Docker, lazydocker, dive and the Kubernetes tools.
+
+Colima runs the Docker engine in a small Linux VM, with no Docker Desktop and no licence to think about. The Docker CLI, Compose and Buildx talk to it as usual. The terminal UIs make containers and clusters easy to read.
+
+== On the workstation
+
+* `colima`, `docker`, `docker-compose`, `docker-buildx` from the Brewfile; the `services` target keeps colima running.
+* lazydocker shows containers, logs and images; dive looks inside image layers.
+* k9s (with the ZoolCoder skin), kubectx and stern for Kubernetes.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`dps` |Containers with name, status and ports
+|`dcu` `dcd` `dcl` |Compose up, down, follow logs
+|`lazydocker` |Containers in a terminal UI
+|`k9s` |A cluster in a terminal UI
+|`kubectx` `kubens` |Switch context and namespace
+|===
+
+== See also
+
+* xref:toolbox/postgresql.adoc[PostgreSQL, pgcli and TablePlus]
+* https://github.com/abiosoft/colima[Colima, Docker and friends website]

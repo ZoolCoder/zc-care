@@ -1,0 +1,23 @@
+= gitleaks
+:description: gitleaks, the secret scanner that runs before every commit.
+
+gitleaks looks for keys, tokens and passwords in what you are about to commit. On the workstation it runs as a global pre-commit hook in every repository, so a secret is stopped before it reaches history, which is far cheaper than rotating it later.
+
+== On the workstation
+
+* Installed by the `gitleaks` formula.
+* A global hook chain runs it on staged changes, then hands over to the repository's own hook, so pre-commit and git-lfs keep working.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`gitleaks git` |Scan a repository's whole history
+|===
+
+== See also
+
+* xref:toolbox/git-tools.adoc[git, delta, difftastic and git-absorb]
+* https://github.com/gitleaks/gitleaks[gitleaks website]

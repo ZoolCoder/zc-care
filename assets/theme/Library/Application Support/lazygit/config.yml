@@ -1,0 +1,83 @@
+gui:
+  nerdFontsVersion: "3"
+  # The focused side panel grows, the diff keeps the rest.
+  expandFocusedSidePanel: true
+  # Branches show how far they are ahead of and behind main.
+  showDivergenceFromBaseBranch: arrowAndNumber
+  switchTabsWithPanelJumpKeys: true
+  theme:
+    activeBorderColor:
+      - '#3d7bff'
+      - bold
+    inactiveBorderColor:
+      - '#b9bfc8'
+    searchingActiveBorderColor:
+      - '#ffd27a'
+    optionsTextColor:
+      - '#9cc3ff'
+    selectedLineBgColor:
+      - '#161A22'
+    inactiveViewSelectedLineBgColor:
+      - '#646973'
+    cherryPickedCommitFgColor:
+      - '#3d7bff'
+    cherryPickedCommitBgColor:
+      - '#2b313d'
+    markedBaseCommitFgColor:
+      - '#9cc3ff'
+    markedBaseCommitBgColor:
+      - '#ffd27a'
+    unstagedChangesColor:
+      - '#ff7a7e'
+    defaultFgColor:
+      - '#f3f5f7'
+  authorColors:
+    '*': '#c4dcff'
+git:
+  diffRenderers:
+    - colorArg: always
+      command: delta --paging=never
+os:
+  editPreset: vscode
+promptToReturnFromSubprocess: false
+keybinding:
+  files:
+    # C opens the conventional commit form below instead of the editor.
+    commitChangesWithEditor: <disabled>
+customCommands:
+  - key: C
+    context: files
+    description: Conventional commit
+    prompts:
+      - type: menu
+        key: Type
+        title: Type
+        options:
+          - {value: feat, description: new behaviour}
+          - {value: fix, description: bug fix}
+          - {value: refactor, description: no behaviour change}
+          - {value: docs, description: documentation only}
+          - {value: test, description: tests only}
+          - {value: chore, description: maintenance without source changes}
+          - {value: build, description: build system or dependencies}
+          - {value: ci, description: CI config}
+          - {value: perf, description: performance}
+          - {value: style, description: formatting only}
+      - type: input
+        key: Scope
+        title: Scope (module or area, empty if too broad)
+      - type: input
+        key: Message
+        title: Description (imperative, lowercase, no period)
+    command: '{{- $scope := "" }}{{ if .Form.Scope }}{{ $scope = printf "(%s)" .Form.Scope }}{{ end }}git commit -m {{ printf "%s%s: %s" .Form.Type $scope .Form.Message | quote }}'
+    loadingText: committing
+  - key: <c-a>
+    context: files
+    description: Absorb staged hunks into the commits they fix, then rebase
+    command: git absorb --and-rebase
+    loadingText: absorbing
+  - key: <c-t>
+    context: commits
+    description: Show this commit with difftastic
+    command: git -c diff.external=difft show --ext-diff {{ .SelectedLocalCommit.Hash }}
+    output: terminal

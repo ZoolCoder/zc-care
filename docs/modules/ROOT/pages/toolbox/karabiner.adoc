@@ -1,0 +1,32 @@
+= Karabiner-Elements and the Hyper key
+:description: Karabiner-Elements: Caps Lock as Escape and Hyper, and Hyper shortcuts for apps.
+
+Karabiner remaps the keyboard. Caps Lock, the most wasted key, becomes Escape when tapped and Hyper (Cmd+Ctrl+Opt+Shift) when held. Hyper plus a letter then opens an app from anywhere, without clashing with any app's own shortcuts.
+
+== On the workstation
+
+* Installed by the `karabiner-elements` cask; `karabiner.json` comes from the config repo.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|Caps Lock (tap) |Escape
+|Hyper+T |Ghostty
+|Hyper+V |VS Code
+|Hyper+I |IntelliJ IDEA
+|Hyper+B |Chrome
+|Hyper+A |Bruno
+|Hyper+M |Teams
+|Hyper+O |Outlook
+|Hyper+S |A Shottr area screenshot
+|Hyper+D |A new Ghostty window running `dev`
+|===
+
+== See also
+
+* xref:toolbox/raycast.adoc[Raycast]
+* xref:toolbox/ghostty.adoc[Ghostty]
+* https://karabiner-elements.pqrs.org[Karabiner-Elements and the Hyper key website]

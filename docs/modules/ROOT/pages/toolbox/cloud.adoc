@@ -1,0 +1,56 @@
+= Cloud CLIs
+:description: The command-line tools for AWS, Google Cloud, Oracle Cloud, Hetzner, Cloudflare Tunnel, Fly.io, Railway, Render, Koyeb, Neon and Supabase.
+
+One command-line tool per cloud or hosting service the workstation deploys
+to. Each logs in once through the browser and keeps its token under the home
+folder.
+
+== On the workstation
+
+* Installed by the `awscli`, `oci-cli`, `hcloud`, `cloudflared`, `flyctl`,
+  `railway`, `render`, `koyeb`, `neonctl` and `supabase` formulae and the
+  `gcloud-cli` cask.
+* Tokens stay out of the dotfiles: chezmoi manages none of the folders where
+  these tools keep their logins, such as `~/.aws` and `~/.config/gcloud`.
+* `supabase start` runs its local stack in Docker, so Colima must be running.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`aws sso login --profile work` |Log in to AWS through single sign-on
+|`aws sts get-caller-identity` |Show which AWS account and role are active
+|`gcloud auth login` |Log in to Google Cloud
+|`gcloud config configurations list` |List the Google Cloud accounts and projects set up
+|`hcloud context create <name>` |Add a Hetzner project with its API token
+|`hcloud server list` |List the Hetzner servers
+|`cloudflared tunnel --url http://localhost:8080` |Share a local service on a temporary public URL
+|`fly deploy` |Build and deploy the app in this folder to Fly.io
+|`fly logs` |Follow a Fly.io app's logs
+|`railway up` |Deploy this folder to Railway
+|`neonctl branches create --name dev` |Branch a Neon database, data included
+|`neonctl connection-string dev` |Print the connection string of a branch
+|`supabase start` |Run Supabase locally
+|`supabase migration new <name>` |Start a new SQL migration
+|`supabase db push` |Apply the migrations to the linked project
+|===
+
+== With zc-care
+
+The cloud CLIs sit under a `# Cloud` section of the Brewfile. A new one goes
+in the same section with its reason, and one you stop using leaves with its
+package:
+
+[source,console]
+----
+$ zc-care add -target packages -section Cloud -why "DigitalOcean from the command line" brew:doctl
+$ zc-care remove -target packages brew:railway
+----
+
+== See also
+
+* xref:toolbox/containers.adoc[Colima and Docker]
+* xref:toolbox/postgresql.adoc[PostgreSQL]
+* xref:toolbox/gh.adoc[GitHub CLI]

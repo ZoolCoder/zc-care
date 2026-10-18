@@ -1,0 +1,243 @@
+= Commands
+:description: Every zc-care command, flag and exit code.
+
+[cols="1,3"]
+|===
+| Command | What it does
+
+| `plan` | Read live state and list what would change. The default.
+| `apply [FILE]` | Make the changes, then plan again to verify. With a saved plan, exactly those.
+| `status` | What is in place per target, without diffing.
+| `list` | Every package, app, dotfile and runtime the config declares, one line each: its state, installed version, the app it configures, and why it is there. Then what is installed but declared nowhere.
+| `add ITEM` | Declare a package or runtime in one target's manifest, with why it is there. Installs nothing; `plan` and `apply` do.
+| `capture` | Print the manifest one target would declare to match this machine. Needs `-target`.
+| `validate` | Check the config offline.
+| `doctor` | Machine health: binary, system, config, the programs targets need, and each target. It also warns about weak security settings, keys without a passphrase, unsigned commits, secrets in the shell history and risky AI agent configs, each with its fix. xref:security.adoc#_what_doctor_checks[Every check].
+| `upgrade` | Save what is outdated to the state folder, then `apply -upgrade`. The review skill reads the snapshot to say what moved from what to what.
+| `history` | What was applied, newest first: when, which target, from the terminal, ZC Care or an agent, and whether it worked. Drift changes show here too.
+| `drift` | Plan, and save how many changes are outstanding to `~/.local/state/zc-care/drift.json`, which ZC Care shows. `-last` prints the saved one; `-plist` prints a launchd agent that runs it every morning.
+| `mcp` | The MCP server on standard input and output.
+| `version` | The version.
+|===
+
+== Flags
+
+[cols="1,3"]
+|===
+| `-config FILE` | Config file, or `-` for standard input.
+| `-target NAME` | Limit to this target; repeat for several.
+| `-out FILE` | `plan`: save the plan for `apply FILE`. `capture`: write the manifest to `FILE` instead of standard output.
+| `-force` | `capture -out`: overwrite `FILE` if it exists.
+| `-state LIST` | `list`: only these states, comma-separated, such as `outdated,not declared`.
+| `-kind LIST` | `list`: only these kinds, comma-separated, such as `cask,mas`.
+| `-adoc` | `list`: the declared packages and runtimes as an AsciiDoc page, one table per section.
+| `-why TEXT` | `add`: one line on why the item is there.
+| `-section NAME` | `add`: the manifest section to add it under; a new name starts a new section.
+| `-json` | `plan`, `status`, `list` and `doctor`: machine-readable.
+| `-exit-code` | `plan`: exit 2 for changes, 3 for manual-only.
+| `-upgrade` | `plan`, `apply`: also upgrade outdated packages and runtimes, as if every `packages` and `tools` target said `upgrade: true`.
+| `-only RESOURCE` | `plan`, `apply`: only the change to this resource, such as `brew:tmux`; repeat for several. A saved plan remembers `-upgrade` and `-only`.
+| `-yes` | `apply`: skip the confirmation prompt for deletions.
+|===
+
+== Inventory
+
+[source,console]
+----
+$ zc-care list
+TARGET    KIND     NAME                STATE     VERSION   APP       ABOUT
+brew      brew     starship            in place      1.26.0       -         Cross-shell prompt for astronauts
+brew      brew     tmux                outdated      3.7c -> 3.8  -         Terminal multiplexer
+brew      cask     ghostty             in place      1.3.1        Ghostty   Terminal emulator that uses platform UI and GPU
+brew      cask     google-chrome       missing       -            -         -
+brew      brew     jq                  not declared  1.8.1        -         Lightweight and flexible command-line JSON processor
+dotfiles  dotfile  .config/ghostty/config  in place  -            ghostty   -
+runtimes  runtime  node                in place      24.21.0      -         requested lts
+----
+
+States:
+
+* `in place`: installed, and nothing newer is known.
+* `outdated`: installed, and the manager has a newer version. A pinned
+  formula never shows as outdated.
+* `missing`: declared, not installed.
+* `differs`: a dotfile that does not match its source, or a script still to
+  run.
+* `manual`: an entry `zc-care` does not install.
+* `not declared`: installed on purpose, but no target declares it. For brew
+  these are formulae installed on request, casks, taps and App Store apps; a
+  dependency never shows.
+
+ABOUT is the item's why, from its manifest line, else the package manager's
+description; JSON has both, as `why` and `desc`, with the `section`. Versions
+and descriptions come from the package manager; see
+xref:providers.adoc[Providers]. A target that cannot be read is listed with its error. The reads run side by side,
+so a full list takes about two seconds on a Mac with a few hundred packages.
+
+[source,console]
+----
+$ zc-care list -state outdated
+$ zc-care list -state "not declared" -kind cask,mas
+----
+
+== Why each item is there
+
+A manifest says what is installed; its comments say why. A comment at the end
+of an entry's line is that entry's why. A comment line that opens a block,
+after a blank line or at the top of the file, is the heading of the section
+below it. A Brewfile heading can end in profile tags, such as
+`# Containers [developer]`, which ZC Care's xref:app.adoc#_choose_apps[app
+picker] reads.
+
+[source,ruby]
+----
+# Git
+brew "git-delta" # Side-by-side, syntax-highlighted git diffs
+brew "lazygit"   # Git in a terminal UI, opened from tmux with prefix g
+----
+
+The same works in apt and dnf package lists and in a mise config's
+`[tools]` table: `go = "1.26" # Builds zc-care`.
+
+`list`, ZC Care and the MCP `list` tool show the why. `list -adoc`
+turns it into a page that names every tool, links its homepage, and says why
+you have it; keep that page in your config repository and generate it again
+after a change:
+
+[source,console]
+----
+$ zc-care list -adoc > docs/software.adoc
+----
+
+== Add
+
+`add` writes one entry, with its why, into a target's manifest. It installs
+nothing: plan and apply do, so you review the change like any other edit.
+
+[source,console]
+----
+$ zc-care add -target packages -section Git -why "Fixup commits that find their target" brew:git-absorb
+added brew:git-absorb to /Users/me/config/Brewfile; review and install it with: zc-care plan -target packages
+$ zc-care add -target runtimes -why "Builds zc-care" runtime:go@1.26
+----
+
+* The item is `kind:name`: `brew`, `cask` or `tap` for a Brewfile, the
+  manager's name for apt and dnf, `runtime` for mise. A bare name is a
+  formula, a package or a runtime.
+* A formula or cask from a third-party tap, such as
+  `brew:cirruslabs/cli/tart`, brings its `tap` line too.
+* A runtime is `name@version`; without a version it asks for `latest`.
+* In a manifest with sections, `-section` is required, and the error lists
+  them. An item the manifest already declares is refused.
+* App Store apps need their id: write the `mas` line yourself.
+
+== Remove
+
+`remove` uninstalls one item now and drops its line from the manifest, so the
+next plan does not bring it back. Apply only ever adds; `remove` is how
+something leaves.
+
+[source,console]
+----
+$ zc-care remove -target packages brew:htop
+removed brew:htop and dropped it from /Users/me/config/Brewfile
+$ zc-care remove -target packages mas:409201541
+----
+
+* The item is `kind:name` as `list` shows it. An item the manifest does not
+  declare is still uninstalled, so leftovers go through the tool too.
+* An App Store app that is not declared is named by its id.
+
+== Capture
+
+`capture` writes the manifest that would declare what the machine has: a
+Brewfile for brew, one package per line for apt and dnf, and a `[tools]`
+table for mise. Use it to start a config from a machine you already set up,
+or to see what a manifest misses.
+
+[source,console]
+----
+$ zc-care capture -target brew > Brewfile.new
+$ zc-care capture -target brew -out Brewfile.new
+captured brew to Brewfile.new
+----
+
+It writes standard output unless you pass `-out`, and it refuses to replace a
+file without `-force`. Diff the result against your manifest and copy what
+you want; a capture lists everything installed on request, including what
+you only tried once.
+
+== Installs ask in the terminal
+
+Apply runs installers attached to your terminal, so `sudo`, a license prompt
+or an App Store sign-in can ask you. Their output goes to standard error, so
+`-json` output stays parseable.
+
+With no terminal, as under an AI agent or launchd, `sudo` asks for your
+password in a macOS dialog instead, through `SUDO_ASKPASS`; Touch ID still
+comes first when `sudo` is set up for it. A `SUDO_ASKPASS` you set yourself
+is left alone.
+
+== Deletions ask first
+
+A plan with a `DELETE` stops and asks you to type `yes`. Without a terminal,
+and without `-yes`, apply is cancelled. Agents never get `-yes`.
+
+== Drift watch
+
+`drift -plist` prints a launchd agent that runs `drift` at 9:00 (`-hour`
+moves it). Keep it in your dotfiles and loaded by a `services` target, like
+any other agent:
+
+[source,console]
+----
+$ zc-care drift -plist > Library/LaunchAgents/dev.zoolcoder.zc-care.drift.plist
+----
+
+The agent carries the `PATH` of the shell that printed it, since launchd
+starts agents with almost none. It only plans; nothing is applied. A change
+in the count is written to `history`; ZC Care counts the changes in its
+number, on the menu bar and in SketchyBar's `zccare` item.
+
+== Exit codes
+
+[cols="1,3"]
+|===
+| `0` | Nothing to do, or the apply converged and was verified.
+| `1` | Something failed.
+| `2` | With `-exit-code`: changes are outstanding.
+| `3` | With `-exit-code`: nothing left but `MANUAL` items.
+|===
+
+== JSON
+
+[source,console]
+----
+$ zc-care plan -json
+{
+  "changes": 1,
+  "manual": 1,
+  "actions": [
+    {
+      "op": "CREATE",
+      "target": "brew",
+      "resource": "cask:ghostty",
+      "detail": "install with brew",
+      "manual": false
+    },
+    {
+      "op": "MANUAL",
+      "target": "runtimes",
+      "resource": "trust",
+      "detail": "mise does not trust /Users/me/dotfiles/mise.toml; review it, then run mise trust /Users/me/dotfiles/mise.toml",
+      "manual": true
+    }
+  ]
+}
+----
+
+== Reference
+
+The usage text, as `zc-care help` prints it:
+
+include::partial$usage.adoc[]

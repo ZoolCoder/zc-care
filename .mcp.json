@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "zc-care": {
+      "command": "zc-care",
+      "args": ["mcp"]
+    }
+  }
+}

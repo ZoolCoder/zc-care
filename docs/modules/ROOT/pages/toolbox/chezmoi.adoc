@@ -1,0 +1,27 @@
+= chezmoi
+:description: chezmoi, the dotfiles engine behind the dotfiles provider.
+
+chezmoi applies a source folder of dotfiles to your home folder, with templates for what differs per machine and scripts for setup steps a file cannot express. zc-care drives it path by path, so a plan shows each file it would write.
+
+== On the workstation
+
+* Installed by the `chezmoi` formula.
+* The `home` target applies the config repo's `home/` in symlink mode: editing `~/.zshrc` edits the repo.
+* The `theme` target applies `assets/theme` from this repository: colours for the terminal, the bar and the command-line tools.
+* `run_onchange_` scripts set up git, macOS, the screen saver, scheduled jobs, app settings and Claude Code.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`zc-care plan -target home` |What would change in your dotfiles
+|`chezmoi diff` |The raw diff, if you want it
+|===
+
+== See also
+
+* xref:toolbox/mise.adoc[mise]
+* xref:toolbox/zsh.adoc[zsh, antidote and plugins]
+* https://www.chezmoi.io[chezmoi website]

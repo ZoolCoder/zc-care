@@ -1,0 +1,24 @@
+= zoxide
+:description: zoxide, a smarter cd that learns the folders you use.
+
+zoxide remembers the folders you visit and jumps to the best match for a few letters. `z zc-w` lands in zc-care from anywhere.
+
+== On the workstation
+
+* Installed by the `zoxide` formula and hooked into zsh.
+
+== Keys and commands
+
+[%header,cols="1,2"]
+|===
+|Key or command |Does
+
+|`z part` |Jump to the most used folder matching `part`
+|`zi` |Pick among the matches with fzf
+|===
+
+== See also
+
+* xref:toolbox/fzf.adoc[fzf]
+* xref:toolbox/zsh.adoc[zsh, antidote and plugins]
+* https://github.com/ajeetdsouza/zoxide[zoxide website]
