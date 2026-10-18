@@ -297,3 +297,29 @@ func TestSkipAddsListsAndUndoes(t *testing.T) {
 		t.Fatal("a bare name was accepted")
 	}
 }
+
+func TestInitWritesAStarterThatPlans(t *testing.T) {
+	scratch := t.TempDir()
+	t.Setenv(config.EnvSkip, filepath.Join(scratch, "skip"))
+	t.Setenv(config.EnvProfiles, filepath.Join(scratch, "profiles"))
+	dir := filepath.Join(scratch, "cfg")
+	out, err := run(t, "", "init", "-profile", "everyday", "-role", "work", "-dir", dir, "-json")
+	if err != nil || !strings.Contains(out, `"profiles": [`) || !strings.Contains(out, `"cask:ghostty"`) {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	if out, err := run(t, "", "profile"); err != nil || out != "everyday\nwork\n" {
+		t.Fatalf("profile: %v\n%s", err, out)
+	}
+	if out, err := run(t, "", "validate", "-config", filepath.Join(dir, "zc-care.yaml")); err != nil {
+		t.Fatalf("validate: %v\n%s", err, out)
+	}
+	if _, err := run(t, "", "init", "-profile", "everyday", "-dir", dir); err == nil {
+		t.Fatal("init replaced a config without -force")
+	}
+	if out, err := run(t, "", "profile", "-clear", "-json"); err != nil || out != "[]\n" {
+		t.Fatalf("clear: %v\n%s", err, out)
+	}
+	if out, err := run(t, "", "init", "-list"); err != nil || !strings.Contains(out, "developer") {
+		t.Fatalf("list: %v\n%s", err, out)
+	}
+}

@@ -1,0 +1,5 @@
+# The runtimes zc-care init pins for a developer Mac. Change a version, then
+# run zc-care plan.
+[tools]
+node = "lts"
+python = "3.13"

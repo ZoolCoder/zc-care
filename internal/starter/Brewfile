@@ -1,0 +1,44 @@
+# The apps zc-care init starts a Mac with. A comment at the end of a line
+# says why the entry is there; a comment after a blank line names the
+# section below it. A heading may end in [profile, ...]: those sections are
+# for Macs with one of the profiles, the rest are for every Mac.
+# Add entries with: zc-care add -target apps -section NAME -why "..." KIND:NAME
+
+# Essentials
+cask "rectangle" # snap windows to halves and corners with the keyboard
+cask "the-unarchiver" # opens zip, rar, 7z and every other archive
+cask "bitwarden" # a password manager that syncs to your phone
+cask "iina" # plays any video file
+
+# Everyday [everyday]
+cask "firefox" # a private web browser
+cask "spotify" # music and podcasts
+cask "whatsapp" # messages and calls
+cask "zoom" # video meetings
+cask "libreoffice" # documents, spreadsheets and slides
+
+# Terminal [developer]
+brew "git" # version control
+brew "gh" # GitHub from the terminal: pull requests, issues, keys
+brew "mise" # installs the runtimes mise.toml pins
+brew "starship" # a fast prompt that shows the branch and runtime
+brew "zoxide" # cd to a folder by part of its name
+brew "fzf" # fuzzy finder for files and history
+brew "ripgrep" # fast search through code
+brew "bat" # cat with syntax colours
+brew "eza" # ls with git status and icons
+brew "jq" # reads and filters JSON
+cask "ghostty" # a fast terminal
+
+# Developer apps [developer]
+cask "visual-studio-code" # code editor
+cask "orbstack" # Docker containers and Linux machines, light on battery
+cask "bruno" # tries HTTP APIs; collections live in git
+
+# Creative [creative]
+cask "figma" # interface and graphic design
+cask "blender" # 3D modelling and animation
+cask "gimp" # photo editing
+cask "inkscape" # vector drawing
+cask "obs" # screen recording and live streams
+cask "audacity" # audio recording and editing

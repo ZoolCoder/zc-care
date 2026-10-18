@@ -1,0 +1,55 @@
+# Made by zc-care init. Edit it, then run zc-care plan; apply asks before
+# it changes anything. A target with profiles is for Macs with one of them;
+# zc-care profile shows and changes this Mac's.
+version: 1
+
+targets:
+  # apps installs what the Brewfile declares, and never uninstalls. The
+  # sections for other profiles start on this Mac's skip list; ZC Care's
+  # Choose Apps changes the pick.
+  - name: apps
+    provider: packages
+    file: Brewfile
+
+  # runtimes installs what mise.toml pins.
+  - name: runtimes
+    provider: tools
+    file: mise.toml
+    profiles: [developer]
+
+  # macos keeps the settings every Mac gets: AirDrop for contacts only,
+  # file extensions and the path bar in Finder.
+  - name: macos
+    provider: settings
+    defaults:
+      com.apple.sharingd:
+        DiscoverableMode: Contacts Only
+      NSGlobalDomain:
+        AppleShowAllExtensions: true
+      com.apple.finder:
+        ShowPathbar: true
+
+  # macos-developer: hidden files, a fast key repeat, and no smart quotes
+  # or dashes that break code pasted into a terminal.
+  - name: macos-developer
+    provider: settings
+    profiles: [developer]
+    defaults:
+      com.apple.finder:
+        AppleShowAllFiles: true
+      NSGlobalDomain:
+        KeyRepeat: 2
+        InitialKeyRepeat: 15
+        ApplePressAndHoldEnabled: false
+        NSAutomaticQuoteSubstitutionEnabled: false
+        NSAutomaticDashSubstitutionEnabled: false
+
+  # macos-everyday: tap to click, and a Dock without recent apps.
+  - name: macos-everyday
+    provider: settings
+    profiles: [everyday]
+    defaults:
+      com.apple.AppleMultitouchTrackpad:
+        Clicking: true
+      com.apple.dock:
+        show-recents: false
