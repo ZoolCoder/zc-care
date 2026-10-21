@@ -22,6 +22,9 @@ type Result struct {
 	Detail string
 	// Warn marks a finding to look at rather than a failure.
 	Warn bool
+	// Fix is the commands that repair a failed check, when commands can; the
+	// rest stay advice in Detail.
+	Fix [][]string
 }
 
 const firewall = "/usr/libexec/ApplicationFirewall/socketfilterfw"
@@ -117,7 +120,7 @@ func result(name string, ok bool, fix string) Result {
 	if ok {
 		return Result{Name: name, OK: true}
 	}
-	return Result{Name: name, Detail: fix}
+	return Result{Name: name, Detail: fix, Fix: fixes[name]}
 }
 
 // exposed lists servers listening on every network interface, which any
