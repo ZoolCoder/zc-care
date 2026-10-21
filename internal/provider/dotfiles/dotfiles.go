@@ -206,11 +206,6 @@ func (p Provider) Items(ctx context.Context, t config.Target) ([]provider.Item, 
 	return items, nil
 }
 
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
-}
-
 func destination(t config.Target) (string, error) {
 	if t.Destination != "" {
 		return t.Destination, nil

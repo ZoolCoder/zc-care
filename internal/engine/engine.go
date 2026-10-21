@@ -238,13 +238,9 @@ func (e *Engine) Status(ctx context.Context) []TargetStatus {
 		defer func() { out[n] = row }()
 		prov, err := e.provider(t)
 		if err == nil {
-			if m, ok := prov.(provider.Measurer); ok {
-				var live provider.Live
-				live, err = m.Measure(ctx, t)
-				row.Summary, row.InPlace, row.Declared = live.Summary, live.InPlace, live.Declared
-			} else {
-				row.Summary, err = prov.Status(ctx, t)
-			}
+			var live provider.Live
+			live, err = prov.Measure(ctx, t)
+			row.Summary, row.InPlace, row.Declared = live.Summary, live.InPlace, live.Declared
 		}
 		if err != nil {
 			row.Error = err.Error()
@@ -351,19 +347,32 @@ func itemKey(i provider.Item) string {
 	return key
 }
 
-// Add declares e in the one selected target's manifest.
-func (e *Engine) Add(entry provider.Entry) (config.Target, error) {
+// single is the one selected target and its provider as a C, for the
+// commands that act on exactly one. cannot is the error for a provider that
+// is not a C; it may use the provider's name as %[1]s and the target's file
+// as %[2]s.
+func single[C any](e *Engine, verb, cannot string) (config.Target, C, error) {
+	var zero C
 	if len(e.targets) != 1 {
-		return config.Target{}, fmt.Errorf("add needs exactly one target, %d selected; use -target", len(e.targets))
+		return config.Target{}, zero, fmt.Errorf("%s needs exactly one target, %d selected; use -target", verb, len(e.targets))
 	}
 	t := e.targets[0]
 	prov, err := e.provider(t)
 	if err != nil {
-		return t, err
+		return t, zero, err
 	}
-	a, ok := prov.(provider.Adder)
+	c, ok := prov.(C)
 	if !ok {
-		return t, fmt.Errorf("provider %s cannot add items; edit %s by hand", t.Provider, t.File)
+		return t, zero, fmt.Errorf(cannot, t.Provider, t.File)
+	}
+	return t, c, nil
+}
+
+// Add declares e in the one selected target's manifest.
+func (e *Engine) Add(entry provider.Entry) (config.Target, error) {
+	t, a, err := single[provider.Adder](e, "add", "provider %[1]s cannot add items; edit %[2]s by hand")
+	if err != nil {
+		return t, err
 	}
 	return t, a.Add(t, entry)
 }
@@ -371,17 +380,9 @@ func (e *Engine) Add(entry provider.Entry) (config.Target, error) {
 // PlanRemove is the plan that uninstalls an item and drops it from the one
 // selected target's manifest. It changes nothing until the plan is applied.
 func (e *Engine) PlanRemove(kind, name string) (plan.Plan, error) {
-	if len(e.targets) != 1 {
-		return plan.Plan{}, fmt.Errorf("remove needs exactly one target, %d selected; use -target", len(e.targets))
-	}
-	t := e.targets[0]
-	prov, err := e.provider(t)
+	t, r, err := single[provider.Remover](e, "remove", "provider %[1]s cannot remove items")
 	if err != nil {
 		return plan.Plan{}, err
-	}
-	r, ok := prov.(provider.Remover)
-	if !ok {
-		return plan.Plan{}, fmt.Errorf("provider %s cannot remove items", t.Provider)
 	}
 	a, err := r.PlanRemove(t, kind, name)
 	return plan.Plan{Actions: []plan.Action{a}}, err
@@ -390,17 +391,9 @@ func (e *Engine) PlanRemove(kind, name string) (plan.Plan, error) {
 // Capture writes the manifest the one selected target would declare to
 // match this machine.
 func (e *Engine) Capture(ctx context.Context) (config.Target, []byte, error) {
-	if len(e.targets) != 1 {
-		return config.Target{}, nil, fmt.Errorf("capture needs exactly one target, %d selected; use -target", len(e.targets))
-	}
-	t := e.targets[0]
-	prov, err := e.provider(t)
+	t, c, err := single[provider.Capturer](e, "capture", "provider %[1]s cannot capture")
 	if err != nil {
 		return t, nil, err
-	}
-	c, ok := prov.(provider.Capturer)
-	if !ok {
-		return t, nil, fmt.Errorf("provider %s cannot capture", t.Provider)
 	}
 	data, err := c.Capture(ctx, t)
 	return t, data, err

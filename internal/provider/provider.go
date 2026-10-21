@@ -20,8 +20,9 @@ type Provider interface {
 	// Plan compares live state with t and returns what would change. It must
 	// not write.
 	Plan(ctx context.Context, t config.Target) ([]plan.Action, error)
-	// Status is a one-line summary of live state, without diffing.
-	Status(ctx context.Context, t config.Target) (string, error)
+	// Measure counts what is in place, so status and ZC Care can show
+	// progress; Live.Summary is the one-line form.
+	Measure(ctx context.Context, t config.Target) (Live, error)
 }
 
 // Live is a target's measured state: how many of the items it declares are
@@ -29,12 +30,6 @@ type Provider interface {
 type Live struct {
 	InPlace, Declared int
 	Summary           string
-}
-
-// Measurer is a Provider that can count what is in place, so status and
-// ZC Care can show progress. Status stays the one-line form of the same reading.
-type Measurer interface {
-	Measure(ctx context.Context, t config.Target) (Live, error)
 }
 
 // Requirer is a Provider that runs other programs; doctor shows whether

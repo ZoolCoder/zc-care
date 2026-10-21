@@ -147,11 +147,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	return live, nil
 }
 
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
-}
-
 // Items is each service, then each agent, as declared.
 func (p Provider) Items(ctx context.Context, t config.Target) ([]provider.Item, error) {
 	services, err := p.read(ctx, t)

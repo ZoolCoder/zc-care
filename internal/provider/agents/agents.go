@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/zoolcoder/zc-care/internal/config"
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/provider"
 	"github.com/zoolcoder/zc-care/internal/sh"
@@ -77,7 +78,7 @@ func Load(path string) (Manifest, error) {
 	var errs []error
 	for _, c := range m.Clients {
 		if _, ok := clients[c]; !ok {
-			errs = append(errs, fmt.Errorf("%s: client %q is not one of %s", path, c, strings.Join(sortedKeys(clients), ", ")))
+			errs = append(errs, fmt.Errorf("%s: client %q is not one of %s", path, c, strings.Join(slices.Sorted(maps.Keys(clients)), ", ")))
 		}
 	}
 	for name, s := range m.Servers {
@@ -86,7 +87,7 @@ func Load(path string) (Manifest, error) {
 		}
 	}
 	if len(m.Clients) == 0 {
-		m.Clients = sortedKeys(clients)
+		m.Clients = slices.Sorted(maps.Keys(clients))
 	}
 	dir := filepath.Dir(path)
 	abs := func(p string) string {
@@ -117,7 +118,7 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 	var out []change
 	for _, name := range m.Clients {
 		c := clients[name]
-		for _, s := range sortedKeys(m.Servers) {
+		for _, s := range slices.Sorted(maps.Keys(m.Servers)) {
 			ch, err := p.server(t.Name, name, c, s, m.Servers[s])
 			if err != nil {
 				return nil, err
@@ -183,11 +184,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	}
 	m.Summary = fmt.Sprintf("%d of %d agent settings in place", m.InPlace, m.Declared)
 	return m, nil
-}
-
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	m, err := p.Measure(ctx, t)
-	return m.Summary, err
 }
 
 // Programs lists ollama when the manifest asks for models.
@@ -325,8 +321,8 @@ func tree(dir string) (map[string][]byte, error) {
 	return files, err
 }
 
-// writeFile replaces path in one rename, so an agent that reads the file at
-// the same moment sees the old or the new content, never half.
+// writeFile writes path, and its folder if missing, keeping an existing
+// file's mode and else private to the user.
 func writeFile(path string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -335,30 +331,11 @@ func writeFile(path string, b []byte) error {
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return manifest.WriteFile(path, b, mode)
 }
 
 // jsonEqual compares two JSON values whatever their key order.
 func jsonEqual(a, b []byte) bool {
 	var x, y any
 	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	return slices.Sorted(maps.Keys(m))
 }

@@ -289,11 +289,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	return live, nil
 }
 
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
-}
-
 // Items is the wallpaper, the screen saver page and the accent colour, as the
 // target sets them.
 func (p Provider) Items(ctx context.Context, t config.Target) ([]provider.Item, error) {

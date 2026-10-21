@@ -19,7 +19,9 @@ func (stuck) Plan(context.Context, config.Target) ([]plan.Action, error) {
 	return []plan.Action{{Op: plan.OpCreate, Target: "t", Resource: "r",
 		Do: func(context.Context) error { return nil }}}, nil
 }
-func (stuck) Status(context.Context, config.Target) (string, error) { return "stuck", nil }
+func (stuck) Measure(context.Context, config.Target) (provider.Live, error) {
+	return provider.Live{Summary: "stuck"}, nil
+}
 
 func cfg(dir string) config.Config {
 	return config.Config{Version: 1, Dir: dir, Targets: []config.Target{
@@ -90,7 +92,9 @@ func (s scripted) Plan(_ context.Context, t config.Target) ([]plan.Action, error
 	}
 	return []plan.Action{{Op: plan.OpCreate, Target: t.Name, Resource: "same"}}, nil
 }
-func (scripted) Status(context.Context, config.Target) (string, error) { return "", nil }
+func (scripted) Measure(context.Context, config.Target) (provider.Live, error) {
+	return provider.Live{}, nil
+}
 
 func twoTargets() config.Config {
 	return config.Config{Version: 1, Targets: []config.Target{
@@ -154,7 +158,7 @@ func TestSelectAndMissingProvider(t *testing.T) {
 	}
 }
 
-// counted measures, so Status must fill the counts from Measure.
+// counted has counts, so Status must fill them from Measure.
 type counted struct{ stuck }
 
 func (counted) Measure(context.Context, config.Target) (provider.Live, error) {

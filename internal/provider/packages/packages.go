@@ -198,11 +198,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	return live, nil
 }
 
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
-}
-
 func installer(i item) string {
 	if i.Kind == "mas" {
 		return "mas"

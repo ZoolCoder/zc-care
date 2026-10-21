@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,7 +32,7 @@ func (Provider) Plan(_ context.Context, t config.Target) ([]plan.Action, error) 
 		return nil, err
 	}
 	var actions []plan.Action
-	for _, name := range sortedKeys(t.Files) {
+	for _, name := range slices.Sorted(maps.Keys(t.Files)) {
 		want := []byte(t.Files[name])
 		have, exists := live[name]
 		switch {
@@ -43,7 +44,7 @@ func (Provider) Plan(_ context.Context, t config.Target) ([]plan.Action, error) 
 		}
 	}
 	if t.Prune {
-		for _, name := range sortedKeys(live) {
+		for _, name := range slices.Sorted(maps.Keys(live)) {
 			if _, declared := t.Files[name]; !declared {
 				actions = append(actions, remove(t, name))
 			}
@@ -75,7 +76,7 @@ func (Provider) Items(_ context.Context, t config.Target) ([]provider.Item, erro
 		return nil, err
 	}
 	items := make([]provider.Item, 0, len(t.Files))
-	for _, name := range sortedKeys(t.Files) {
+	for _, name := range slices.Sorted(maps.Keys(t.Files)) {
 		item := provider.Item{Name: name, Kind: "file", State: provider.InPlace}
 		if have, ok := live[name]; !ok {
 			item.State = provider.Missing
@@ -85,11 +86,6 @@ func (Provider) Items(_ context.Context, t config.Target) ([]provider.Item, erro
 		items = append(items, item)
 	}
 	return items, nil
-}
-
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	m, err := p.Measure(ctx, t)
-	return m.Summary, err
 }
 
 // read returns every regular file under dir, by slash path. A directory that
@@ -146,13 +142,4 @@ func remove(t config.Target, name string) plan.Action {
 			}
 			return nil
 		}}
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
 }

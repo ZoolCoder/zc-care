@@ -222,11 +222,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	return live, nil
 }
 
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
-}
-
 func sorted(m map[tool]installed) []tool {
 	keys := make([]tool, 0, len(m))
 	for k := range m {
