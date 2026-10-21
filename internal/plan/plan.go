@@ -36,7 +36,10 @@ type Action struct {
 	// tool did not write, such as an edit made outside it, or that runs a
 	// script. It needs the same confirmation as a delete.
 	Destructive bool
-	Do          func(context.Context) error
+	// Before, when set, reads the state Do is about to replace, right before
+	// it runs, so undo can put it back. A failure does not stop Do.
+	Before func(context.Context) (Undo, error)
+	Do     func(context.Context) error
 }
 
 func (a Action) destroys() bool { return a.Op == OpDelete || a.Destructive }

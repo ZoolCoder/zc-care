@@ -102,3 +102,10 @@ type Remover interface {
 type Capturer interface {
 	Capture(ctx context.Context, t config.Target) ([]byte, error)
 }
+
+// Reverter is a Provider that can turn the Undo records it made into the
+// actions that put the old state back. The records are in the order to undo
+// them, newest change first.
+type Reverter interface {
+	Revert(undos []plan.Undo) []plan.Action
+}
