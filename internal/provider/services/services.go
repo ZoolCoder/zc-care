@@ -118,7 +118,14 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 			a.Do = func(ctx context.Context) error { return p.r.Run(ctx, "brew", "services", "restart", s.name) }
 		default:
 			a.Detail = "load " + filepath.Base(s.file) + " into launchd"
-			a.Do = func(ctx context.Context) error { return p.r.Run(ctx, "launchctl", "bootstrap", p.domain(), s.file) }
+			// A disabled agent makes bootstrap fail with "5: Input/output
+			// error", so clear the flag first. enable is a no-op when set.
+			a.Do = func(ctx context.Context) error {
+				if err := p.r.Run(ctx, "launchctl", "enable", p.domain()+"/"+s.name); err != nil {
+					return err
+				}
+				return p.r.Run(ctx, "launchctl", "bootstrap", p.domain(), s.file)
+			}
 		}
 		actions = append(actions, a)
 	}
