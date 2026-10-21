@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -22,13 +23,18 @@ import (
 
 // runDoctor checks the install: the binary on PATH, the config, and that
 // every target's live state can be read. On a Mac it also checks security.
-func runDoctor(args []string, _ io.Reader, stdout, stderr io.Writer) error {
+func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	path := flags.String("config", "", "config file")
 	asJSON := flags.Bool("json", false, "machine-readable report")
+	fix := flags.Bool("fix", false, "plan the fixes for what doctor found, and apply them after a yes")
+	yes := flags.Bool("yes", false, "with -fix: skip the confirmation prompt")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *fix && *asJSON {
+		return errors.New("-fix prints a plan and asks; it cannot also be -json")
 	}
 	*path = findConfig(*path)
 
@@ -63,7 +69,8 @@ func runDoctor(args []string, _ io.Reader, stdout, stderr io.Writer) error {
 		}
 		addShadows(r, cfg)
 	}
-	for _, res := range security.New(sh.System()).Run(context.Background()) {
+	found := security.New(sh.System()).Run(context.Background())
+	for _, res := range found {
 		addSecurity(r, "security ", res)
 	}
 	// Keys, commits, shell history and AI configs live in the home folder on
@@ -75,7 +82,13 @@ func runDoctor(args []string, _ io.Reader, stdout, stderr io.Writer) error {
 	for _, res := range user.AI() {
 		addSecurity(r, "ai ", res)
 	}
-	return r.Write(stdout, *asJSON)
+	// A failed check makes Write return an error, but the fixes are still
+	// worth offering.
+	reportErr := r.Write(stdout, *asJSON)
+	if !*fix {
+		return reportErr
+	}
+	return errors.Join(reportErr, fixFindings(context.Background(), found, sh.System(), *yes, stdin, stdout))
 }
 
 // addShadows checks that the shell runs each tools target's commands from
@@ -88,7 +101,7 @@ func addShadows(r *doctor.Report, cfg config.Config) {
 		return
 	}
 	for _, t := range cfg.Targets {
-		if t.Provider != "tools" {
+		if t.Provider != "tools" || !t.For(cfg.Profiles) {
 			continue
 		}
 		shadows, err := tools.Shadowed(context.Background(), runner, filepath.Dir(cfg.Resolve(t).File), exec.LookPath)

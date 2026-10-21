@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/zoolcoder/zc-care/internal/config"
 	"github.com/zoolcoder/zc-care/internal/engine"
@@ -51,7 +53,9 @@ Usage:
   ` + name + ` list     [flags]        every package, dotfile and runtime, with versions
   ` + name + ` capture  -target t      write t's manifest from what this machine has
   ` + name + ` validate [flags]        check the config offline
-  ` + name + ` doctor   [-json]        health: system, config, programs, targets
+  ` + name + ` doctor   [-json] [-fix] health: system, config, programs, targets; -fix plans
+                                 the fixes it can make
+  ` + name + ` undo     [-n N] [-plan] revert the last apply, from what it replaced
   ` + name + ` upgrade  [flags]        save what is outdated, then upgrade it
   ` + name + ` history  [-n 20] [-json] what was applied, newest first
   ` + name + ` drift    [-last] [-json] count what differs from the config, and save it;
@@ -70,11 +74,14 @@ Flags:
   -config string   config file, or "-" for standard input; default: $` + envConfig + `,
                    then ./` + name + `.yaml, then ~/.config/` + name + `/` + name + `.yaml
   -target value    limit to this target; repeat for several
-  -yes             skip the confirmation prompt for deletions
+  -yes             skip the confirmation prompt for deletions, overwrites of outside
+                   edits and scripts
   -exit-code       plan: exit 2 for changes, 3 for manual-only
   -upgrade         plan and apply: also upgrade outdated packages and runtimes
   -only value      plan and apply: only the change to this resource, such as
                    brew:tmux; repeat for several
+  -remove item     plan and apply: only uninstall this item, kind:name, and drop it
+                   from -target's manifest
   -json            plan, status and list: machine-readable
   -out string      plan: save the plan, to apply exactly what you reviewed;
                    capture: write the manifest to this file, not stdout
@@ -83,6 +90,9 @@ Flags:
   -kind list       list: only these kinds, comma-separated (brew,cask,dotfile,...)
   -adoc            list: the declared packages and runtimes, with why each is
                    there, as an AsciiDoc page
+  -fix             doctor: plan the fixes it can make, and apply them after a yes
+  -n N             undo: revert the last N applies (default 1); -id picks one by
+                   the id -list shows; -plan shows the reverts and changes nothing
 `
 
 func usage() string {
@@ -143,107 +153,147 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runHistory(args, stdin, stdout, stderr)
 	case "drift":
 		return runDrift(args, stdin, stdout, stderr)
+	case "undo":
+		return runUndo(args, stdin, stdout, stderr)
 	case "plan", "apply", "status", "list", "capture", "validate":
-	default:
-		if run, ok := optional[cmd]; ok {
-			return run(args, stdin, stdout, stderr)
-		}
-		fmt.Fprint(stderr, usage())
-		return fmt.Errorf("unknown command %q", cmd)
+		return runConfigured(cmd, args, stdin, stdout, stderr)
 	}
+	if run, ok := optional[cmd]; ok {
+		return run(args, stdin, stdout, stderr)
+	}
+	fmt.Fprint(stderr, usage())
+	return fmt.Errorf("unknown command %q", cmd)
+}
 
-	flags := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
-	path := flags.String("config", "", "config file")
-	yes := flags.Bool("yes", false, "skip the deletion prompt")
-	exitCode := flags.Bool("exit-code", false, "exit 2 for changes, 3 for manual-only")
-	asJSON := flags.Bool("json", false, "machine-readable output")
-	out := flags.String("out", "", "save the plan, or the captured manifest, to this file")
-	force := flags.Bool("force", false, "capture: overwrite the -out file")
-	states := flags.String("state", "", "list: only these states")
-	kinds := flags.String("kind", "", "list: only these kinds")
-	adoc := flags.Bool("adoc", false, "list: the declared packages and runtimes as an AsciiDoc page")
-	upgrade := flags.Bool("upgrade", false, "also upgrade outdated packages and runtimes")
+// cliFlags is every flag the config-driven commands take.
+type cliFlags struct {
+	path, out, states, kinds, via, remove string
+	yes, exitCode, asJSON                 bool
+	force, adoc, upgrade                  bool
+	targets, only                         targetList
+	file                                  string
+}
+
+func parseCLIFlags(cmd string, args []string, stderr io.Writer) (cliFlags, error) {
+	var f cliFlags
+	flags := newFlags(cmd, stderr)
+	flags.StringVar(&f.path, "config", "", "config file")
+	flags.BoolVar(&f.yes, "yes", false, "skip the deletion prompt")
+	flags.BoolVar(&f.exitCode, "exit-code", false, "exit 2 for changes, 3 for manual-only")
+	flags.BoolVar(&f.asJSON, "json", false, "machine-readable output")
+	flags.StringVar(&f.out, "out", "", "save the plan, or the captured manifest, to this file")
+	flags.BoolVar(&f.force, "force", false, "capture: overwrite the -out file")
+	flags.StringVar(&f.states, "state", "", "list: only these states")
+	flags.StringVar(&f.kinds, "kind", "", "list: only these kinds")
+	flags.BoolVar(&f.adoc, "adoc", false, "list: the declared packages and runtimes as an AsciiDoc page")
+	flags.BoolVar(&f.upgrade, "upgrade", false, "also upgrade outdated packages and runtimes")
 	// Not in the usage text: the MCP server sets it, so history tells an
 	// agent's apply from one typed at a terminal.
-	via := flags.String("via", "the terminal", "apply: who asked, for the history")
-	var targets, only targetList
-	flags.Var(&targets, "target", "limit to this target")
-	flags.Var(&only, "only", "only the change to this resource")
+	flags.StringVar(&f.via, "via", "the terminal", "apply: who asked, for the history")
+	flags.StringVar(&f.remove, "remove", "", "only uninstall this item, kind:name")
+	flags.Var(&f.targets, "target", "limit to this target")
+	flags.Var(&f.only, "only", "only the change to this resource")
 	if err := flags.Parse(args); err != nil {
+		return f, err
+	}
+	f.path = findConfig(f.path)
+	f.file = flags.Arg(0)
+	return f, nil
+}
+
+// runConfigured runs a command that reads the config: plan, apply, status,
+// list, capture and validate.
+func runConfigured(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	f, err := parseCLIFlags(cmd, args, stderr)
+	if err != nil {
 		return err
 	}
-	*path = findConfig(*path)
-
-	cfg, err := config.Load(*path, stdin)
+	cfg, err := config.Load(f.path, stdin)
 	if err != nil {
 		return err
 	}
 	if cmd == "validate" {
-		_, err := fmt.Fprintf(stdout, "%s: %d target(s), valid\n", *path, len(cfg.Targets))
+		if err := validateManifests(cfg); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(stdout, "%s: %d target(s), valid\n", f.path, len(cfg.Targets))
 		return err
 	}
 
-	// A saved plan is re-planned for the targets it was made for, so a bare
-	// `apply file` checks the plan that was reviewed and not a bigger one.
 	var saved *plan.Saved
-	if file := flags.Arg(0); cmd == "apply" && file != "" {
-		s, err := readSavedPlan(file)
-		if err != nil {
+	if cmd == "apply" && f.file != "" {
+		if saved, err = f.adoptSavedPlan(); err != nil {
 			return err
 		}
-		if len(targets) == 0 {
-			targets = s.Targets
-		} else if !slices.Equal(targets, s.Targets) {
-			return fmt.Errorf("this plan was saved for -target %v; apply it with the same selection, or none", s.Targets)
-		}
-		if len(only) == 0 {
-			only = s.Only
-		} else if !slices.Equal(only, s.Only) {
-			return fmt.Errorf("this plan was saved for -only %v; apply it with the same selection, or none", s.Only)
-		}
-		*upgrade = *upgrade || s.Upgrade
-		saved = &s
 	}
-	if *upgrade {
+	if f.upgrade {
 		upgradeAll(&cfg)
 	}
 
-	// Installers talk through this command's streams, never the process's:
-	// under mcp, standard output is the protocol. Their output goes to stderr
-	// so -json output stays parseable.
-	runner := sh.Exec{Stdin: stdin, Stdout: stderr, Stderr: stderr}
-	eng, err := engine.New(cfg, engine.With(runner), targets)
+	eng, err := newEngine(cfg, f.targets, stdin, stderr)
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	// Ctrl-C stops apply between actions, so the ones that ran are still logged.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	if cmd == "status" {
-		return writeStatus(stdout, eng.Status(ctx), *asJSON)
-	}
-	if cmd == "list" && *adoc {
-		return writeAdoc(stdout, eng.Items(ctx))
-	}
-	if cmd == "list" {
-		return writeItems(stdout, filterItems(eng.Items(ctx), *states, *kinds), *asJSON)
-	}
-	if cmd == "capture" {
-		return runCapture(ctx, eng, *out, *force, stdout)
+	switch cmd {
+	case "status":
+		return writeStatus(stdout, eng.Status(ctx), f.asJSON)
+	case "list":
+		if f.adoc {
+			return writeAdoc(stdout, eng.Items(ctx))
+		}
+		return writeItems(stdout, filterItems(eng.Items(ctx), f.states, f.kinds), f.asJSON)
+	case "capture":
+		return runCapture(ctx, eng, f.out, f.force, stdout)
 	}
 
-	p, err := eng.Plan(ctx)
+	p, err := planFor(ctx, eng, f.remove)
 	if err != nil {
 		return err
 	}
-	p = p.Only(only)
+	p = p.Only(f.only)
 	if cmd == "plan" {
-		s := p.Snapshot(targets)
-		s.Upgrade, s.Only = *upgrade, only
-		return runPlan(p, s, *out, *asJSON, *exitCode, stdout, stderr)
+		s := p.Snapshot(f.targets)
+		s.Upgrade, s.Only, s.Remove = f.upgrade, f.only, f.remove
+		return runPlan(p, s, f.out, f.asJSON, f.exitCode, stdout, stderr)
 	}
+	return runApply(ctx, eng, p, saved, f, stdin, stdout)
+}
 
+// adoptSavedPlan reads the plan file and takes its targets, -only selection
+// -remove item and upgrade from it. A saved plan is re-planned for the targets it was
+// made for, so a bare `apply file` checks the plan that was reviewed and not
+// a bigger one.
+func (f *cliFlags) adoptSavedPlan() (*plan.Saved, error) {
+	s, err := readSavedPlan(f.file)
+	if err != nil {
+		return nil, err
+	}
+	if len(f.targets) == 0 {
+		f.targets = s.Targets
+	} else if !slices.Equal(f.targets, s.Targets) {
+		return nil, fmt.Errorf("this plan was saved for -target %v; apply it with the same selection, or none", s.Targets)
+	}
+	if len(f.only) == 0 {
+		f.only = s.Only
+	} else if !slices.Equal(f.only, s.Only) {
+		return nil, fmt.Errorf("this plan was saved for -only %v; apply it with the same selection, or none", s.Only)
+	}
+	if f.remove == "" {
+		f.remove = s.Remove
+	} else if f.remove != s.Remove {
+		return nil, fmt.Errorf("this plan was saved for -remove %q; apply it with the same item, or none", s.Remove)
+	}
+	f.upgrade = f.upgrade || s.Upgrade
+	return &s, nil
+}
+
+// runApply shows p, asks before deleting anything, applies it and records
+// the run.
+func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.Saved, f cliFlags, stdin io.Reader, stdout io.Writer) error {
 	if saved != nil {
 		if err := saved.Matches(p); err != nil {
 			return err
@@ -255,18 +305,64 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(p.Executable()) == 0 {
 		return nil
 	}
-	if p.Destructive() && !*yes {
-		if *path == "-" {
-			return errors.New("this plan deletes things and the config came from stdin; pass -yes to confirm")
+	if p.Destructive() && !f.yes {
+		if f.path == "-" {
+			return errors.New("this plan deletes things, overwrites outside edits or runs scripts, and the config came from stdin; pass -yes to confirm")
 		}
-		if !confirm(stdin, stdout) {
+		if !confirm(stdin, stdout, destructiveWhy) {
 			return errCancelled
 		}
 	}
 	fmt.Fprintln(stdout)
-	err = eng.Apply(ctx, p, stdout)
-	recordApply(p, *via, err)
+	outcomes, err := eng.Apply(ctx, p, stdout)
+	recordApply(outcomes, f.via)
 	return err
+}
+
+// planFor is the plan for the config, or with remove set, the one change that
+// uninstalls that item.
+func planFor(ctx context.Context, eng *engine.Engine, remove string) (plan.Plan, error) {
+	if remove == "" {
+		return eng.Plan(ctx)
+	}
+	kind, name, ok := strings.Cut(remove, ":")
+	if !ok {
+		kind, name = "", remove
+	}
+	return eng.PlanRemove(kind, name)
+}
+
+// newFlags is a flag set for a command that reports its errors and usage on
+// stderr.
+func newFlags(cmd string, stderr io.Writer) *flag.FlagSet {
+	flags := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
+	return flags
+}
+
+// newEngine builds the engine for the named targets. Installers talk through
+// this command's streams, never the process's: under mcp, standard output is
+// the protocol. Their output goes to stderr so -json output stays parseable.
+func newEngine(cfg config.Config, targets []string, stdin io.Reader, stderr io.Writer) (*engine.Engine, error) {
+	return engine.New(cfg, engine.With(installerRunner(stdin, stderr)), targets)
+}
+
+func installerRunner(stdin io.Reader, stderr io.Writer) sh.Exec {
+	return sh.Exec{Stdin: stdin, Stdout: stderr, Stderr: stderr}
+}
+
+// loadManifestEngine loads the config and builds the engine for the commands
+// that edit a manifest, which needs a file on disk.
+func loadManifestEngine(verb, path string, targets []string, stdin io.Reader, stderr io.Writer) (*engine.Engine, error) {
+	if path == "-" {
+		return nil, fmt.Errorf("%s edits a manifest on disk; pass a config file, not standard input", verb)
+	}
+	cfg, err := config.Load(path, stdin)
+	if err != nil {
+		return nil, err
+	}
+	return newEngine(cfg, targets, stdin, stderr)
 }
 
 // upgradeAll makes every target that can upgrade do so, as if its config said
@@ -329,8 +425,10 @@ func writeStatus(w io.Writer, rows []engine.TargetStatus, asJSON bool) error {
 	return nil
 }
 
-func confirm(stdin io.Reader, stdout io.Writer) bool {
-	fmt.Fprint(stdout, "\nthis plan deletes things. type yes to continue: ")
+const destructiveWhy = "this plan deletes things, overwrites edits made outside the tool or runs scripts"
+
+func confirm(stdin io.Reader, stdout io.Writer, why string) bool {
+	fmt.Fprintf(stdout, "\n%s. type yes to continue: ", why)
 	var answer string
 	if _, err := fmt.Fscanln(stdin, &answer); err != nil {
 		return false

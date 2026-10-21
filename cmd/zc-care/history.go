@@ -10,37 +10,66 @@ import (
 	"time"
 
 	"github.com/zoolcoder/toolshell/activity"
-	"github.com/zoolcoder/zc-care/internal/plan"
+	"github.com/zoolcoder/zc-care/internal/engine"
 )
 
 // activityLog is the log ZC Care, the CLI and the MCP server share, so
 // every apply shows in one place whichever way it ran.
 func activityLog(dataDir string) *activity.Log {
-	if dataDir == "" {
-		dataDir = activity.DataDir(name)
-	}
-	return &activity.Log{Path: filepath.Join(dataDir, "activity.jsonl")}
+	return &activity.Log{Path: filepath.Join(dataFolder(dataDir), "activity.jsonl")}
 }
 
-// recordApply writes one entry per target the plan touched.
-func recordApply(p plan.Plan, via string, applyErr error) {
-	byTarget := map[string][]string{}
+// dataFolder is where the activity log and the undo journal live.
+func dataFolder(dataDir string) string {
+	if dataDir == "" {
+		return activity.DataDir(name)
+	}
+	return dataDir
+}
+
+// recordApply writes one entry per target that ran an action: failed when
+// any of its actions failed, naming each with its own error.
+func recordApply(outcomes []engine.Outcome, via string) {
+	byTarget := map[string][]engine.Outcome{}
 	var order []string
-	for _, a := range p.Executable() {
-		if _, ok := byTarget[a.Target]; !ok {
-			order = append(order, a.Target)
+	for _, o := range outcomes {
+		if _, ok := byTarget[o.Target]; !ok {
+			order = append(order, o.Target)
 		}
-		byTarget[a.Target] = append(byTarget[a.Target], a.Resource)
+		byTarget[o.Target] = append(byTarget[o.Target], o)
 	}
 	log := activityLog("")
 	for _, t := range order {
-		res := byTarget[t]
-		detail := fmt.Sprintf("%d change(s) applied from %s: %s", len(res), via, short(res, 5))
-		if applyErr != nil {
-			detail = fmt.Sprintf("from %s: %v", via, applyErr)
-		}
-		_ = log.Append(activity.Entry{At: time.Now(), Kind: "apply", Target: t, Detail: detail, OK: applyErr == nil})
+		detail, ok := applyDetail(byTarget[t], via)
+		_ = log.Append(activity.Entry{At: time.Now(), Kind: "apply", Target: t, Detail: detail, OK: ok})
 	}
+	// An undo is not itself undone: running it again would only redo. A
+	// doctor fix keeps no record either: it changes system settings undo
+	// cannot restore.
+	if via != viaUndo && via != viaDoctor {
+		_ = saveJournal("", outcomes, via)
+	}
+}
+
+// applyDetail summarises one target's outcomes and reports whether all
+// succeeded.
+func applyDetail(outcomes []engine.Outcome, via string) (string, bool) {
+	var done, failures []string
+	for _, o := range outcomes {
+		if o.Err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", o.Resource, o.Err))
+			continue
+		}
+		done = append(done, o.Resource)
+	}
+	if len(failures) == 0 {
+		return fmt.Sprintf("%d change(s) applied from %s: %s", len(done), via, short(done, 5)), true
+	}
+	detail := fmt.Sprintf("%d failed from %s: %s", len(failures), via, strings.Join(failures, "; "))
+	if len(done) > 0 {
+		detail += fmt.Sprintf(" (%d applied: %s)", len(done), short(done, 5))
+	}
+	return detail, false
 }
 
 // short joins up to n names and counts the rest.

@@ -245,7 +245,7 @@ private func write(_ url: URL, bytes: Int) throws {
     let spot = Junk(id: "t", title: "T", detail: "", path: dir.path, keep: ["kept"])
 
     #expect(spot.contents().map(\.name) == ["a", "b.bin"])
-    spot.empty(only: ["b.bin"])
+    spot.empty(only: ["b.bin"], permanently: true)
     #expect(spot.contents().map(\.name) == ["a"])
     #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("kept/y.bin").path))
 }
@@ -505,6 +505,20 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(found[1].paths.map(\.lastPathComponent) == ["old"])
 }
 
+@Test func aiClutterSkipsATempFolderThatIsALink() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let documents = home.appendingPathComponent("Documents")
+    try write(documents.appendingPathComponent("thesis/x"), bytes: 100_000)
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86400)],
+                                          ofItemAtPath: documents.appendingPathComponent("thesis").path)
+    let temp = home.appendingPathComponent("claude-501")
+    try FileManager.default.createSymbolicLink(at: temp, withDestinationURL: documents)
+
+    #expect(AIClutter.find(home: home.path, claudeTemp: temp.path).isEmpty)
+    #expect(Junk(id: "t", title: "T", detail: "", path: temp.path).contents().isEmpty)
+}
+
 @Test func aiClutterCallsNoVersionStaleWithoutTheLink() throws {
     let home = try tempDir()
     defer { try? FileManager.default.removeItem(at: home) }
@@ -581,7 +595,7 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(names == ["History", "History-journal", "Cookies", "Default", "cookies.sqlite"])
 
     let history = try #require(traces.first)
-    #expect(BrowserPrivacy.clear(history) == 0)
+    #expect(BrowserPrivacy.clear(history, permanently: true).stayed == 0)
     #expect(!FileManager.default.fileExists(atPath: home.path + "/" + chrome + "Default/History"))
     #expect(FileManager.default.fileExists(atPath: home.path + "/" + chrome + "Default/Bookmarks"))
 }

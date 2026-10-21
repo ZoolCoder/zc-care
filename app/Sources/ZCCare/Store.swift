@@ -15,6 +15,8 @@ final class Store {
     var refreshing = false
     /// What a running change is doing, such as "Updating tmux".
     var busy: String?
+    /// Set while a change that can hang runs: the busy banner's Cancel.
+    var cancelBusy: (() -> Void)?
     /// The outcome of the last change, or why it failed.
     var message: Message?
     /// The plan Plan last showed.
@@ -74,6 +76,7 @@ final class Store {
         static let vitalsAlerts = "vitalsAlerts"
         static let vitalLimits = "vitalLimits"
         static let barStats = "barStats"
+        static let deletesPermanently = "deletesPermanently"
     }
 
     /// A reading the menu bar can show beside the mark.
@@ -92,6 +95,8 @@ final class Store {
     }
 
     private var careCLI: CareCLI?
+    /// The zc-care found, config or not, for the Setup Assistant.
+    private var binary: String?
     private var env: [String: String] = [:]
     private var ticker: Task<Void, Never>?
     private var discovery: Task<Void, Never>?
@@ -107,6 +112,8 @@ final class Store {
     var openSettings: (() -> Void)?
     /// Set by the app delegate, which owns the app picker.
     var openApps: (() -> Void)?
+    /// Set by the app delegate, which owns the Setup Assistant.
+    var openSetup: (() -> Void)?
     /// Set by Care, which drops what the list names from its own lists.
     var ignoreListChanged: (() -> Void)?
     /// Set by Care, whose lists are stale once files come back.
@@ -121,6 +128,7 @@ final class Store {
         weeklyScan = UserDefaults.standard.bool(forKey: Keys.weeklyScan)
         ignoreList = IgnoreList(UserDefaults.standard.stringArray(forKey: Keys.ignoreList) ?? [])
         vitalsAlerts = UserDefaults.standard.bool(forKey: Keys.vitalsAlerts)
+        deletesPermanently = UserDefaults.standard.bool(forKey: Keys.deletesPermanently)
         vitalLimits = UserDefaults.standard.data(forKey: Keys.vitalLimits)
             .flatMap { try? JSONDecoder().decode(VitalLimits.self, from: $0) } ?? VitalLimits()
         barStats = Set((UserDefaults.standard.stringArray(forKey: Keys.barStats) ?? []).compactMap(BarStat.init))
@@ -151,6 +159,12 @@ final class Store {
     /// checked each minute whether the panel shows or not.
     var vitalsAlerts: Bool {
         didSet { UserDefaults.standard.set(vitalsAlerts, forKey: Keys.vitalsAlerts) }
+    }
+
+    /// Cache, browser and AI clutter cleanups go to the Trash, where My
+    /// Activity can put them back, unless this is on.
+    var deletesPermanently: Bool {
+        didSet { UserDefaults.standard.set(deletesPermanently, forKey: Keys.deletesPermanently) }
     }
 
     var vitalLimits: VitalLimits {
@@ -258,9 +272,10 @@ final class Store {
             setupProblem = "zc-care is missing. Install ZC Care again with brew reinstall --cask zc-care."
             return
         }
+        self.binary = binary
         let chosen = UserDefaults.standard.string(forKey: Keys.config)
         guard let config = Discovery.config(chosen: chosen, env: env, home: home) else {
-            setupProblem = "Choose your zc-care.yaml to start."
+            setupProblem = "Set up this Mac, or choose the zc-care.yaml you have."
             return
         }
         setupProblem = nil
@@ -298,6 +313,72 @@ final class Store {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         UserDefaults.standard.set(url.path, forKey: Keys.config)
         Task { await connect() }
+    }
+
+    // MARK: Setup
+
+    /// The CLI is here but no config is: the Setup Assistant can make one.
+    var needsConfig: Bool { careCLI == nil && binary != nil }
+
+    /// The CLI, without a config until there is one; nil when zc-care is
+    /// missing.
+    var setupCLI: CareCLI? {
+        careCLI ?? binary.map { CareCLI(binary: $0, config: "", env: env) }
+    }
+
+    /// Writes the starter config for who the Mac is for, then reads the
+    /// Mac with it. Nothing is installed yet.
+    func createConfig(profiles: [String], role: String?, fromMac: Bool) async throws -> InitResult {
+        await connected()
+        guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
+        busy = "Writing your config"
+        defer { busy = nil }
+        let result = try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac)
+        UserDefaults.standard.set(result.config, forKey: Keys.config)
+        await connect()
+        return result
+    }
+
+    /// Runs body so the busy banner can cancel it; the programs it runs stop.
+    func cancellable<T: Sendable>(_ body: @escaping @MainActor () async -> T) async -> T {
+        let task = Task { await body() }
+        cancelBusy = { task.cancel() }
+        defer { cancelBusy = nil }
+        return await task.value
+    }
+
+    /// Why a program failed, or nil when it exited 0: its last line of
+    /// error, else fallback. A cancelled run and a launch error say so.
+    func failure(_ fallback: String, of run: () async throws -> CommandResult) async -> String? {
+        do {
+            let r = try await run()
+            return r.status == 0 ? nil : (ZCCareCore.lastLine(r.stderr) ?? fallback)
+        } catch is CancellationError {
+            return "Cancelled."
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Runs the command as root behind the password dialog; why it failed, if it did.
+    private func asRoot(_ command: String) async -> String? {
+        await cancellable {
+            await self.failure("osascript failed") {
+                try await ProcessRunner().run("/usr/bin/osascript", ["-e", adminScript(command)], env: [:])
+            }
+        }
+    }
+
+    /// Fixes every failed check that runs as root, behind one password
+    /// dialog. The caller has shown the commands and had them confirmed.
+    func secureAll() async {
+        guard busy == nil, let command = Fix.rootCommands(for: snapshot?.security ?? []) else { return }
+        busy = "Securing this Mac"
+        defer { busy = nil }
+        let failed = await asRoot(command)
+        message = failed.map { Message(text: "This Mac: not changed. \($0)", failed: true) }
+            ?? Message(text: "This Mac: fixed.", failed: false)
+        await refresh()
     }
 
     // MARK: Targets
@@ -514,11 +595,9 @@ final class Store {
             guard Alerts.confirm(fix: command, for: check.title) else { return }
             busy = "Fixing \(check.title)"
             defer { busy = nil }
-            let script = adminScript(command)
-            let r = try? await ProcessRunner().run("/usr/bin/osascript", ["-e", script], env: [:])
-            message = r?.status == 0
-                ? Message(text: "\(check.title): fixed.", failed: false)
-                : Message(text: "\(check.title): not changed. \(r?.stderr ?? "")", failed: true)
+            let failed = await asRoot(command)
+            message = failed.map { Message(text: "\(check.title): not changed. \($0)", failed: true) }
+                ?? Message(text: "\(check.title): fixed.", failed: false)
             await refresh()
         case .settings(let url, let what):
             NSWorkspace.shared.open(url)

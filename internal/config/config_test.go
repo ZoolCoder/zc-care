@@ -167,3 +167,20 @@ func TestLoadHandsTheSkipListToEveryTarget(t *testing.T) {
 		t.Fatalf("skip %v", got)
 	}
 }
+
+func TestProfilesAreKebabCaseAndRoundTrip(t *testing.T) {
+	_, err := Parse([]byte("version: 1\ntargets:\n  - name: a\n    provider: localdir\n    path: a\n    profiles: [Work Mac]\n"))
+	if err == nil || !strings.Contains(err.Error(), `profile "Work Mac" must be kebab-case`) {
+		t.Fatalf("parse: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "profiles")
+	if got, err := ReadProfiles(path); err != nil || got != nil {
+		t.Fatalf("no file: %v %v", got, err)
+	}
+	if err := WriteProfiles(path, []string{"work", "developer", "work"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ReadProfiles(path); err != nil || strings.Join(got, ",") != "developer,work" {
+		t.Fatalf("read %v %v", got, err)
+	}
+}

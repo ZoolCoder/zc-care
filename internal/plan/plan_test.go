@@ -57,6 +57,29 @@ func TestWriteJSONAndPredicates(t *testing.T) {
 	}
 }
 
+func TestDestructiveCountsOverwritesAndScripts(t *testing.T) {
+	var p Plan
+	p.Add(Action{Op: OpCreate, Resource: "a"}, Action{Op: OpUpdate, Resource: "b"})
+	if p.Destructive() {
+		t.Fatal("create and update are not destructive")
+	}
+	p.Add(Action{Op: OpUpdate, Resource: "c", Destructive: true})
+	if !p.Destructive() {
+		t.Fatal("a flagged update is destructive")
+	}
+	var out bytes.Buffer
+	if err := p.WriteJSON(&out); err != nil {
+		t.Fatal(err)
+	}
+	var got struct{ Actions []JSONAction }
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Actions[0].Destructive || got.Actions[1].Destructive || !got.Actions[2].Destructive {
+		t.Fatalf("json %+v", got.Actions)
+	}
+}
+
 func TestSavedMatches(t *testing.T) {
 	var buf bytes.Buffer
 	if err := sample().Save(&buf, []string{"a"}); err != nil {

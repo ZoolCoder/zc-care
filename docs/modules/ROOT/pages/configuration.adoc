@@ -36,7 +36,15 @@ targets:
 | `version` | Always `1`. A future format bumps it.
 | `name` | Lowercase kebab case, unique. `-target` selects by it.
 | `provider` | `packages`, `dotfiles`, `tools`, `desktop`, `settings`, `services`, `agents` or `localdir`.
+| `profiles` | Optional. The target applies only on a Mac with one of these profiles, such as `[developer]` or `[work]`. Without it the target applies on every Mac.
 |===
+
+A Mac's profiles live in `~/.config/zc-care/profiles`, beside its skip list
+(`ZC_CARE_PROFILES` names another file). `zc-care profile` shows them,
+`zc-care profile developer work` sets them and `zc-care profile -clear`
+drops them. A Mac without profiles gets every target. `plan` and `apply`
+leave out the targets for other profiles, and naming one with `-target` is
+an error.
 
 == Per provider
 

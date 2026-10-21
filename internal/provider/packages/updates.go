@@ -126,9 +126,9 @@ var masOutdated = regexp.MustCompile(`^\s*(\d+)\s+.*\((\S+)\s+->\s+(\S+)\)\s*$`)
 func brewUpgrade(r sh.Runner, i item) func(context.Context) error {
 	switch i.Kind {
 	case "cask":
-		return run(r, "brew", "upgrade", "--cask", i.Name)
+		return run(r, "brew", "upgrade", "--cask", "--", i.Name)
 	case "mas":
 		return run(r, "mas", "upgrade", i.ID)
 	}
-	return run(r, "brew", "upgrade", i.Name)
+	return run(r, "brew", "upgrade", "--", i.Name)
 }

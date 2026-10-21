@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/provider"
 )
@@ -170,7 +173,7 @@ const (
 func codexServer(have []byte, name string, s Server) (plan.Op, func([]byte) ([]byte, error), error) {
 	text := string(have)
 	inside, outside := splitBlock(text)
-	header := regexp.MustCompile(`(?m)^\[mcp_servers\.` + regexp.QuoteMeta(tomlKey(name)) + `(\.[a-z_]+)?\]`)
+	header := regexp.MustCompile(`(?m)^\[mcp_servers\.` + regexp.QuoteMeta(manifest.TOMLKey(name)) + `(\.[a-z_]+)?\]`)
 	if header.MatchString(outside) {
 		return plan.OpManual, nil, nil
 	}
@@ -181,7 +184,7 @@ func codexServer(have []byte, name string, s Server) (plan.Op, func([]byte) ([]b
 		tables := codexTables(inside)
 		tables[name] = want
 		var body strings.Builder
-		for _, n := range sortedKeys(tables) {
+		for _, n := range slices.Sorted(maps.Keys(tables)) {
 			body.WriteString(tables[n])
 		}
 		return []byte(withBlock(string(now), codexBegin, codexEnd, body.String())), nil
@@ -232,7 +235,7 @@ func codexTables(block string) map[string]string {
 // so an env value written as ${NAME} becomes an env_vars entry.
 func codexTable(name string, s Server) string {
 	var b strings.Builder
-	key := "mcp_servers." + tomlKey(name)
+	key := "mcp_servers." + manifest.TOMLKey(name)
 	fmt.Fprintf(&b, "[%s]\n", key)
 	if s.URL != "" {
 		fmt.Fprintf(&b, "url = %s\n", strconv.Quote(s.URL))
@@ -250,7 +253,7 @@ func codexTable(name string, s Server) string {
 		fmt.Fprintf(&b, "args = [%s]\n", strings.Join(quoted, ", "))
 	}
 	env, pass := map[string]string{}, []string{}
-	for _, k := range sortedKeys(s.Env) {
+	for _, k := range slices.Sorted(maps.Keys(s.Env)) {
 		if s.Env[k] == "${"+k+"}" {
 			pass = append(pass, strconv.Quote(k))
 		} else {
@@ -268,17 +271,8 @@ func codexTable(name string, s Server) string {
 
 func inline(m map[string]string) string {
 	pairs := make([]string, 0, len(m))
-	for _, k := range sortedKeys(m) {
-		pairs = append(pairs, tomlKey(k)+" = "+strconv.Quote(m[k]))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		pairs = append(pairs, manifest.TOMLKey(k)+" = "+strconv.Quote(m[k]))
 	}
 	return "{ " + strings.Join(pairs, ", ") + " }"
-}
-
-var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-
-func tomlKey(k string) string {
-	if bareKey.MatchString(k) {
-		return k
-	}
-	return strconv.Quote(k)
 }

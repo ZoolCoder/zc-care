@@ -124,6 +124,11 @@ struct SettingsView: View {
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            Section("Cleanup") {
+                Toggle("Delete permanently instead of moving to the Trash", isOn: $store.deletesPermanently)
+                Text("Caches, browser data and AI clutter go to the Trash, where My Activity can put them back. Space frees once the Trash is emptied.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Smart Care") {
                 Toggle("Scan every week", isOn: $store.weeklyScan)
                 Text("The weekly scan only looks and notifies; nothing is cleaned without you. It waits until the Mac is on power and not in Low Power Mode.")
@@ -152,6 +157,9 @@ struct SettingsView: View {
                         }
                     }
                     Button("Choose…", action: store.chooseConfig)
+                }
+                LabeledContent("Who this Mac is for") {
+                    Button("Set Up This Mac…") { store.openSetup?() }
                 }
                 LabeledContent("Apps on this Mac") {
                     Button("Choose Apps…") { store.openApps?() }

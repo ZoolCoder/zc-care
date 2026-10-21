@@ -136,7 +136,8 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		}
 		actions = append(actions, plan.Action{
 			Op: plan.OpCreate, Target: t.Name, Resource: k.String(), Detail: "install with mise",
-			Do: func(ctx context.Context) error { return p.r.Run(ctx, "mise", "install", "-C", dir, k.String()) },
+			Before: cannotUndo("a runtime install is not undone; remove it with mise uninstall"),
+			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "mise", "install", "-C", dir, "--", k.String()) },
 		})
 	}
 	if t.Upgrade {
@@ -162,7 +163,8 @@ func (p Provider) upgrades(ctx context.Context, t config.Target, tools map[tool]
 		actions = append(actions, plan.Action{
 			Op: plan.OpUpdate, Target: t.Name, Resource: k.String(),
 			Detail: "upgrade with mise, " + v.current + " to " + v.latest,
-			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "mise", "upgrade", "-C", dir, k.String()) },
+			Before: cannotUndo("an upgrade is not downgraded"),
+			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "mise", "upgrade", "-C", dir, "--", k.String()) },
 		})
 	}
 	return actions
@@ -220,11 +222,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	}
 	live.Summary = fmt.Sprintf("%d of %d tools installed", live.InPlace, live.Declared)
 	return live, nil
-}
-
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
 }
 
 func sorted(m map[tool]installed) []tool {
@@ -321,3 +318,8 @@ func names(all map[string][]version) []string {
 }
 
 func (Provider) Programs(config.Target) []string { return []string{"mise"} }
+
+// cannotUndo records that a change stays, and why, for undo to report.
+func cannotUndo(reason string) func(context.Context) (plan.Undo, error) {
+	return func(context.Context) (plan.Undo, error) { return plan.Irreversible(reason), nil }
+}

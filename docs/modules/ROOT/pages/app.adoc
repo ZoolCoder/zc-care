@@ -88,6 +88,30 @@ image::care-cleanup.png[ZC Care's Cleanup module, with System Junk and AI Clutte
 
 image::care-tools.png[ZC Care's My Tools grid]
 
+== Set Up This Mac
+
+The first time ZC Care runs without a config, it opens *Set Up This Mac*.
+*Set Up This Mac…* in the panel, Welcome and Settings opens it again, and so
+does `zccare://setup`. It takes four steps:
+
+. *Who it is for*: Everyday, Developer, Creative, or several, and Personal
+  or Work. ZC Care writes a starter config to `~/.config/zc-care` with
+  `zc-care init`. *Keep the apps this Mac already has* adds them to the
+  Brewfile under *From this Mac*. With a config in place, this step only
+  saves the Mac's profiles.
+. *Make it safe*: the security checks the Mac fails, among them FileVault,
+  the firewall, updates, File Sharing, AirDrop and Time Machine. *Fix All as
+  Administrator…* runs every fix that needs root behind one password dialog;
+  the rest open their pane in System Settings.
+. *Your developer identity*, for a developer Mac: Apple's command line
+  tools, git's name and email, and *Set Up in Terminal…*. Terminal makes an
+  SSH key behind a passphrase the keychain keeps, signs commits with it,
+  signs in to GitHub with `gh` and adds the key there for login and
+  signing.
+. *Done*: *Choose Apps…* installs the apps, and *Start* runs Smart Care.
+
+Nothing installs until you press *Install* in Choose Apps.
+
 == Choose Apps
 
 The first time ZC Care runs, and whenever you press *Choose Apps…* in My
@@ -95,8 +119,9 @@ Workstation or Settings, it lists every package the config declares, under
 the Brewfile's sections. At the top you pick who the Mac is for:
 
 * *Everything* ticks every package.
-* A profile, such as *Developer* or *Everyday*, ticks the sections tagged for
-  it and the sections tagged for no one in particular.
+* One profile or several, such as *Developer* and *Creative*, ticks the
+  sections tagged for one of them and the sections tagged for no one in
+  particular. The Mac's own profiles start selected.
 
 You can untick or tick any package after. *Install* puts what you left out on
 this Mac's skip list, takes what you picked again off it, and applies the

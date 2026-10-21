@@ -49,9 +49,9 @@ func TestPlanAndApplyConverge(t *testing.T) {
 	if actions, _ := New().Plan(ctx, target); len(actions) != 0 {
 		t.Fatalf("not converged: %+v", actions)
 	}
-	status, err := New().Status(ctx, target)
-	if err != nil || !strings.HasPrefix(status, "2 of 2") {
-		t.Fatalf("status %q %v", status, err)
+	live, err := New().Measure(ctx, target)
+	if err != nil || !strings.HasPrefix(live.Summary, "2 of 2") {
+		t.Fatalf("status %q %v", live.Summary, err)
 	}
 }
 

@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var welcome: HostWindow<WelcomeView>?
     private var apps: HostWindow<AppPickerView>?
+    private var setup: HostWindow<SetupView>?
 
     override init() {
         store = Store()
@@ -46,11 +47,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.openCare = { [weak self] in self?.care.show($0) }
         store.openSettings = { [weak self] in self?.settings.show() }
         store.openApps = { [weak self] in self?.showApps() }
+        store.openSetup = { [weak self] in self?.showSetup() }
         store.hotkeyChanged = { [weak self] on in on ? self?.hotkey.register() : self?.hotkey.unregister() }
         if store.hotkey { hotkey.register() }
         Task { await store.start() }
         care.care.startSchedule()
-        if !UserDefaults.standard.bool(forKey: Self.welcomed) { showWelcome() }
+        // A Mac without a config starts in the Setup Assistant; the welcome
+        // waits for a launch that has one.
+        Task {
+            await store.connected()
+            if store.needsConfig {
+                showSetup()
+            } else if !UserDefaults.standard.bool(forKey: Self.welcomed) {
+                showWelcome()
+            }
+        }
     }
 
     /// A clicked alert opens where its fix is: a full disk Cleanup, the
@@ -95,6 +106,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.show()
     }
 
+    private func showSetup() {
+        setup?.close()
+        let window = HostWindow(title: "Set Up This Mac", size: NSSize(width: 580, height: 680), themed: true) { [unowned self] in
+            SetupView(store: store) { [weak self] in self?.setup?.close() }
+        }
+        setup = window
+        window.show()
+    }
+
     @objc private func open(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue.flatMap(URL.init(string:)),
               let host = url.host() else { return }
@@ -111,6 +131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // zccare://apps, from bootstrap.sh, picks what a new Mac installs.
         if host == "apps" {
             showApps()
+            return
+        }
+        if host == "setup" {
+            showSetup()
             return
         }
         guard host == "panel" else { return }

@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/zoolcoder/zc-care/internal/config"
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/provider"
 	"github.com/zoolcoder/zc-care/internal/sh"
@@ -77,16 +78,22 @@ func Load(path string) (Manifest, error) {
 	var errs []error
 	for _, c := range m.Clients {
 		if _, ok := clients[c]; !ok {
-			errs = append(errs, fmt.Errorf("%s: client %q is not one of %s", path, c, strings.Join(sortedKeys(clients), ", ")))
+			errs = append(errs, fmt.Errorf("%s: client %q is not one of %s", path, c, strings.Join(slices.Sorted(maps.Keys(clients)), ", ")))
 		}
 	}
 	for name, s := range m.Servers {
 		if (s.Command == "") == (s.URL == "") {
 			errs = append(errs, fmt.Errorf("%s: server %s needs a command or a url, not both", path, name))
 		}
+		_ = eachValue(&s, func(v string) (string, error) {
+			if !wellFormed(v) {
+				errs = append(errs, fmt.Errorf("%s: server %s has a malformed secret reference; write ${keychain:service} or ${keychain:service/account}", path, name))
+			}
+			return v, nil
+		})
 	}
 	if len(m.Clients) == 0 {
-		m.Clients = sortedKeys(clients)
+		m.Clients = slices.Sorted(maps.Keys(clients))
 	}
 	dir := filepath.Dir(path)
 	abs := func(p string) string {
@@ -114,11 +121,15 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 	if err != nil {
 		return nil, err
 	}
+	servers, err := p.resolve(ctx, m.Servers)
+	if err != nil {
+		return nil, err
+	}
 	var out []change
 	for _, name := range m.Clients {
 		c := clients[name]
-		for _, s := range sortedKeys(m.Servers) {
-			ch, err := p.server(t.Name, name, c, s, m.Servers[s])
+		for _, s := range slices.Sorted(maps.Keys(servers)) {
+			ch, err := p.server(t.Name, name, c, s, servers[s])
 			if err != nil {
 				return nil, err
 			}
@@ -146,6 +157,21 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 	}
 	models, err := p.models(ctx, t.Name, m.Models)
 	return append(out, models...), err
+}
+
+// resolve reads the secrets the servers refer to. The result is for
+// comparing and writing only: it must never reach a plan or a message.
+func (p Provider) resolve(ctx context.Context, servers map[string]Server) (map[string]Server, error) {
+	k := newKeychain(p.r)
+	out := make(map[string]Server, len(servers))
+	for _, name := range slices.Sorted(maps.Keys(servers)) {
+		s, err := k.server(ctx, servers[name])
+		if err != nil {
+			return nil, fmt.Errorf("server %s: %w", name, err)
+		}
+		out[name] = s
+	}
+	return out, nil
 }
 
 // Plan lists what is not in place yet.
@@ -183,11 +209,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	}
 	m.Summary = fmt.Sprintf("%d of %d agent settings in place", m.InPlace, m.Declared)
 	return m, nil
-}
-
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	m, err := p.Measure(ctx, t)
-	return m.Summary, err
 }
 
 // Programs lists ollama when the manifest asks for models.
@@ -288,7 +309,7 @@ func (p Provider) models(ctx context.Context, target string, models []string) ([
 		if !have[m] && !have[m+":latest"] {
 			ch.item.State, ch.action = provider.Missing, plan.Action{Op: plan.OpCreate, Target: target,
 				Resource: "model " + m, Detail: "ollama pull " + m,
-				Do: func(ctx context.Context) error { return p.r.Run(ctx, "ollama", "pull", m) }}
+				Do: func(ctx context.Context) error { return p.r.Run(ctx, "ollama", "pull", "--", m) }}
 		}
 		changes = append(changes, ch)
 	}
@@ -325,8 +346,8 @@ func tree(dir string) (map[string][]byte, error) {
 	return files, err
 }
 
-// writeFile replaces path in one rename, so an agent that reads the file at
-// the same moment sees the old or the new content, never half.
+// writeFile writes path, and its folder if missing, keeping an existing
+// file's mode and else private to the user.
 func writeFile(path string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
@@ -335,30 +356,11 @@ func writeFile(path string, b []byte) error {
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	defer func() { _ = os.Remove(tmp.Name()) }()
-	if _, err := tmp.Write(b); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), mode); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return manifest.WriteFile(path, b, mode)
 }
 
 // jsonEqual compares two JSON values whatever their key order.
 func jsonEqual(a, b []byte) bool {
 	var x, y any
 	return json.Unmarshal(a, &x) == nil && json.Unmarshal(b, &y) == nil && reflect.DeepEqual(x, y)
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	return slices.Sorted(maps.Keys(m))
 }

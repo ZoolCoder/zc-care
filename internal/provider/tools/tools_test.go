@@ -45,7 +45,7 @@ func TestPlanInstallsMissingVersionsFromThisFileOnly(t *testing.T) {
 		t.Fatalf("plan %+v %v", actions, err)
 	}
 	_ = actions[0].Do(context.Background())
-	if want := "mise install -C " + filepath.Dir(tg.File) + " java@temurin-25"; r.Ran[0] != want {
+	if want := "mise install -C " + filepath.Dir(tg.File) + " -- java@temurin-25"; r.Ran[0] != want {
 		t.Fatalf("ran %v", r.Ran)
 	}
 	live, err := p.Measure(context.Background(), tg)
@@ -118,7 +118,7 @@ func TestOutdatedExtraUpgradeAndCapture(t *testing.T) {
 		t.Fatalf("plan %+v %v", actions, err)
 	}
 	_ = actions[0].Do(context.Background())
-	if r.Ran[0] != "mise upgrade -C "+dir+" node@lts" {
+	if r.Ran[0] != "mise upgrade -C "+dir+" -- node@lts" {
 		t.Fatalf("ran %v", r.Ran)
 	}
 	out, err := p.Capture(context.Background(), tg)

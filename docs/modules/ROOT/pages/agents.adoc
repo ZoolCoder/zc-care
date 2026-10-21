@@ -10,7 +10,7 @@
 | `status` | Live state per target. Read-only.
 | `list` | Every declared item with its state, version, newer version and app, then what is installed but not declared. Takes `state` and `kind` filters. Read-only.
 | `add` | Declare a package or runtime in one target's manifest, with its why and section. Edits the manifest only.
-| `remove` | Uninstall a package and drop it from the manifest. Destructive: only once the user okayed it.
+| `remove` | Plan the uninstall of a package and the drop of its manifest line. Returns a plan_id; the user applies it at a terminal.
 | `capture` | The manifest one target would declare to match this machine. Writes nothing. Read-only.
 | `validate` | Check the config offline. Read-only.
 | `plan` | Plan and save it. Returns a `plan_id`. Changes nothing.
@@ -30,7 +30,7 @@ the user to run.
   go to `~/.local/state/zc-care/mcp-audit.jsonl`. An apply also lands
   in `zc-care history` as applied from an agent.
 * *Tools say what they do.* Each tool carries MCP annotations: read-only
-  tools say so, `add` edits a file, `remove` is destructive, and `apply`
+  tools say so, `add` edits a file, `remove` only plans, and `apply`
   changes the machine. A client can ask before the ones that write.
 * *Resources.* The server offers the config (`zc-care://config`), the
   last 50 applies (`zc-care://history`) and each target's manifest

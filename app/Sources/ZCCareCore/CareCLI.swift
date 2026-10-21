@@ -21,8 +21,8 @@ public protocol Runner: Sendable {
 
 public struct ProcessRunner: Runner {
     /// Stops a program still running after this many seconds, and its
-    /// children, which could hold the pipes open. Nil waits for ever: for
-    /// installs, and anything that asks the user.
+    /// children, which could hold the pipes open. Nil waits for ever, unless
+    /// the task is cancelled: for installs, and anything that asks the user.
     public var timeout: TimeInterval?
 
     public init(timeout: TimeInterval? = nil) {
@@ -30,70 +30,129 @@ public struct ProcessRunner: Runner {
     }
 
     public func run(_ executable: String, _ args: [String], env: [String: String]) async throws -> CommandResult {
-        try await withCheckedThrowingContinuation { continuation in
-            let done = Once(continuation)
-            DispatchQueue.global().async {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: executable)
-                p.arguments = args
-                p.environment = env
-                p.standardInput = FileHandle.nullDevice
-                let out = Pipe(), err = Pipe()
-                p.standardOutput = out
-                p.standardError = err
-                do { try p.run() } catch { return done.resume(throwing: error) }
-                let pid = p.processIdentifier
-                let timer = timeout.map { seconds in
-                    let item = DispatchWorkItem {
-                        // Children first, while they still have this parent.
-                        let children = try? Process.run(URL(fileURLWithPath: "/usr/bin/pkill"), arguments: ["-TERM", "-P", "\(pid)"])
-                        children?.waitUntilExit()
-                        kill(pid, SIGTERM)
-                        // A grandchild could still hold the pipes: the caller
-                        // goes on without waiting for them to close.
-                        let name = (executable as NSString).lastPathComponent
-                        done.resume(throwing: CLIError(message: "\(name) did not finish in \(Int(seconds)) seconds"))
-                    }
-                    DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: item)
-                    return item
-                }
-                // Both pipes drain at once: a full one would stall the child.
-                let errData = Box()
-                let group = DispatchGroup()
-                group.enter()
-                DispatchQueue.global().async {
-                    errData.data = err.fileHandleForReading.readDataToEndOfFile()
-                    group.leave()
-                }
-                let outData = out.fileHandleForReading.readDataToEndOfFile()
-                group.wait()
-                p.waitUntilExit()
-                timer?.cancel()
-                done.resume(returning: CommandResult(status: p.terminationStatus, stdout: outData,
-                                                     stderr: String(decoding: errData.data, as: UTF8.self)))
+        let child = Child()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard child.begin(continuation) else { return }
+                DispatchQueue.global().async { launch(executable, args, env: env, child: child) }
+            }
+        } onCancel: {
+            child.stop(CancellationError())
+        }
+    }
+
+    private func launch(_ executable: String, _ args: [String], env: [String: String], child: Child) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: executable)
+        p.arguments = args
+        p.environment = env
+        p.standardInput = FileHandle.nullDevice
+        let out = Pipe(), err = Pipe()
+        p.standardOutput = out
+        p.standardError = err
+        do { try p.run() } catch { return child.finish(throwing: error) }
+        guard child.launched(p) else { return }
+        let timer = timeout.map { seconds in
+            let item = DispatchWorkItem {
+                let name = (executable as NSString).lastPathComponent
+                child.stop(CLIError(message: "\(name) did not finish in \(Int(seconds)) seconds", timedOut: true))
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: item)
+            return item
+        }
+        // Both pipes drain at once: a full one would stall the child.
+        let outData = Drain(out.fileHandleForReading), errData = Drain(err.fileHandleForReading)
+        p.waitUntilExit()
+        timer?.cancel()
+        // A grandchild could still hold the pipes: take what came, and let go.
+        outData.finish(within: 2)
+        errData.finish(within: 2)
+        child.finish(returning: CommandResult(status: p.terminationStatus, stdout: outData.data,
+                                              stderr: String(decoding: errData.data, as: UTF8.self)))
+    }
+}
+
+/// Reads a pipe as it fills, without a thread blocked on it: a grandchild
+/// that keeps the pipe open cannot strand one.
+private final class Drain: @unchecked Sendable {
+    private let lock = NSLock()
+    private let handle: FileHandle
+    private let eof = DispatchSemaphore(value: 0)
+    private var buffer = Data()
+
+    init(_ handle: FileHandle) {
+        self.handle = handle
+        handle.readabilityHandler = { [self] h in
+            let chunk = h.availableData
+            if chunk.isEmpty {
+                h.readabilityHandler = nil
+                eof.signal()
+            } else {
+                lock.withLock { buffer.append(chunk) }
             }
         }
     }
+
+    var data: Data { lock.withLock { buffer } }
+
+    /// Waits for the end of the pipe, for this many seconds at most, then stops reading.
+    func finish(within seconds: TimeInterval) {
+        _ = eof.wait(timeout: .now() + seconds)
+        handle.readabilityHandler = nil
+    }
 }
 
-private final class Box: @unchecked Sendable {
-    var data = Data()
-}
-
-/// A continuation the timeout and the exit race to resume; the first wins.
-private final class Once: @unchecked Sendable {
+/// One run of a program. The exit, the timeout and a cancelled task race to
+/// end it; the first wins, and a stop also kills the program.
+private final class Child: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<CommandResult, any Error>?
+    private var process: Process?
+    private var stopped: (any Error)?
 
-    init(_ continuation: CheckedContinuation<CommandResult, any Error>) {
+    /// False when the run was stopped before it began.
+    func begin(_ continuation: CheckedContinuation<CommandResult, any Error>) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let stopped {
+            continuation.resume(throwing: stopped)
+            return false
+        }
         self.continuation = continuation
+        return true
     }
 
-    func resume(returning result: CommandResult) {
+    /// False, and the program killed, when a stop came while it started.
+    func launched(_ p: Process) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if stopped != nil {
+            Self.kill(p)
+            return false
+        }
+        process = p
+        return true
+    }
+
+    func stop(_ error: any Error) {
+        lock.lock()
+        guard stopped == nil else { return lock.unlock() }
+        stopped = error
+        let waiting = continuation
+        continuation = nil
+        let p = process
+        process = nil
+        lock.unlock()
+        waiting?.resume(throwing: error)
+        if let p { DispatchQueue.global().async { Self.kill(p) } }
+    }
+
+    func finish(returning result: CommandResult) {
+        lock.withLock { process = nil }
         take()?.resume(returning: result)
     }
 
-    func resume(throwing error: any Error) {
+    func finish(throwing error: any Error) {
         take()?.resume(throwing: error)
     }
 
@@ -103,10 +162,31 @@ private final class Once: @unchecked Sendable {
             return continuation
         }
     }
+
+    /// Children first, while they still have this parent; whatever ignores
+    /// the TERM gets a KILL.
+    private static func kill(_ p: Process) {
+        guard p.isRunning else { return }
+        let pid = p.processIdentifier
+        let children = try? Process.run(URL(fileURLWithPath: "/usr/bin/pkill"), arguments: ["-TERM", "-P", "\(pid)"])
+        children?.waitUntilExit()
+        Foundation.kill(pid, SIGTERM)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            if p.isRunning { Foundation.kill(pid, SIGKILL) }
+        }
+    }
 }
 
 public struct CLIError: LocalizedError, Sendable {
     public var message: String
+    /// The program was stopped for running too long.
+    public var timedOut: Bool
+
+    public init(message: String, timedOut: Bool = false) {
+        self.message = message
+        self.timedOut = timedOut
+    }
+
     public var errorDescription: String? { message }
 }
 
@@ -254,6 +334,6 @@ extension Result where Failure == any Error {
     }
 }
 
-func lastLine(_ s: String) -> String? {
+public func lastLine(_ s: String) -> String? {
     s.split(whereSeparator: \.isNewline).last.map(String.init)
 }

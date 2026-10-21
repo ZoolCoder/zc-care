@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/zoolcoder/zc-care/internal/manifest"
 )
 
 // EnvSkip names a skip file other than the default one.
@@ -29,7 +31,10 @@ func SkipPath() string {
 
 // ReadSkip lists the resources in a skip file, such as cask:ghostty, one a
 // line; # starts a comment. No file is an empty list.
-func ReadSkip(path string) ([]string, error) {
+func ReadSkip(path string) ([]string, error) { return readList(path, "skip list") }
+
+// readList reads a file of one name a line; # starts a comment.
+func readList(path, what string) ([]string, error) {
 	if path == "" {
 		return nil, nil
 	}
@@ -38,7 +43,7 @@ func ReadSkip(path string) ([]string, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read skip list: %w", err)
+		return nil, fmt.Errorf("read %s: %w", what, err)
 	}
 	var out []string
 	for line := range strings.Lines(string(data)) {
@@ -53,20 +58,25 @@ func ReadSkip(path string) ([]string, error) {
 
 // WriteSkip replaces the skip file with resources, sorted and once each.
 func WriteSkip(path string, resources []string) error {
-	resources = slices.Clone(resources)
-	slices.Sort(resources)
-	resources = slices.Compact(resources)
+	return writeList(path, "skip list", "# Packages this machine does not install; zc-care skip manages it.\n", resources)
+}
+
+// writeList replaces the file with head and the names, sorted and once each.
+func writeList(path, what, head string, names []string) error {
+	names = slices.Clone(names)
+	slices.Sort(names)
+	names = slices.Compact(names)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("write skip list: %w", err)
+		return fmt.Errorf("write %s: %w", what, err)
 	}
 	var body strings.Builder
-	body.WriteString("# Packages this machine does not install; zc-care skip manages it.\n")
-	for _, r := range resources {
+	body.WriteString(head)
+	for _, r := range names {
 		body.WriteString(r)
 		body.WriteByte('\n')
 	}
-	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
-		return fmt.Errorf("write skip list: %w", err)
+	if err := manifest.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", what, err)
 	}
 	return nil
 }

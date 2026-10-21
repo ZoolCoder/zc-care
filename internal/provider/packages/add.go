@@ -43,9 +43,13 @@ func (p Provider) Add(t config.Target, e provider.Entry) error {
 	if sections := manifest.Sections(data); e.Section == "" && len(sections) > 0 {
 		return fmt.Errorf("choose a section: %s, or a new one", strings.Join(sections, ", "))
 	}
-	data = manifest.Insert(data, e.Section, line)
+	if data, err = manifest.Insert(data, e.Section, line); err != nil {
+		return err
+	}
 	if tap := tapOf(e.Name); kind != "tap" && tap != "" && !declares(items, "tap", tap) {
-		data = manifest.Insert(data, "", `tap "`+tap+`" # `+e.Name[len(tap)+1:])
+		if data, err = manifest.Insert(data, "", `tap "`+tap+`" # `+e.Name[len(tap)+1:]); err != nil {
+			return err
+		}
 	}
 	return writeFile(t.File, data)
 }
@@ -73,5 +77,5 @@ func writeFile(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, info.Mode().Perm())
+	return manifest.WriteFile(path, data, info.Mode().Perm())
 }

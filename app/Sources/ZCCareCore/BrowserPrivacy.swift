@@ -37,9 +37,9 @@ public enum BrowserPrivacy {
         }
     }
 
-    /// Removes a trace's files; returns how many would not go.
-    public static func clear(_ trace: BrowserTrace) -> Int {
-        trace.paths.filter { (try? FileManager.default.removeItem(at: $0)) == nil }.count
+    /// Moves a trace's files to the Trash, or deletes them for good; returns what would not go.
+    public static func clear(_ trace: BrowserTrace, permanently: Bool = false) -> Removal {
+        Removal.remove(trace.paths, permanently: permanently)
     }
 
     static func browsers(home: String) -> [Browser] {
@@ -89,6 +89,7 @@ public enum BrowserPrivacy {
     }
 
     private static func entries(_ path: String) -> [URL] {
-        (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: nil)) ?? []
+        guard OwnFolder.check(path) else { return [] }
+        return (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: nil)) ?? []
     }
 }

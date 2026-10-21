@@ -19,7 +19,9 @@ func (stuck) Plan(context.Context, config.Target) ([]plan.Action, error) {
 	return []plan.Action{{Op: plan.OpCreate, Target: "t", Resource: "r",
 		Do: func(context.Context) error { return nil }}}, nil
 }
-func (stuck) Status(context.Context, config.Target) (string, error) { return "stuck", nil }
+func (stuck) Measure(context.Context, config.Target) (provider.Live, error) {
+	return provider.Live{Summary: "stuck"}, nil
+}
 
 func cfg(dir string) config.Config {
 	return config.Config{Version: 1, Dir: dir, Targets: []config.Target{
@@ -39,7 +41,7 @@ func TestPlanApplyVerify(t *testing.T) {
 		t.Fatalf("plan %+v %v", p, err)
 	}
 	var out bytes.Buffer
-	if err := e.Apply(ctx, p, &out); err != nil {
+	if _, err := e.Apply(ctx, p, &out); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "applied and verified") {
@@ -56,7 +58,7 @@ func TestApplyCatchesAWriteThatDidNothing(t *testing.T) {
 	c.Targets[0].Provider = "stuck"
 	e, _ := New(c, Providers{"stuck": stuck{}}, []string{"a"})
 	p, _ := e.Plan(ctx)
-	if err := e.Apply(ctx, p, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "still outstanding") {
+	if _, err := e.Apply(ctx, p, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "still outstanding") {
 		t.Fatalf("apply %v", err)
 	}
 }
@@ -69,11 +71,77 @@ func TestApplyKeepsGoingPastAFailure(t *testing.T) {
 		Do: func(context.Context) error { return errors.New("boom") }}
 	p.Actions = append([]plan.Action{broken}, p.Actions...)
 	var out bytes.Buffer
-	if err := e.Apply(ctx, p, &out); err == nil || !strings.Contains(err.Error(), "1 change(s) failed") {
+	outcomes, err := e.Apply(ctx, p, &out)
+	if err == nil || !strings.Contains(err.Error(), "1 change(s) failed") {
 		t.Fatalf("apply %v", err)
+	}
+	if len(outcomes) != 2 || outcomes[0].Resource != "broken" || outcomes[0].Err == nil || outcomes[1].Err != nil {
+		t.Fatalf("outcomes %+v", outcomes)
 	}
 	if !strings.Contains(out.String(), "done  CREATE b") {
 		t.Fatalf("later action skipped: %q", out.String())
+	}
+}
+
+// scripted plans "same" for the targets in stuck and nothing for the rest.
+type scripted struct{ stuck map[string]bool }
+
+func (s scripted) Plan(_ context.Context, t config.Target) ([]plan.Action, error) {
+	if !s.stuck[t.Name] {
+		return nil, nil
+	}
+	return []plan.Action{{Op: plan.OpCreate, Target: t.Name, Resource: "same"}}, nil
+}
+func (scripted) Measure(context.Context, config.Target) (provider.Live, error) {
+	return provider.Live{}, nil
+}
+
+func twoTargets() config.Config {
+	return config.Config{Version: 1, Targets: []config.Target{
+		{Name: "a", Provider: "scripted"}, {Name: "b", Provider: "scripted"}}}
+}
+
+func ok(target string) plan.Action {
+	return plan.Action{Op: plan.OpCreate, Target: target, Resource: "same", Do: func(context.Context) error { return nil }}
+}
+
+func TestVerifyMatchesTargetAndResource(t *testing.T) {
+	// b still has "same" outstanding, but only a's was applied.
+	e, _ := New(twoTargets(), Providers{"scripted": scripted{stuck: map[string]bool{"b": true}}}, nil)
+	var p plan.Plan
+	p.Add(ok("a"))
+	if _, err := e.Apply(context.Background(), p, &bytes.Buffer{}); err != nil {
+		t.Fatalf("collided with another target's resource: %v", err)
+	}
+	p = plan.Plan{}
+	p.Add(ok("b"))
+	if _, err := e.Apply(context.Background(), p, &bytes.Buffer{}); err == nil {
+		t.Fatal("missed b's outstanding change")
+	}
+}
+
+func TestVerifyStillRunsAfterAFailure(t *testing.T) {
+	e, _ := New(twoTargets(), Providers{"scripted": scripted{stuck: map[string]bool{"a": true}}}, nil)
+	var p plan.Plan
+	p.Add(plan.Action{Op: plan.OpCreate, Target: "b", Resource: "broken", Do: func(context.Context) error { return errors.New("boom") }}, ok("a"))
+	_, err := e.Apply(context.Background(), p, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "1 change(s) failed") || !strings.Contains(err.Error(), "still outstanding") {
+		t.Fatalf("apply %v", err)
+	}
+}
+
+func TestApplyStopsWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	e, _ := New(twoTargets(), Providers{"scripted": scripted{}}, nil)
+	var p plan.Plan
+	first := plan.Action{Op: plan.OpCreate, Target: "a", Resource: "first", Do: func(context.Context) error { cancel(); return nil }}
+	p.Add(first, ok("b"))
+	outcomes, err := e.Apply(ctx, p, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "interrupted: 1 change(s) not run") {
+		t.Fatalf("apply %v", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].Resource != "first" {
+		t.Fatalf("outcomes %+v", outcomes)
 	}
 }
 
@@ -90,7 +158,7 @@ func TestSelectAndMissingProvider(t *testing.T) {
 	}
 }
 
-// counted measures, so Status must fill the counts from Measure.
+// counted has counts, so Status must fill them from Measure.
 type counted struct{ stuck }
 
 func (counted) Measure(context.Context, config.Target) (provider.Live, error) {
@@ -140,5 +208,24 @@ func TestCaptureNeedsOneCapturingTarget(t *testing.T) {
 	e, _ = New(cfg(t.TempDir()), Default(), []string{"a"})
 	if _, _, err := e.Capture(context.Background()); err == nil || !strings.Contains(err.Error(), "cannot capture") {
 		t.Fatalf("localdir: %v", err)
+	}
+}
+
+func TestSelectLeavesOutOtherProfilesTargets(t *testing.T) {
+	cfg := config.Config{Version: 1, Profiles: []string{"everyday"}, Targets: []config.Target{
+		{Name: "apps", Provider: "localdir", Path: "a"},
+		{Name: "dev", Provider: "localdir", Path: "b", Profiles: []string{"developer"}},
+		{Name: "home", Provider: "localdir", Path: "c", Profiles: []string{"everyday", "creative"}},
+	}}
+	got, err := Select(cfg, nil)
+	if err != nil || len(got) != 2 || got[0].Name != "apps" || got[1].Name != "home" {
+		t.Fatalf("select %+v %v", got, err)
+	}
+	if _, err := Select(cfg, []string{"dev"}); err == nil || !strings.Contains(err.Error(), "zc-care profile") {
+		t.Fatalf("named dev: %v", err)
+	}
+	cfg.Profiles = nil
+	if got, _ := Select(cfg, nil); len(got) != 3 {
+		t.Fatalf("a machine without profiles gets every target: %+v", got)
 	}
 }

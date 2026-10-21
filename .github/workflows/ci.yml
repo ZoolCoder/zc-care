@@ -33,8 +33,12 @@ jobs:
           esac
 
   quick:
-    # pull requests into develop: vet and the short tests, nothing else
-    if: github.event_name == 'pull_request' && github.base_ref == 'develop'
+    # pull requests into develop: vet and the short tests, nothing else. Run by
+    # hand on a branch, gh workflow run ci.yml --ref <branch>, when the pull
+    # request event started nothing.
+    if: >-
+      (github.event_name == 'pull_request' && github.base_ref == 'develop') ||
+      (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

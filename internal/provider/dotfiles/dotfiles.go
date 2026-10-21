@@ -28,8 +28,10 @@ type change struct {
 	path string
 	// outside is set when the target was edited since chezmoi last wrote it.
 	outside bool
-	op      plan.Op
-	what    string
+	// script is set for a script chezmoi would run, not a file it would write.
+	script bool
+	op     plan.Op
+	what   string
 }
 
 var ops = map[byte]struct {
@@ -72,7 +74,7 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 		if !ok {
 			continue
 		}
-		cs = append(cs, change{path: l[3:], outside: l[0] != ' ', op: o.op, what: o.what})
+		cs = append(cs, change{path: l[3:], outside: l[0] != ' ', script: l[1] == 'R', op: o.op, what: o.what})
 	}
 	return cs, nil
 }
@@ -114,6 +116,10 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		paths := withParents(dest, c.path)
 		actions = append(actions, plan.Action{
 			Op: c.op, Target: t.Name, Resource: c.path, Detail: detail,
+			Destructive: c.outside || c.script,
+			Before: func(context.Context) (plan.Undo, error) {
+				return before(filepath.Join(dest, c.path), c.script)
+			},
 			// --force: the plan already showed the overwrite, and without a
 			// terminal chezmoi would fail on its own prompt.
 			Do: func(ctx context.Context) error {
@@ -201,11 +207,6 @@ func (p Provider) Items(ctx context.Context, t config.Target) ([]provider.Item, 
 		}
 	}
 	return items, nil
-}
-
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
 }
 
 func destination(t config.Target) (string, error) {

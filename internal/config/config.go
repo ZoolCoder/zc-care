@@ -37,6 +37,9 @@ type Config struct {
 	// Skip is this machine's skip list, from SkipPath; Resolve hands it to
 	// every target.
 	Skip []string `yaml:"-"`
+	// Profiles is who this machine is for, from ProfilesPath; a target
+	// with profiles applies only when one of them is here.
+	Profiles []string `yaml:"-"`
 }
 
 // Target is one thing to reconcile.
@@ -77,6 +80,9 @@ type Target struct {
 	// Agents are the launchd agent plists the services provider keeps
 	// loaded.
 	Agents []string `yaml:"agents"`
+	// Profiles limits the target to machines with one of these profiles,
+	// such as developer or work; empty is every machine.
+	Profiles []string `yaml:"profiles"`
 	// Skip lists the resources, such as cask:ghostty, this machine does not
 	// install. The packages provider reads it; it is never in the YAML.
 	Skip []string `yaml:"-"`
@@ -173,6 +179,9 @@ func Load(path string, stdin io.Reader) (Config, error) {
 	if cfg.Skip, err = ReadSkip(SkipPath()); err != nil {
 		return Config{}, err
 	}
+	if cfg.Profiles, err = ReadProfiles(ProfilesPath()); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -209,6 +218,11 @@ func (c Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s: declared twice", where))
 		}
 		seen[t.Name] = true
+		for _, p := range t.Profiles {
+			if !IsProfile(p) {
+				errs = append(errs, fmt.Errorf("%s: profile %q must be kebab-case", where, p))
+			}
+		}
 		if !slices.Contains(Providers, t.Provider) {
 			errs = append(errs, fmt.Errorf("%s: provider %q is not one of %s", where, t.Provider, strings.Join(Providers, ", ")))
 		} else {
@@ -218,94 +232,131 @@ func (c Config) Validate() error {
 	return errors.Join(errs...)
 }
 
+// fieldCheck collects the problems with one target's fields.
+type fieldCheck struct {
+	where, provider string
+	errs            []error
+}
+
+func (c *fieldCheck) add(format string, args ...any) {
+	c.errs = append(c.errs, fmt.Errorf("%s: %s", c.where, fmt.Sprintf(format, args...)))
+}
+
+func (c *fieldCheck) need(field, value string) {
+	if value == "" {
+		c.add("%s is required for provider %s", field, c.provider)
+	}
+}
+
+func (c *fieldCheck) unused(field string, set bool) {
+	if set {
+		c.add("%s does nothing for provider %s", field, c.provider)
+	}
+}
+
 // validateFields checks the fields each provider needs, and refuses the ones
 // it would ignore.
 func (t Target) validateFields(where string) []error {
-	var errs []error
-	need := func(field, value string) {
-		if value == "" {
-			errs = append(errs, fmt.Errorf("%s: %s is required for provider %s", where, field, t.Provider))
-		}
-	}
-	unused := func(field string, set bool) {
-		if set {
-			errs = append(errs, fmt.Errorf("%s: %s does nothing for provider %s", where, field, t.Provider))
-		}
-	}
+	c := &fieldCheck{where: where, provider: t.Provider}
 	switch t.Provider {
 	case "localdir":
-		need("path", t.Path)
-		for name := range t.Files {
-			if !filepath.IsLocal(name) {
-				errs = append(errs, fmt.Errorf("%s: file %q must stay inside the target path", where, name))
-			}
-		}
+		t.checkLocaldir(c)
 	case "packages":
-		need("file", t.File)
+		c.need("file", t.File)
 	case "dotfiles":
-		need("source", t.Source)
-		if t.Mode != "" && t.Mode != "file" && t.Mode != "symlink" {
-			errs = append(errs, fmt.Errorf("%s: mode %q is not file or symlink", where, t.Mode))
-		}
+		t.checkDotfiles(c)
 	case "tools", "agents":
-		need("file", t.File)
+		c.need("file", t.File)
 	case "desktop":
-		if t.Wallpaper == "" && t.Screensaver == "" && t.Accent == "" {
-			errs = append(errs, fmt.Errorf("%s: set wallpaper, screensaver or accent for provider desktop", where))
-		}
-		if t.Accent != "" && !slices.Contains(Accents, t.Accent) {
-			errs = append(errs, fmt.Errorf("%s: accent %q is not one of %s", where, t.Accent, strings.Join(Accents, ", ")))
-		}
+		t.checkDesktop(c)
 	case "settings":
-		if len(t.Defaults) == 0 {
-			errs = append(errs, fmt.Errorf("%s: defaults is required for provider settings", where))
-		}
-		for domain, keys := range t.Defaults {
-			for name, v := range keys {
-				switch v.(type) {
-				case bool, int, float64, string:
-				default:
-					errs = append(errs, fmt.Errorf("%s: %s %s must be a bool, number or string", where, domain, name))
-				}
-			}
-		}
+		t.checkSettings(c)
 	case "services":
-		if len(t.Services) == 0 && len(t.Agents) == 0 {
-			errs = append(errs, fmt.Errorf("%s: set services or agents for provider services", where))
+		t.checkServices(c)
+	}
+	t.checkUnused(c)
+	return c.errs
+}
+
+func (t Target) checkLocaldir(c *fieldCheck) {
+	c.need("path", t.Path)
+	for name := range t.Files {
+		if !filepath.IsLocal(name) {
+			c.add("file %q must stay inside the target path", name)
 		}
-		for _, a := range t.Agents {
-			if filepath.Ext(a) != ".plist" {
-				errs = append(errs, fmt.Errorf("%s: agent %q must be a launchd .plist file", where, a))
+	}
+}
+
+func (t Target) checkDotfiles(c *fieldCheck) {
+	c.need("source", t.Source)
+	if t.Mode != "" && t.Mode != "file" && t.Mode != "symlink" {
+		c.add("mode %q is not file or symlink", t.Mode)
+	}
+}
+
+func (t Target) checkDesktop(c *fieldCheck) {
+	if t.Wallpaper == "" && t.Screensaver == "" && t.Accent == "" {
+		c.add("set wallpaper, screensaver or accent for provider desktop")
+	}
+	if t.Accent != "" && !slices.Contains(Accents, t.Accent) {
+		c.add("accent %q is not one of %s", t.Accent, strings.Join(Accents, ", "))
+	}
+}
+
+func (t Target) checkSettings(c *fieldCheck) {
+	if len(t.Defaults) == 0 {
+		c.add("defaults is required for provider settings")
+	}
+	for domain, keys := range t.Defaults {
+		for name, v := range keys {
+			switch v.(type) {
+			case bool, int, float64, string:
+			default:
+				c.add("%s %s must be a bool, number or string", domain, name)
 			}
 		}
 	}
+}
+
+func (t Target) checkServices(c *fieldCheck) {
+	if len(t.Services) == 0 && len(t.Agents) == 0 {
+		c.add("set services or agents for provider services")
+	}
+	for _, a := range t.Agents {
+		if filepath.Ext(a) != ".plist" {
+			c.add("agent %q must be a launchd .plist file", a)
+		}
+	}
+}
+
+// checkUnused refuses the fields that belong to another provider.
+func (t Target) checkUnused(c *fieldCheck) {
 	if t.Provider != "localdir" {
-		unused("path", t.Path != "")
-		unused("files", len(t.Files) > 0)
-		unused("prune", t.Prune)
+		c.unused("path", t.Path != "")
+		c.unused("files", len(t.Files) > 0)
+		c.unused("prune", t.Prune)
 	}
 	if t.Provider != "packages" && t.Provider != "tools" {
-		unused("upgrade", t.Upgrade)
+		c.unused("upgrade", t.Upgrade)
 	}
 	if t.Provider != "dotfiles" {
-		unused("source", t.Source != "")
-		unused("destination", t.Destination != "")
-		unused("mode", t.Mode != "")
+		c.unused("source", t.Source != "")
+		c.unused("destination", t.Destination != "")
+		c.unused("mode", t.Mode != "")
 	}
 	if !slices.Contains([]string{"packages", "tools", "agents"}, t.Provider) {
-		unused("file", t.File != "")
+		c.unused("file", t.File != "")
 	}
 	if t.Provider != "desktop" {
-		unused("wallpaper", t.Wallpaper != "")
-		unused("screensaver", t.Screensaver != "")
-		unused("accent", t.Accent != "")
+		c.unused("wallpaper", t.Wallpaper != "")
+		c.unused("screensaver", t.Screensaver != "")
+		c.unused("accent", t.Accent != "")
 	}
 	if t.Provider != "settings" {
-		unused("defaults", len(t.Defaults) > 0)
+		c.unused("defaults", len(t.Defaults) > 0)
 	}
 	if t.Provider != "services" {
-		unused("services", len(t.Services) > 0)
-		unused("agents", len(t.Agents) > 0)
+		c.unused("services", len(t.Services) > 0)
+		c.unused("agents", len(t.Agents) > 0)
 	}
-	return errs
 }
