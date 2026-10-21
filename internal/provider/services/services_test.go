@@ -47,7 +47,7 @@ func TestPlanStartsWhatIsNotRunning(t *testing.T) {
 		t.Fatalf("plan\n got %q\nwant %q", got, want)
 	}
 	ran := []string{
-		"brew services restart colima", "brew services restart borders", "brew services restart postgresql",
+		"brew services restart -- colima", "brew services restart -- borders", "brew services restart -- postgresql",
 		"launchctl enable gui/501/local.weekly", "launchctl bootstrap gui/501 /Users/me/Library/LaunchAgents/local.weekly.plist",
 	}
 	if !slices.Equal(r.Ran, ran) {

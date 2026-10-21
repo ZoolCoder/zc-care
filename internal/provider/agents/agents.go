@@ -288,7 +288,7 @@ func (p Provider) models(ctx context.Context, target string, models []string) ([
 		if !have[m] && !have[m+":latest"] {
 			ch.item.State, ch.action = provider.Missing, plan.Action{Op: plan.OpCreate, Target: target,
 				Resource: "model " + m, Detail: "ollama pull " + m,
-				Do: func(ctx context.Context) error { return p.r.Run(ctx, "ollama", "pull", m) }}
+				Do: func(ctx context.Context) error { return p.r.Run(ctx, "ollama", "pull", "--", m) }}
 		}
 		changes = append(changes, ch)
 	}

@@ -46,30 +46,30 @@ var brew = manager{
 		case "tap":
 			// Homebrew loads a third-party tap's formulae only once it is trusted.
 			return func(ctx context.Context) error {
-				if err := r.Run(ctx, "brew", "tap", i.Name); err != nil {
+				if err := r.Run(ctx, "brew", "tap", "--", i.Name); err != nil {
 					return err
 				}
-				return r.Run(ctx, "brew", "trust", i.Name)
+				return r.Run(ctx, "brew", "trust", "--", i.Name)
 			}
 		case "cask":
-			return run(r, "brew", "install", "--cask", "--adopt", i.Name)
+			return run(r, "brew", "install", "--cask", "--adopt", "--", i.Name)
 		case "mas":
 			// mas runs sudo itself but drops SUDO_ASKPASS, so without a
 			// terminal it cannot ask; under our sudo the dialog works.
 			return run(r, "sudo", "mas", "install", i.ID)
 		}
-		return run(r, "brew", "install", i.Name)
+		return run(r, "brew", "install", "--", i.Name)
 	},
 	remove: func(r sh.Runner, i item) func(context.Context) error {
 		switch i.Kind {
 		case "tap":
-			return run(r, "brew", "untap", i.Name)
+			return run(r, "brew", "untap", "--", i.Name)
 		case "cask":
-			return run(r, "brew", "uninstall", "--cask", i.Name)
+			return run(r, "brew", "uninstall", "--cask", "--", i.Name)
 		case "mas":
 			return run(r, "sudo", "mas", "uninstall", i.ID)
 		}
-		return run(r, "brew", "uninstall", i.Name)
+		return run(r, "brew", "uninstall", "--", i.Name)
 	},
 }
 

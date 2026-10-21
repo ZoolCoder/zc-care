@@ -136,7 +136,7 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		}
 		actions = append(actions, plan.Action{
 			Op: plan.OpCreate, Target: t.Name, Resource: k.String(), Detail: "install with mise",
-			Do: func(ctx context.Context) error { return p.r.Run(ctx, "mise", "install", "-C", dir, k.String()) },
+			Do: func(ctx context.Context) error { return p.r.Run(ctx, "mise", "install", "-C", dir, "--", k.String()) },
 		})
 	}
 	if t.Upgrade {
@@ -162,7 +162,7 @@ func (p Provider) upgrades(ctx context.Context, t config.Target, tools map[tool]
 		actions = append(actions, plan.Action{
 			Op: plan.OpUpdate, Target: t.Name, Resource: k.String(),
 			Detail: "upgrade with mise, " + v.current + " to " + v.latest,
-			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "mise", "upgrade", "-C", dir, k.String()) },
+			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "mise", "upgrade", "-C", dir, "--", k.String()) },
 		})
 	}
 	return actions

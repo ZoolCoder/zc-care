@@ -115,7 +115,7 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		case "brew":
 			a.Detail = "start with brew services, and at every login (now " + s.detail + ")"
 			// restart also recovers a service that started and then failed.
-			a.Do = func(ctx context.Context) error { return p.r.Run(ctx, "brew", "services", "restart", s.name) }
+			a.Do = func(ctx context.Context) error { return p.r.Run(ctx, "brew", "services", "restart", "--", s.name) }
 		default:
 			a.Detail = "load " + filepath.Base(s.file) + " into launchd"
 			// A disabled agent makes bootstrap fail with "5: Input/output
