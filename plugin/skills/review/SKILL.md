@@ -32,7 +32,7 @@ Keep only new features, behaviour changes and deprecations that touch the item's
 
 - Each `doctor` check that is not ok, with its fix.
 - `missing` and `differs` items: offer a plan with the plan-apply skill.
-- `not declared` items: installed but not in the config. Offer to declare each with the add-software skill, or to take it off with `remove`; run `remove` only for items the user named.
+- `not declared` items: installed but not in the config. Offer to declare each with the add-software skill, or to take it off with `remove`, which only plans it: the user applies the plan at a terminal. Plan `remove` only for items the user named.
 - Entries without a why: propose one line each, from the package description and how the user works, for them to confirm.
 - Two tools doing one job, judged by their whys: name the overlap and suggest which to keep.
 

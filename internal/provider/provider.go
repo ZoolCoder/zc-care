@@ -95,10 +95,11 @@ type Adder interface {
 	Add(t config.Target, e Entry) error
 }
 
-// Remover is a Provider that can uninstall an item and take it out of its
-// manifest, the one change apply never makes on its own.
+// Remover is a Provider that can plan the uninstall of an item and the drop
+// of its line from the manifest: a DELETE, the one change a plan only holds
+// when a person asked for that item by name.
 type Remover interface {
-	Remove(ctx context.Context, t config.Target, kind, name string) error
+	PlanRemove(t config.Target, kind, name string) (plan.Action, error)
 }
 
 // Capturer is a Provider that can write its manifest from what the machine

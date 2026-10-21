@@ -1,33 +1,30 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"strings"
-
-	"github.com/zoolcoder/zc-care/internal/config"
-	"github.com/zoolcoder/zc-care/internal/engine"
-	"github.com/zoolcoder/zc-care/internal/sh"
 )
 
 func init() {
 	optional["remove"] = runRemove
 	optionalUsage = append(optionalUsage,
 		"  "+name+" remove   -target t kind:name\n"+
-			"                                uninstall an item and drop it from t's manifest; mas:ID for an undeclared app\n")
+			"                                plan the uninstall of an item, show it and ask; drops it from\n"+
+			"                                t's manifest; mas:ID for an undeclared app\n")
 }
 
-// runRemove uninstalls one item now, since apply only ever adds, and takes
-// it out of the manifest so the next plan does not bring it back.
+// runRemove is `apply -remove` for a person at a terminal: the plan is one
+// uninstall, shown and confirmed like any plan that deletes. Apply only ever
+// adds, so removing is always a request for one named item.
 func runRemove(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("remove", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
 	path := flags.String("config", "", "config file")
 	item := flags.String("item", "", "kind:name, such as cask:raycast; or the first argument")
+	yes := flags.Bool("yes", false, "skip the confirmation prompt")
 	var targets targetList
 	flags.Var(&targets, "target", "the target whose manifest declares the item")
 	if err := flags.Parse(args); err != nil {
@@ -42,22 +39,12 @@ func runRemove(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if *path = findConfig(*path); *path == "-" {
 		return errors.New("remove edits a manifest on disk; pass a config file, not standard input")
 	}
-	cfg, err := config.Load(*path, stdin)
-	if err != nil {
-		return err
+	apply := []string{"apply", "-config", *path, "-remove", *item}
+	for _, t := range targets {
+		apply = append(apply, "-target", t)
 	}
-	eng, err := engine.New(cfg, engine.With(sh.Exec{Stdin: stdin, Stdout: stderr, Stderr: stderr}), targets)
-	if err != nil {
-		return err
+	if *yes {
+		apply = append(apply, "-yes")
 	}
-	kind, itemName, ok := strings.Cut(*item, ":")
-	if !ok {
-		kind, itemName = "", *item
-	}
-	t, err := eng.Remove(context.Background(), kind, itemName)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(stdout, "removed %s and dropped it from %s\n", *item, t.File)
-	return err
+	return runCLI(apply, stdin, stdout, stderr)
 }

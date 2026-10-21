@@ -72,11 +72,14 @@ Flags:
   -config string   config file, or "-" for standard input; default: $` + envConfig + `,
                    then ./` + name + `.yaml, then ~/.config/` + name + `/` + name + `.yaml
   -target value    limit to this target; repeat for several
-  -yes             skip the confirmation prompt for deletions
+  -yes             skip the confirmation prompt for deletions, overwrites of outside
+                   edits and scripts
   -exit-code       plan: exit 2 for changes, 3 for manual-only
   -upgrade         plan and apply: also upgrade outdated packages and runtimes
   -only value      plan and apply: only the change to this resource, such as
                    brew:tmux; repeat for several
+  -remove item     plan and apply: only uninstall this item, kind:name, and drop it
+                   from -target's manifest
   -json            plan, status and list: machine-readable
   -out string      plan: save the plan, to apply exactly what you reviewed;
                    capture: write the manifest to this file, not stdout
@@ -170,6 +173,7 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	// Not in the usage text: the MCP server sets it, so history tells an
 	// agent's apply from one typed at a terminal.
 	via := flags.String("via", "the terminal", "apply: who asked, for the history")
+	remove := flags.String("remove", "", "only uninstall this item, kind:name")
 	var targets, only targetList
 	flags.Var(&targets, "target", "limit to this target")
 	flags.Var(&only, "only", "only the change to this resource")
@@ -205,6 +209,11 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		} else if !slices.Equal(only, s.Only) {
 			return fmt.Errorf("this plan was saved for -only %v; apply it with the same selection, or none", s.Only)
 		}
+		if *remove == "" {
+			*remove = s.Remove
+		} else if *remove != s.Remove {
+			return fmt.Errorf("this plan was saved for -remove %q; apply it with the same item, or none", s.Remove)
+		}
 		*upgrade = *upgrade || s.Upgrade
 		saved = &s
 	}
@@ -237,14 +246,14 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runCapture(ctx, eng, *out, *force, stdout)
 	}
 
-	p, err := eng.Plan(ctx)
+	p, err := planFor(ctx, eng, *remove)
 	if err != nil {
 		return err
 	}
 	p = p.Only(only)
 	if cmd == "plan" {
 		s := p.Snapshot(targets)
-		s.Upgrade, s.Only = *upgrade, only
+		s.Upgrade, s.Only, s.Remove = *upgrade, only, *remove
 		return runPlan(p, s, *out, *asJSON, *exitCode, stdout, stderr)
 	}
 
@@ -261,7 +270,7 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	if p.Destructive() && !*yes {
 		if *path == "-" {
-			return errors.New("this plan deletes things and the config came from stdin; pass -yes to confirm")
+			return errors.New("this plan deletes things, overwrites outside edits or runs scripts, and the config came from stdin; pass -yes to confirm")
 		}
 		if !confirm(stdin, stdout) {
 			return errCancelled
@@ -271,6 +280,19 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	outcomes, err := eng.Apply(ctx, p, stdout)
 	recordApply(outcomes, *via)
 	return err
+}
+
+// planFor is the plan for the config, or with remove set, the one change that
+// uninstalls that item.
+func planFor(ctx context.Context, eng *engine.Engine, remove string) (plan.Plan, error) {
+	if remove == "" {
+		return eng.Plan(ctx)
+	}
+	kind, name, ok := strings.Cut(remove, ":")
+	if !ok {
+		kind, name = "", remove
+	}
+	return eng.PlanRemove(kind, name)
 }
 
 // upgradeAll makes every target that can upgrade do so, as if its config said
@@ -334,7 +356,7 @@ func writeStatus(w io.Writer, rows []engine.TargetStatus, asJSON bool) error {
 }
 
 func confirm(stdin io.Reader, stdout io.Writer) bool {
-	fmt.Fprint(stdout, "\nthis plan deletes things. type yes to continue: ")
+	fmt.Fprint(stdout, "\nthis plan deletes things, overwrites edits made outside the tool or runs scripts. type yes to continue: ")
 	var answer string
 	if _, err := fmt.Fscanln(stdin, &answer); err != nil {
 		return false

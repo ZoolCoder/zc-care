@@ -368,22 +368,23 @@ func (e *Engine) Add(entry provider.Entry) (config.Target, error) {
 	return t, a.Add(t, entry)
 }
 
-// Remove uninstalls an item and drops it from the one selected target's
-// manifest.
-func (e *Engine) Remove(ctx context.Context, kind, name string) (config.Target, error) {
+// PlanRemove is the plan that uninstalls an item and drops it from the one
+// selected target's manifest. It changes nothing until the plan is applied.
+func (e *Engine) PlanRemove(kind, name string) (plan.Plan, error) {
 	if len(e.targets) != 1 {
-		return config.Target{}, fmt.Errorf("remove needs exactly one target, %d selected; use -target", len(e.targets))
+		return plan.Plan{}, fmt.Errorf("remove needs exactly one target, %d selected; use -target", len(e.targets))
 	}
 	t := e.targets[0]
 	prov, err := e.provider(t)
 	if err != nil {
-		return t, err
+		return plan.Plan{}, err
 	}
 	r, ok := prov.(provider.Remover)
 	if !ok {
-		return t, fmt.Errorf("provider %s cannot remove items", t.Provider)
+		return plan.Plan{}, fmt.Errorf("provider %s cannot remove items", t.Provider)
 	}
-	return t, r.Remove(ctx, t, kind, name)
+	a, err := r.PlanRemove(t, kind, name)
+	return plan.Plan{Actions: []plan.Action{a}}, err
 }
 
 // Capture writes the manifest the one selected target would declare to

@@ -74,7 +74,7 @@ func TestBrewPlanInstallsWhatIsMissing(t *testing.T) {
 		}
 	}
 	ran := strings.Join(r.Ran, "\n")
-	if ran != "brew tap hashicorp/tap\nbrew trust hashicorp/tap\nbrew install --cask --adopt ghostty\nsudo mas install 6745342698" {
+	if ran != "brew tap -- hashicorp/tap\nbrew trust -- hashicorp/tap\nbrew install --cask --adopt -- ghostty\nsudo mas install 6745342698" {
 		t.Fatalf("ran\n%s", ran)
 	}
 }
@@ -235,7 +235,7 @@ func TestUpgradeIsOptIn(t *testing.T) {
 		t.Fatalf("plan %v %v", actions, err)
 	}
 	_ = actions[0].Do(context.Background())
-	if r.Ran[0] != "brew upgrade git" {
+	if r.Ran[0] != "brew upgrade -- git" {
 		t.Fatalf("ran %v", r.Ran)
 	}
 }
@@ -254,6 +254,17 @@ func TestCaptureWritesABrewfile(t *testing.T) {
 	// A captured Brewfile reads back.
 	if _, _, err := parseBrewfile(got); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAddRefusesALineBreakInTheSection(t *testing.T) {
+	tg := writeManifest(t, "Brewfile", "# Git\nbrew \"git\"\n")
+	err := New(brewMachine()).Add(tg, provider.Entry{Name: "lazygit", Section: "Git\ncask \"evil\""})
+	if err == nil {
+		t.Fatal("section with a line break accepted")
+	}
+	if b, _ := os.ReadFile(tg.File); string(b) != "# Git\nbrew \"git\"\n" {
+		t.Fatalf("Brewfile changed:\n%s", b)
 	}
 }
 
@@ -279,24 +290,59 @@ func TestAddDeclaresUnderASectionWithItsTap(t *testing.T) {
 	}
 }
 
-func TestRemoveUninstallsAndDropsTheLine(t *testing.T) {
+func TestPlanRemoveIsADeleteThatUninstallsAndDropsTheLine(t *testing.T) {
 	tg := writeManifest(t, "Brewfile", "# Git\nbrew \"git\" # version control\nbrew \"htop\" # processes\nmas \"Pages\", id: 361309726 # documents\n")
 	r := &sh.Fake{}
 	p := New(r)
-	if err := p.Remove(context.Background(), tg, "brew", "HTOP"); err != nil {
-		t.Fatal(err)
+	var actions []plan.Action
+	for _, c := range [][2]string{{"brew", "HTOP"}, {"mas", "Pages"}, {"mas", "409201541"}} {
+		a, err := p.PlanRemove(tg, c[0], c[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		actions = append(actions, a)
 	}
-	if err := p.Remove(context.Background(), tg, "mas", "Pages"); err != nil {
-		t.Fatal(err)
+	if len(r.Ran) != 0 {
+		t.Fatalf("planning ran %q", r.Ran)
 	}
-	if err := p.Remove(context.Background(), tg, "mas", "409201541"); err != nil {
-		t.Fatal(err)
+	if got := strings.Join(resources(actions), ","); got != "DELETE brew:htop,DELETE mas:Pages,DELETE mas:409201541" {
+		t.Fatalf("plan %s", got)
 	}
-	if want := "brew uninstall htop\nsudo mas uninstall 361309726\nsudo mas uninstall 409201541"; strings.Join(r.Ran, "\n") != want {
+	for _, a := range actions {
+		if err := a.Do(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := "brew uninstall -- htop\nsudo mas uninstall 361309726\nsudo mas uninstall 409201541"; strings.Join(r.Ran, "\n") != want {
 		t.Fatalf("ran %q", r.Ran)
 	}
 	b, _ := os.ReadFile(tg.File)
 	if want := "# Git\nbrew \"git\" # version control\n"; string(b) != want {
 		t.Fatalf("Brewfile:\n%s", b)
+	}
+}
+
+func TestPlanRemoveRefusesWhatBrewWouldReadAsAFlag(t *testing.T) {
+	tg := writeManifest(t, "Brewfile", "brew \"git\"\n")
+	p := New(&sh.Fake{})
+	for _, c := range [][2]string{
+		{"brew", "--force"}, {"cask", "--zap"}, {"tap", "-v"}, {"", "--force"},
+		{"mas", "Pages"}, {"mas", "-1"}, {"vscode", "golang.go"},
+	} {
+		if _, err := p.PlanRemove(tg, c[0], c[1]); err == nil {
+			t.Fatalf("%s:%s planned", c[0], c[1])
+		}
+	}
+}
+
+func TestInstallPutsManifestNamesAfterTheOptionTerminator(t *testing.T) {
+	r := &sh.Fake{}
+	for _, i := range []item{{Kind: "brew", Name: "--force"}, {Kind: "cask", Name: "--zap"}} {
+		if err := brew.install(r, i)(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := "brew install -- --force\nbrew install --cask --adopt -- --zap"; strings.Join(r.Ran, "\n") != want {
+		t.Fatalf("ran %q", r.Ran)
 	}
 }

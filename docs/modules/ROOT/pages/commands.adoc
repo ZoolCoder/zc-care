@@ -133,16 +133,23 @@ $ zc-care add -target runtimes -why "Builds zc-care" runtime:go@1.26
 
 == Remove
 
-`remove` uninstalls one item now and drops its line from the manifest, so the
-next plan does not bring it back. Apply only ever adds; `remove` is how
-something leaves.
+`remove` plans the uninstall of one item, shows it as a DELETE and asks before
+it uninstalls the item and drops its line from the manifest, so the next plan
+does not bring it back. Apply only ever adds; `remove` is how something leaves.
+It is `zc-care apply -remove kind:name`, so `zc-care plan -remove kind:name
+-out file` saves the same plan for review, and the apply is recorded in the
+history. Pass `-yes` to skip the prompt.
 
 [source,console]
 ----
 $ zc-care remove -target packages brew:htop
-removed brew:htop and dropped it from /Users/me/config/Brewfile
+DELETE  packages  brew:htop  uninstall with brew and drop it from /Users/me/config/Brewfile
+this plan deletes things, overwrites edits made outside the tool or runs scripts. type yes to continue: yes
 $ zc-care remove -target packages mas:409201541
 ----
+
+An agent cannot remove anything: the MCP `remove` tool only returns a plan, and
+a plan that deletes is applied at a terminal.
 
 * The item is `kind:name` as `list` shows it. An item the manifest does not
   declare is still uninstalled, so leftovers go through the tool too.
