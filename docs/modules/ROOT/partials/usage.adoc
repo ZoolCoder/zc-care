@@ -18,6 +18,10 @@ Usage:
                                  -plist prints a launchd agent that runs it daily
   zc-care add      -target t -why w [-section s] kind:name
                                 declare an item in t's manifest; plan and apply install it
+  zc-care export   [-o file] [-config f] [-target t]
+                                save what this Mac has, per target, as JSON
+  zc-care diff     [-json] a.json [b.json]
+                                what differs between two exports, or one and this Mac
   zc-care mcp                     stdio MCP server for agents
   zc-care remove   -target t kind:name
                                 plan the uninstall of an item, show it and ask; drops it from
