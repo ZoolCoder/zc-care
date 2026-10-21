@@ -11,7 +11,9 @@
 | `list` | Every package, app, dotfile and runtime the config declares, one line each: its state, installed version, the app it configures, and why it is there. Then what is installed but declared nowhere.
 | `add ITEM` | Declare a package or runtime in one target's manifest, with why it is there. Installs nothing; `plan` and `apply` do.
 | `capture` | Print the manifest one target would declare to match this machine. Needs `-target`.
-| `validate` | Check the config offline.
+| `validate` | Check the config offline, and each agents manifest, including its `+${keychain:...}+` references.
+| `export` | Save what this Mac has, per target, as a JSON snapshot. `-o FILE` writes a file (mode 0600) instead of standard output.
+| `diff A.json [B.json]` | What differs between two snapshots, or between one and this Mac. See <<Compare two Macs>>.
 | `doctor` | Machine health: binary, system, config, the programs targets need, and each target. It also warns about weak security settings, keys without a passphrase, unsigned commits, secrets in the shell history and risky AI agent configs, each with its fix. xref:security.adoc#_what_doctor_checks[Every check].
 | `upgrade` | Save what is outdated to the state folder, then `apply -upgrade`. The review skill reads the snapshot to say what moved from what to what.
 | `history` | What was applied, newest first: when, which target, from the terminal, ZC Care or an agent, and whether it worked. Drift changes show here too.
@@ -33,12 +35,41 @@
 | `-adoc` | `list`: the declared packages and runtimes as an AsciiDoc page, one table per section.
 | `-why TEXT` | `add`: one line on why the item is there.
 | `-section NAME` | `add`: the manifest section to add it under; a new name starts a new section.
-| `-json` | `plan`, `status`, `list` and `doctor`: machine-readable.
+| `-json` | `plan`, `status`, `list`, `doctor` and `diff`: machine-readable.
 | `-exit-code` | `plan`: exit 2 for changes, 3 for manual-only.
 | `-upgrade` | `plan`, `apply`: also upgrade outdated packages and runtimes, as if every `packages` and `tools` target said `upgrade: true`.
 | `-only RESOURCE` | `plan`, `apply`: only the change to this resource, such as `brew:tmux`; repeat for several. A saved plan remembers `-upgrade` and `-only`.
 | `-yes` | `apply`: skip the confirmation prompt for deletions.
 |===
+
+== Compare two Macs
+
+[source,console]
+----
+$ zc-care export -o mini.json     # on the first Mac
+$ zc-care export -o air.json      # on the second
+$ zc-care diff mini.json air.json
+A mini.json: mini, macOS 15.1, 2026-10-20T08:00:00Z
+B air.json: air, macOS 15.2, 2026-10-21T08:00:00Z
+
+packages
+  only in B
+    cask:ghostty  1.0
+  different
+    brew:git  2.45.0 -> 2.46.0
+----
+
+`export` reads what `list` reads: each target's items with their state and
+version, a setting's live value, and the machine's host name, macOS version
+and date. A snapshot holds no secrets and no file contents. For a dotfile or a
+`localdir` file it holds the path and the sha256 of the live file, so two Macs
+compare by hash. An item that is missing, skipped or manual counts as absent.
+Installed items that no target declares are in the snapshot too, marked
+`not declared`.
+
+`diff` groups by target: items only in A, only in B, and items on both with a
+different version, value or hash. With one file, B is this Mac, read live with
+`-config`. Targets that match are left out.
 
 == Inventory
 

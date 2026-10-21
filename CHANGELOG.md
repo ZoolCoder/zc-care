@@ -24,6 +24,15 @@ here with what to edit.
 - `zc-care profile` shows and sets who a Mac is for. A target's new
   `profiles` key limits it to Macs with one of them.
 - `doctor` checks that Time Machine has a backup disk.
+- `zc-care export` saves what a Mac has as a JSON snapshot: every target's
+  items with state and version, and the sha256 of dotfiles, never their
+  content. `zc-care diff a.json b.json` shows what only one Mac has and what
+  differs; with one file it compares against this Mac.
+- Agent servers can take secrets from the keychain: write
+  `${keychain:service}` or `${keychain:service/account}` in a command, arg,
+  url, env or header. Plans, history and errors show the reference, not the
+  secret. `validate` flags a malformed one. For dotfiles use chezmoi's
+  `keyring` template function.
 
 ## v0.1.0 — 2026-10-18
 

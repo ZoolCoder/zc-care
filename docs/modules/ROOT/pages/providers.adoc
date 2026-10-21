@@ -67,7 +67,10 @@ still list without it.
 Applies a https://www.chezmoi.io[chezmoi] source directory. Use chezmoi's
 naming (`dot_zshrc`, `private_`, `executable_`, `.tmpl`) and its templates
 for per-machine differences. Its secrets support keeps passwords out of the
-repository.
+repository. zc-care never renders a dotfile, so it has no secret references
+of its own here: read the keychain from a template with chezmoi's `keyring`
+function, such as `+{{ keyring "service" "account" }}+`. `plan` shows only the
+path; the rendered value stays inside chezmoi.
 
 The plan is `chezmoi status`:
 
@@ -285,6 +288,15 @@ models: [qwen3:8b, nomic-embed-text]
   `ollama pull`. `ollama serve` must be running. `list` shows each model.
 * Keep keys out of the file: write `+${NAME}+` and keep the value in the
   keychain or a password manager. `doctor` warns about plain-text keys.
+* A server's command, args, url, env and header values may hold
+  `+${keychain:service}+` or `+${keychain:service/account}+`. Apply reads it
+  from the login keychain with `security find-generic-password -s service
+  [-a account] -w`, compares it with the live file in memory and writes it.
+  Plans, saved plans, `history`, `diff` and errors show only the reference.
+  A missing item fails the plan, naming the reference and the fix:
+  `security add-generic-password -s service -a $USER -w`. `validate` flags a
+  malformed reference. The agent's own config file still holds the secret in
+  plain text, as the agent needs it there.
 
 [#localdir]
 == localdir

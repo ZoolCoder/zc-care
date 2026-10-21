@@ -410,7 +410,9 @@ brew "lazygit"   # git TUI for staging hunks
 | `add -target t -why w kind:name` | Declares an item in a target's manifest, under the right section. The next apply installs it. |
 | `remove -target t kind:name` | Plans the uninstall, shows it and drops the item from the manifest after you confirm. Agents only get the plan. |
 | `capture -target t` | Writes a target's manifest from what this machine has. |
-| `validate` | Checks the config offline. |
+| `validate` | Checks the config offline, and agents manifests for bad `${keychain:...}` references. |
+| `export [-o file]` | Saves what this Mac has, per target, as a JSON snapshot without secrets. |
+| `diff a.json [b.json]` | Shows what differs between two snapshots, or one and this Mac. |
 | `doctor` | Checks programs, config, targets and macOS security settings, each with its fix. |
 | `skip [-undo] kind:name` | Lists or changes the packages this machine leaves out. |
 | `mcp` | Starts the MCP server for AI agents, over stdio. |
