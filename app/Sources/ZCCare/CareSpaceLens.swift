@@ -35,11 +35,15 @@ struct SpaceLensView: View {
                         Text(node.path == root.path ? "Home" : (node.path as NSString).abbreviatingWithTildeInPath)
                             .font(.caption).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle).padding(.bottom, 6)
+                        growers(node)
                         ForEach(Array(node.children.enumerated()), id: \.element.id) { i, child in
                             Button { if !child.children.isEmpty { focus = child.path } } label: {
                                 HStack {
                                     Circle().fill(Sunburst.color(i, depth: 0)).frame(width: 9, height: 9)
                                     Text(child.name).lineLimit(1)
+                                    if let grew = care.space?.growth(of: child.path), grew >= SpaceScan.noticeable {
+                                        Text("+" + Store.bytes(grew)).font(.caption).foregroundStyle(Theme.warning)
+                                    }
                                     Spacer()
                                     Text(Store.bytes(child.size)).monospacedDigit().foregroundStyle(.secondary)
                                     // Only folders measured further down open.
@@ -87,6 +91,40 @@ struct SpaceLensView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
+        }
+    }
+
+    /// What grew most since the previous scan inside this folder, each with
+    /// the module that cleans that kind of folder, where one does.
+    @ViewBuilder private func growers(_ node: SpaceNode) -> some View {
+        let grown = care.space?.growers(under: node.path) ?? []
+        if !grown.isEmpty, let since = care.space?.previousAt {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Grew since \(since.formatted(date: .abbreviated, time: .omitted))")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                ForEach(grown) { grower in
+                    HStack {
+                        Text((grower.path as NSString).abbreviatingWithTildeInPath)
+                            .lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Text("+" + Store.bytes(grower.grew)).monospacedDigit().foregroundStyle(Theme.warning)
+                        if let module = SpaceDestination.of(grower.path, home: NSHomeDirectory()).map(Self.module) {
+                            Button(module.rawValue) { care.open(module) }
+                                .buttonStyle(.zcLink).font(.caption)
+                                .help("Open \(module.rawValue) to clean it up")
+                        }
+                    }
+                }
+            }
+            .padding(.bottom, 10)
+        }
+    }
+
+    private static func module(_ destination: SpaceDestination) -> Care.Module {
+        switch destination {
+        case .clutter: .clutter
+        case .developer: .developer
+        case .cloud: .cloud
         }
     }
 

@@ -112,7 +112,7 @@ func TestPlanWritesEveryClientAndConverges(t *testing.T) {
 	if read(t, filepath.Join(home, ".codex/skills/review/SKILL.md")) == "" {
 		t.Error("skill not copied")
 	}
-	if !strings.Contains(strings.Join(f.Ran, "\n"), "ollama pull qwen3:8b") {
+	if !strings.Contains(strings.Join(f.Ran, "\n"), "ollama pull -- qwen3:8b") {
 		t.Errorf("ran %v", f.Ran)
 	}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/zoolcoder/toolshell/activity"
+	"github.com/zoolcoder/zc-care/internal/engine"
 )
 
 func TestApplyIsRecordedInHistory(t *testing.T) {
@@ -29,6 +31,29 @@ func TestApplyIsRecordedInHistory(t *testing.T) {
 	var entries []activity.Entry
 	if err := json.Unmarshal([]byte(out), &entries); err != nil || len(entries) != 1 || !entries[0].OK || entries[0].Kind != "apply" {
 		t.Fatalf("history -json %v: %s", err, out)
+	}
+}
+
+func TestPartialFailureIsRecordedPerTarget(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	recordApply([]engine.Outcome{
+		{Target: "pkgs", Resource: "jq"},
+		{Target: "pkgs", Resource: "wget", Err: errors.New("no bottle")},
+		{Target: "dots", Resource: ".zshrc"},
+	}, "the terminal")
+	entries, err := activityLog("").Recent(10)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("entries %v: %+v", err, entries)
+	}
+	byTarget := map[string]activity.Entry{}
+	for _, e := range entries {
+		byTarget[e.Target] = e
+	}
+	if e := byTarget["dots"]; !e.OK || !strings.Contains(e.Detail, ".zshrc") {
+		t.Fatalf("dots %+v", e)
+	}
+	if e := byTarget["pkgs"]; e.OK || !strings.Contains(e.Detail, "wget: no bottle") || !strings.Contains(e.Detail, "1 applied: jq") {
+		t.Fatalf("pkgs %+v", e)
 	}
 }
 

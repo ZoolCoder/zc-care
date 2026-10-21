@@ -45,6 +45,13 @@ func TestPlanReadsChezmoiStatus(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("plan\n%s", strings.Join(got, "\n"))
 	}
+	// Overwriting an outside edit and running a script need confirmation; a
+	// plain add or update does not.
+	for n, destructive := range []bool{false, true, false, true} {
+		if actions[n].Destructive != destructive {
+			t.Fatalf("%s destructive = %v", actions[n].Resource, actions[n].Destructive)
+		}
+	}
 	if err := actions[1].Do(context.Background()); err != nil {
 		t.Fatal(err)
 	}

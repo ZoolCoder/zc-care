@@ -699,6 +699,9 @@ private struct StatusLine: View {
                     .spinning(store.busy != nil)
                 Text(store.busy.map { $0 + "…" } ?? store.message?.text ?? "").font(.caption).lineLimit(3)
                 Spacer()
+                if let cancel = store.cancelBusy {
+                    Button("Cancel", action: cancel).buttonStyle(.zcLink).font(.caption)
+                }
                 if store.busy == nil, let m = store.message {
                     if let log = m.log {
                         Button("Log") { NSWorkspace.shared.open(log) }.buttonStyle(.zcLink).font(.caption)

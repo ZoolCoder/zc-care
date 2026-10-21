@@ -65,13 +65,11 @@ public struct Junk: Sendable, Equatable, Identifiable {
             .sorted { $0.size > $1.size }
     }
 
-    /// Removes every entry but those kept, or only the named ones, and
-    /// returns how many would not go: some caches belong to the system.
+    /// Moves every entry but those kept, or only the named ones, to the Trash, or deletes them for
+    /// good, and returns what would not go: some caches belong to the system.
     @discardableResult
-    public func empty(keeping extra: Set<String> = [], only: Set<String>? = nil) -> Int {
-        entries(keeping: extra)
-            .filter { only?.contains($0.lastPathComponent) ?? true }
-            .filter { (try? FileManager.default.removeItem(at: $0)) == nil }.count
+    public func empty(keeping extra: Set<String> = [], only: Set<String>? = nil, permanently: Bool = false) -> Removal {
+        Removal.remove(entries(keeping: extra).filter { only?.contains($0.lastPathComponent) ?? true }, permanently: permanently)
     }
 
     /// The entries running commands point into: an MCP server npx started

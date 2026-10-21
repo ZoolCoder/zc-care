@@ -20,8 +20,9 @@ type Provider interface {
 	// Plan compares live state with t and returns what would change. It must
 	// not write.
 	Plan(ctx context.Context, t config.Target) ([]plan.Action, error)
-	// Status is a one-line summary of live state, without diffing.
-	Status(ctx context.Context, t config.Target) (string, error)
+	// Measure counts what is in place, so status and ZC Care can show
+	// progress; Live.Summary is the one-line form.
+	Measure(ctx context.Context, t config.Target) (Live, error)
 }
 
 // Live is a target's measured state: how many of the items it declares are
@@ -29,12 +30,6 @@ type Provider interface {
 type Live struct {
 	InPlace, Declared int
 	Summary           string
-}
-
-// Measurer is a Provider that can count what is in place, so status and
-// ZC Care can show progress. Status stays the one-line form of the same reading.
-type Measurer interface {
-	Measure(ctx context.Context, t config.Target) (Live, error)
 }
 
 // Requirer is a Provider that runs other programs; doctor shows whether
@@ -95,14 +90,22 @@ type Adder interface {
 	Add(t config.Target, e Entry) error
 }
 
-// Remover is a Provider that can uninstall an item and take it out of its
-// manifest, the one change apply never makes on its own.
+// Remover is a Provider that can plan the uninstall of an item and the drop
+// of its line from the manifest: a DELETE, the one change a plan only holds
+// when a person asked for that item by name.
 type Remover interface {
-	Remove(ctx context.Context, t config.Target, kind, name string) error
+	PlanRemove(t config.Target, kind, name string) (plan.Action, error)
 }
 
 // Capturer is a Provider that can write its manifest from what the machine
 // has, so a config can start from a machine that is already set up.
 type Capturer interface {
 	Capture(ctx context.Context, t config.Target) ([]byte, error)
+}
+
+// Reverter is a Provider that can turn the Undo records it made into the
+// actions that put the old state back. The records are in the order to undo
+// them, newest change first.
+type Reverter interface {
+	Revert(undos []plan.Undo) []plan.Action
 }

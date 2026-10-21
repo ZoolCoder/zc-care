@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/zoolcoder/zc-care/internal/manifest"
 )
 
 // EnvSkip names a skip file other than the default one.
@@ -73,7 +75,7 @@ func writeList(path, what, head string, names []string) error {
 		body.WriteString(r)
 		body.WriteByte('\n')
 	}
-	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {
+	if err := manifest.WriteFile(path, []byte(body.String()), 0o644); err != nil {
 		return fmt.Errorf("write %s: %w", what, err)
 	}
 	return nil

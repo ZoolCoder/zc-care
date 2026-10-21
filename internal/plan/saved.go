@@ -17,8 +17,10 @@ type Saved struct {
 	// every target.
 	Targets []string `json:"targets,omitempty"`
 	// Upgrade and Only are the -upgrade and -only flags the plan was made with.
-	Upgrade bool          `json:"upgrade,omitempty"`
-	Only    []string      `json:"only,omitempty"`
+	Upgrade bool     `json:"upgrade,omitempty"`
+	Only    []string `json:"only,omitempty"`
+	// Remove is the -remove item of a plan that only uninstalls it.
+	Remove  string        `json:"remove,omitempty"`
 	Actions []SavedAction `json:"actions"`
 }
 

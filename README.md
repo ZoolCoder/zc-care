@@ -408,10 +408,13 @@ brew "lazygit"   # git TUI for staging hunks
 | `status` | Gives a one-line summary per target of what is in place now. |
 | `list` | Lists every package, app, dotfile and runtime, with its version, state and why. |
 | `add -target t -why w kind:name` | Declares an item in a target's manifest, under the right section. The next apply installs it. |
-| `remove -target t kind:name` | Uninstalls an item and drops it from the manifest, after you confirm. |
+| `remove -target t kind:name` | Plans the uninstall, shows it and drops the item from the manifest after you confirm. Agents only get the plan. |
 | `capture -target t` | Writes a target's manifest from what this machine has. |
-| `validate` | Checks the config offline. |
-| `doctor` | Checks programs, config, targets and macOS security settings, each with its fix. |
+| `validate` | Checks the config offline, and agents manifests for bad `${keychain:...}` references. |
+| `export [-o file]` | Saves what this Mac has, per target, as a JSON snapshot without secrets. |
+| `diff a.json [b.json]` | Shows what differs between two snapshots, or one and this Mac. |
+| `doctor [-fix]` | Checks programs, config, targets and macOS security settings, each with its fix. With `-fix` it plans those fixes, lists the exact commands and runs them after a yes. |
+| `undo [-n N] [-plan]` | Plans the reverse of the last apply (settings, dotfiles, packages), shows it and runs it after a yes. |
 | `skip [-undo] kind:name` | Lists or changes the packages this machine leaves out. |
 | `mcp` | Starts the MCP server for AI agents, over stdio. |
 

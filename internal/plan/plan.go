@@ -32,8 +32,17 @@ type Action struct {
 	Target   string // the config target the change belongs to
 	Resource string // the thing being changed inside the target
 	Detail   string // human-readable, never a secret value
-	Do       func(context.Context) error
+	// Destructive marks a change that is no delete but loses something the
+	// tool did not write, such as an edit made outside it, or that runs a
+	// script. It needs the same confirmation as a delete.
+	Destructive bool
+	// Before, when set, reads the state Do is about to replace, right before
+	// it runs, so undo can put it back. A failure does not stop Do.
+	Before func(context.Context) (Undo, error)
+	Do     func(context.Context) error
 }
+
+func (a Action) destroys() bool { return a.Op == OpDelete || a.Destructive }
 
 type Plan struct {
 	Actions []Action
@@ -78,10 +87,10 @@ func (p Plan) Manual() []Action { return p.filter(func(a Action) bool { return a
 // Executable is what apply will actually run.
 func (p Plan) Executable() []Action { return p.filter(func(a Action) bool { return a.Op != OpManual }) }
 
-// Destructive reports whether the plan deletes anything, so a caller can insist
-// on confirmation first.
+// Destructive reports whether the plan deletes, overwrites an outside edit or
+// runs a script, so a caller can insist on confirmation first.
 func (p Plan) Destructive() bool {
-	return slices.ContainsFunc(p.Actions, func(a Action) bool { return a.Op == OpDelete })
+	return slices.ContainsFunc(p.Actions, Action.destroys)
 }
 
 // Write renders the plan as aligned columns.
@@ -113,6 +122,9 @@ type JSONAction struct {
 	Resource string `json:"resource"`
 	Detail   string `json:"detail"`
 	Manual   bool   `json:"manual"`
+	// Destructive is true for a delete, an overwrite of an outside edit and a
+	// script: what apply asks a person to confirm.
+	Destructive bool `json:"destructive"`
 }
 
 // WriteJSON renders the plan for a CI step, ZC Care or an agent.
@@ -124,7 +136,7 @@ func (p Plan) WriteJSON(w io.Writer) error {
 	}{Changes: len(p.Executable()), Manual: len(p.Manual()), Actions: []JSONAction{}}
 	for _, a := range p.sorted() {
 		out.Actions = append(out.Actions, JSONAction{
-			Op: string(a.Op), Target: a.Target, Resource: a.Resource, Detail: a.Detail, Manual: a.Op == OpManual,
+			Op: string(a.Op), Target: a.Target, Resource: a.Resource, Detail: a.Detail, Manual: a.Op == OpManual, Destructive: a.destroys(),
 		})
 	}
 	enc := json.NewEncoder(w)

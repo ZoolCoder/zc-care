@@ -2,15 +2,11 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"strings"
 
-	"github.com/zoolcoder/zc-care/internal/config"
-	"github.com/zoolcoder/zc-care/internal/engine"
 	"github.com/zoolcoder/zc-care/internal/provider"
-	"github.com/zoolcoder/zc-care/internal/sh"
 )
 
 func init() {
@@ -23,9 +19,7 @@ func init() {
 // runAdd writes one entry into a target's manifest. It installs nothing, so
 // the change is reviewed with plan like any other edit.
 func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("add", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
+	flags := newFlags("add", stderr)
 	path := flags.String("config", "", "config file")
 	item := flags.String("item", "", "kind:name, such as cask:raycast or runtime:go@1.26; or the first argument")
 	why := flags.String("why", "", "why the item is there, one line; kept as a comment on its line")
@@ -41,14 +35,7 @@ func runAdd(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if *item == "" || strings.TrimSpace(*why) == "" {
 		return errors.New("add needs an item and -why")
 	}
-	if *path = findConfig(*path); *path == "-" {
-		return errors.New("add edits a manifest on disk; pass a config file, not standard input")
-	}
-	cfg, err := config.Load(*path, stdin)
-	if err != nil {
-		return err
-	}
-	eng, err := engine.New(cfg, engine.With(sh.Exec{Stdin: stdin, Stdout: stderr, Stderr: stderr}), targets)
+	eng, err := loadManifestEngine("add", findConfig(*path), targets, stdin, stderr)
 	if err != nil {
 		return err
 	}

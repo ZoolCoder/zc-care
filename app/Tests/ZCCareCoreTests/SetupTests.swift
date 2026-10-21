@@ -33,6 +33,19 @@ struct ScriptRunner: Runner {
     #expect(Fix.pane(for: checks[3].detail!).absoluteString.hasSuffix("Time-Machine-Settings.extension"))
 }
 
+@Test func rootStepsNameEachCheckAndItsExactCommand() {
+    let checks = [
+        Check(name: "security firewall", status: "fail", detail: "sudo socketfilterfw --setglobalstate on"),
+        Check(name: "security Gatekeeper", status: "ok", detail: "sudo spctl --master-enable"),
+        Check(name: "security Time Machine backups", status: "fail", detail: "System Settings, General, Time Machine: add a backup disk"),
+        Check(name: "security automatic update checks", status: "fail", detail: "sudo softwareupdate --schedule on"),
+    ]
+    let steps = Fix.rootSteps(for: checks)
+    #expect(steps.map(\.command) == ["socketfilterfw --setglobalstate on", "softwareupdate --schedule on"])
+    #expect(steps.map(\.title) == [checks[0].title, checks[3].title])
+    #expect(Fix.rootSteps(for: [checks[1], checks[2]]).isEmpty)
+}
+
 @Test func devIdentityReadsGitOnlyOnceTheToolsAreIn() async {
     let none = await DevIdentity.read(runner: ScriptRunner(outputs: [
         "git config --global user.name": ok("Ada\n"),

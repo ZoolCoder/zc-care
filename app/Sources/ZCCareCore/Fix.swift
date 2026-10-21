@@ -18,10 +18,24 @@ public enum Fix: Equatable, Sendable {
         "security automatic update checks", "security File Sharing off", "security Touch ID for sudo",
     ]
 
+    /// The one line the doctor's table gives Touch ID for sudo, which pipes.
+    static let touchIDLine = #"sed "s/^#auth/auth/" /etc/pam.d/sudo_local.template | sudo tee /etc/pam.d/sudo_local"#
+
+    /// The detail, when it is exactly one `sudo <command>` line with nothing
+    /// a shell would act on: prose around a command, or a second command,
+    /// must not reach the password dialog.
+    static func rootCommand(in detail: String) -> String? {
+        let line = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if line == touchIDLine { return line.replacingOccurrences(of: "sudo ", with: "") }
+        let shell = Set(#";&|`$<>()"'\"# + "\n\r")
+        guard line.hasPrefix("sudo "), !line.contains(where: shell.contains) else { return nil }
+        return String(line.dropFirst("sudo ".count))
+    }
+
     public init(for check: Check) {
         let detail = check.detail ?? ""
-        if Fix.rootFixable.contains(check.name), detail.contains("sudo ") {
-            self = .command(detail.replacingOccurrences(of: "sudo ", with: ""))
+        if Fix.rootFixable.contains(check.name), let command = Fix.rootCommand(in: detail) {
+            self = .command(command)
         } else if check.isSecurity, detail.contains("System Settings") {
             self = .settings(Fix.pane(for: detail), detail)
         } else {

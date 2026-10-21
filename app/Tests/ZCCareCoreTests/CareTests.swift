@@ -245,7 +245,7 @@ private func write(_ url: URL, bytes: Int) throws {
     let spot = Junk(id: "t", title: "T", detail: "", path: dir.path, keep: ["kept"])
 
     #expect(spot.contents().map(\.name) == ["a", "b.bin"])
-    spot.empty(only: ["b.bin"])
+    spot.empty(only: ["b.bin"], permanently: true)
     #expect(spot.contents().map(\.name) == ["a"])
     #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("kept/y.bin").path))
 }
@@ -595,7 +595,7 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(names == ["History", "History-journal", "Cookies", "Default", "cookies.sqlite"])
 
     let history = try #require(traces.first)
-    #expect(BrowserPrivacy.clear(history) == 0)
+    #expect(BrowserPrivacy.clear(history, permanently: true).stayed == 0)
     #expect(!FileManager.default.fileExists(atPath: home.path + "/" + chrome + "Default/History"))
     #expect(FileManager.default.fileExists(atPath: home.path + "/" + chrome + "Default/Bookmarks"))
 }

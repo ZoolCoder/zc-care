@@ -12,7 +12,6 @@ import (
 
 	"github.com/zoolcoder/zc-care/internal/config"
 	"github.com/zoolcoder/zc-care/internal/provider/packages"
-	"github.com/zoolcoder/zc-care/internal/sh"
 	"github.com/zoolcoder/zc-care/internal/starter"
 )
 
@@ -66,7 +65,7 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	var captured []byte
 	if *fromMac {
 		var err error
-		runner := sh.Exec{Stdin: stdin, Stdout: stderr, Stderr: stderr}
+		runner := installerRunner(stdin, stderr)
 		if captured, err = packages.New(runner).Capture(context.Background(), config.Target{}); err != nil {
 			fmt.Fprintln(stderr, "not keeping this Mac's apps:", err)
 		}

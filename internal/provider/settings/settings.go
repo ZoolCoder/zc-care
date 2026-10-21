@@ -5,6 +5,7 @@ package settings
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -48,30 +49,54 @@ type key struct {
 
 func (k key) resource() string { return k.domain + " " + k.name }
 
-// read asks defaults for every key at once: each read is its own process.
-func (p Provider) read(ctx context.Context, t config.Target) []key {
+// read asks defaults for every key at once: each read is its own process. A
+// key that is not set is Missing; any other failure, such as a cancelled
+// context, is an error, not a reason to write.
+func (p Provider) read(ctx context.Context, t config.Target) ([]key, error) {
 	var keys []key
 	for _, domain := range slices.Sorted(maps.Keys(t.Defaults)) {
 		for _, name := range slices.Sorted(maps.Keys(t.Defaults[domain])) {
 			keys = append(keys, key{domain: domain, name: name, want: p.expand(t.Defaults[domain][name]), state: provider.Missing})
 		}
 	}
+	errs := make([]error, len(keys))
 	var wg sync.WaitGroup
 	for i := range keys {
-		k := &keys[i]
-		wg.Go(func() {
-			// A key that is not set makes defaults fail.
-			if out, err := p.r.Output(ctx, "defaults", "read", k.domain, k.name); err == nil {
-				k.have = strings.TrimSpace(string(out))
-				k.state = provider.Differs
-				if same(k.want, k.have) {
-					k.state = provider.InPlace
-				}
-			}
-		})
+		wg.Go(func() { errs[i] = p.readKey(ctx, &keys[i]) })
 	}
 	wg.Wait()
-	return keys
+	return keys, errors.Join(errs...)
+}
+
+// readKey fills in what the machine holds for k, if anything.
+func (p Provider) readKey(ctx context.Context, k *key) error {
+	have, typ, present, err := p.current(ctx, k.domain, k.name)
+	if err != nil || !present {
+		return err
+	}
+	k.have = have
+	k.state = provider.Differs
+	if same(k.want, have, typ) {
+		k.state = provider.InPlace
+	}
+	return nil
+}
+
+// current is the value defaults holds for a key and its type as read-type
+// words it; present is false for a key that is not set.
+func (p Provider) current(ctx context.Context, domain, name string) (have, typ string, present bool, err error) {
+	out, err := p.r.Output(ctx, "defaults", "read", domain, name)
+	if err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	kind, err := p.r.Output(ctx, "defaults", "read-type", domain, name)
+	if err != nil {
+		return "", "", false, err
+	}
+	return strings.TrimSpace(string(out)), strings.TrimSpace(string(kind)), true, nil
 }
 
 // expand turns a leading ~/ in a string value into the home directory, for
@@ -83,21 +108,23 @@ func (p Provider) expand(v any) any {
 	return v
 }
 
-// same compares a declared value with what `defaults read` prints: 1 or 0
-// for a bool, and numbers by value, so 0.10 matches 0.1. defaults stores a
-// float in 32 bits, so 0.15 reads back as 0.1500000059604645.
-func same(want any, have string) bool {
+// same compares a declared value with what `defaults read` prints and
+// `read-type` calls its type: 1 or 0 for a bool, and numbers by value, so
+// 0.10 matches 0.1. A value of the wrong type is not in place, whatever it
+// prints: the string "1" is not the bool true. defaults stores a float in 32
+// bits, so 0.15 reads back as 0.1500000059604645.
+func same(want any, have, typ string) bool {
 	switch w := want.(type) {
 	case bool:
-		return have == map[bool]string{true: "1", false: "0"}[w]
+		return typ == "Type is boolean" && have == map[bool]string{true: "1", false: "0"}[w]
 	case int:
 		n, err := strconv.Atoi(have)
-		return err == nil && n == w
+		return typ == "Type is integer" && err == nil && n == w
 	case float64:
 		f, err := strconv.ParseFloat(have, 32)
-		return err == nil && float32(f) == float32(w)
+		return typ == "Type is float" && err == nil && float32(f) == float32(w)
 	}
-	return have == fmt.Sprint(want)
+	return typ == "Type is string" && have == fmt.Sprint(want)
 }
 
 // writeArgs are the defaults write arguments that store v with its type.
@@ -117,9 +144,13 @@ func writeArgs(domain, name string, v any) []string {
 // Plan writes each key that is missing or differs, then restarts the
 // processes that read the changed domains.
 func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, error) {
+	keys, err := p.read(ctx, t)
+	if err != nil {
+		return nil, err
+	}
 	var actions []plan.Action
 	restart := map[string]bool{}
-	for _, k := range p.read(ctx, t) {
+	for _, k := range keys {
 		op, detail := plan.OpCreate, fmt.Sprintf("set to %v", k.want)
 		switch k.state {
 		case provider.InPlace:
@@ -129,22 +160,31 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		}
 		args := writeArgs(k.domain, k.name, k.want)
 		actions = append(actions, plan.Action{Op: op, Target: t.Name, Resource: k.resource(), Detail: detail,
-			Do: func(ctx context.Context) error { return p.r.Run(ctx, "defaults", args...) }})
+			Before: func(ctx context.Context) (plan.Undo, error) { return p.before(ctx, k.domain, k.name) },
+			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "defaults", args...) }})
 		if proc, ok := restarts[k.domain]; ok {
 			restart[proc] = true
 		}
 	}
 	for _, proc := range slices.Sorted(maps.Keys(restart)) {
-		actions = append(actions, plan.Action{Op: plan.OpUpdate, Target: t.Name, Resource: "restart " + proc,
-			Detail: "restart " + proc + " so it reads the new settings",
-			// A process that is not running has nothing to restart.
-			Do: func(ctx context.Context) error { _ = p.r.Run(ctx, "killall", proc); return nil }})
+		actions = append(actions, p.restartAction(t.Name, proc))
 	}
 	return actions, nil
 }
 
+func (p Provider) restartAction(target, proc string) plan.Action {
+	return plan.Action{Op: plan.OpUpdate, Target: target, Resource: "restart " + proc,
+		Detail: "restart " + proc + " so it reads the new settings",
+		Before: func(context.Context) (plan.Undo, error) { return plan.NoUndo(), nil },
+		// A process that is not running has nothing to restart.
+		Do: func(ctx context.Context) error { _ = p.r.Run(ctx, "killall", proc); return nil }}
+}
+
 func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, error) {
-	keys := p.read(ctx, t)
+	keys, err := p.read(ctx, t)
+	if err != nil {
+		return provider.Live{}, err
+	}
 	live := provider.Live{Declared: len(keys)}
 	for _, k := range keys {
 		if k.state == provider.InPlace {
@@ -155,14 +195,12 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	return live, nil
 }
 
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
-}
-
 // Items is each declared key, named domain then key.
 func (p Provider) Items(ctx context.Context, t config.Target) ([]provider.Item, error) {
-	keys := p.read(ctx, t)
+	keys, err := p.read(ctx, t)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]provider.Item, 0, len(keys))
 	for _, k := range keys {
 		item := provider.Item{Name: k.resource(), Kind: "setting", State: k.state, Version: k.have, App: k.domain}

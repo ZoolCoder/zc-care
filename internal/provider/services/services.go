@@ -115,10 +115,17 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		case "brew":
 			a.Detail = "start with brew services, and at every login (now " + s.detail + ")"
 			// restart also recovers a service that started and then failed.
-			a.Do = func(ctx context.Context) error { return p.r.Run(ctx, "brew", "services", "restart", s.name) }
+			a.Do = func(ctx context.Context) error { return p.r.Run(ctx, "brew", "services", "restart", "--", s.name) }
 		default:
 			a.Detail = "load " + filepath.Base(s.file) + " into launchd"
-			a.Do = func(ctx context.Context) error { return p.r.Run(ctx, "launchctl", "bootstrap", p.domain(), s.file) }
+			// A disabled agent makes bootstrap fail with "5: Input/output
+			// error", so clear the flag first. enable is a no-op when set.
+			a.Do = func(ctx context.Context) error {
+				if err := p.r.Run(ctx, "launchctl", "enable", p.domain()+"/"+s.name); err != nil {
+					return err
+				}
+				return p.r.Run(ctx, "launchctl", "bootstrap", p.domain(), s.file)
+			}
 		}
 		actions = append(actions, a)
 	}
@@ -138,11 +145,6 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	}
 	live.Summary = fmt.Sprintf("%d of %d services running", live.InPlace, live.Declared)
 	return live, nil
-}
-
-func (p Provider) Status(ctx context.Context, t config.Target) (string, error) {
-	live, err := p.Measure(ctx, t)
-	return live.Summary, err
 }
 
 // Items is each service, then each agent, as declared.

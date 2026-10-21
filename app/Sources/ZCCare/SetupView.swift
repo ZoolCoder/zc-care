@@ -249,6 +249,7 @@ private struct NextCard<Trailing: View>: View {
 private struct SecureStep: View {
     @Bindable var store: Store
     @State private var loaded = false
+    @State private var previewing = false
 
     private var failing: [Check] { (store.snapshot?.security ?? []).filter { !$0.isOK } }
 
@@ -265,7 +266,7 @@ private struct SecureStep: View {
                 if Fix.rootCommands(for: failing) != nil {
                     HStack {
                         Spacer()
-                        Button("Fix All as Administrator…") { Task { await store.secureAll() } }
+                        Button("Fix All as Administrator…") { previewing = true }
                             .disabled(store.busy != nil)
                     }
                 }
@@ -282,6 +283,9 @@ private struct SecureStep: View {
             await store.refresh()
             loaded = true
         }
+        .sheet(isPresented: $previewing) {
+            RootPreview(steps: Fix.rootSteps(for: failing)) { Task { await store.secureAll() } }
+        }
     }
 
     private func label(_ check: Check) -> String {
@@ -290,6 +294,45 @@ private struct SecureStep: View {
         case .settings: "Open Settings"
         case .info: "Details"
         }
+    }
+}
+
+/// Each fix and the exact command that runs as root, before the password
+/// dialog.
+private struct RootPreview: View {
+    let steps: [Fix.RootStep]
+    let confirm: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Fix \(Store.counted(steps.count, "check")) as administrator?").font(.headline)
+            Text("macOS asks for your password once, then runs these as root:")
+                .font(.callout).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(steps) { step in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(step.title).font(.body.weight(.semibold))
+                            Text(step.command).font(.caption.monospaced()).textSelection(.enabled)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Fix") {
+                    dismiss()
+                    confirm()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 460, height: 340)
     }
 }
 
@@ -308,7 +351,7 @@ private struct IdentityStep: View {
             if let id {
                 NextCard(symbol: "hammer.fill", colors: Tint.gray, title: "Command line tools",
                          detail: id.tools ? "Installed: git, clang and make." : "Apple's git, clang and make. Homebrew needs them.") {
-                    if id.tools { done } else { Button("Install…") { installTools() } }
+                    if id.tools { done } else { Button("Install…") { Task { await installTools() } } }
                 }
                 NextCard(symbol: "person.text.rectangle.fill", colors: Tint.blue, title: "Name and email",
                          detail: "Every commit carries them.") {
@@ -365,8 +408,15 @@ private struct IdentityStep: View {
         id = new
     }
 
-    private func installTools() {
-        _ = try? Process.run(URL(fileURLWithPath: "/usr/bin/xcode-select"), arguments: ["--install"])
+    /// xcode-select opens Apple's installer and returns; it exits non-zero
+    /// when the tools are there already, or no installer could start.
+    private func installTools() async {
+        do {
+            let r = try await ProcessRunner(timeout: 30).run("/usr/bin/xcode-select", ["--install"], env: [:])
+            error = r.status == 0 ? nil : lastLine(r.stderr) ?? "xcode-select exited \(r.status)"
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private func saveGit() async {

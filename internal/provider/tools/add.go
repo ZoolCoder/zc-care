@@ -14,7 +14,6 @@ import (
 
 var (
 	toolName = regexp.MustCompile(`^[a-z0-9][a-z0-9:._/@-]*$`)
-	bareKey  = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	toolVer  = regexp.MustCompile(`^[A-Za-z0-9._+-]+$`)
 )
 
@@ -31,11 +30,7 @@ func (p Provider) Add(t config.Target, e provider.Entry) error {
 	if !toolName.MatchString(name) || !toolVer.MatchString(ver) {
 		return fmt.Errorf("%q is not tool@version", e.Name)
 	}
-	key := name
-	if !bareKey.MatchString(key) {
-		key = strconv.Quote(key)
-	}
-	line, err := manifest.Line(key+" = "+strconv.Quote(ver), e.Why)
+	line, err := manifest.Line(manifest.TOMLKey(name)+" = "+strconv.Quote(ver), e.Why)
 	if err != nil {
 		return err
 	}
@@ -50,7 +45,7 @@ func (p Provider) Add(t config.Target, e provider.Entry) error {
 	if _, ok := declaredTools(data)[name]; ok {
 		return fmt.Errorf("%s already declares %s", t.File, name)
 	}
-	return os.WriteFile(t.File, insertTool(data, line), info.Mode().Perm())
+	return manifest.WriteFile(t.File, insertTool(data, line), info.Mode().Perm())
 }
 
 // declaredTools reads the [tools] table's comments, by tool name.

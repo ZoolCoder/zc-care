@@ -73,11 +73,11 @@ func (u User) readJSON(rel string, v any) bool {
 func (u User) plaintextKeys(servers map[string]map[string]mcpServer) Result {
 	const name = "AI configs hold no plain-text keys"
 	var found []string
-	for _, file := range sortedKeys(servers) {
-		for _, n := range sortedKeys(servers[file]) {
+	for _, file := range slices.Sorted(maps.Keys(servers)) {
+		for _, n := range slices.Sorted(maps.Keys(servers[file])) {
 			s := servers[file][n]
 			for _, vars := range []map[string]string{s.Env, s.Headers} {
-				for _, k := range sortedKeys(vars) {
+				for _, k := range slices.Sorted(maps.Keys(vars)) {
 					if secretName.MatchString(k) && literal(vars[k]) {
 						found = append(found, file+" "+n+"."+k)
 					}
@@ -107,8 +107,8 @@ func literal(v string) bool {
 func unpinned(servers map[string]map[string]mcpServer) Result {
 	const name = "MCP servers pinned to a version"
 	var found []string
-	for _, file := range sortedKeys(servers) {
-		for _, n := range sortedKeys(servers[file]) {
+	for _, file := range slices.Sorted(maps.Keys(servers)) {
+		for _, n := range slices.Sorted(maps.Keys(servers[file])) {
 			if pkg, ok := floating(servers[file][n]); ok {
 				found = append(found, file+" "+n+" ("+pkg+")")
 			}
@@ -172,13 +172,4 @@ func (u User) broadPermissions() Result {
 	}
 	return Result{Name: name, Warn: true, Detail: strings.Join(found, ", ") +
 		"; allow the commands you run, such as Bash(git status:*), and keep the sandbox on"}
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
 }

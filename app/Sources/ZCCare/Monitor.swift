@@ -115,7 +115,7 @@ final class Monitor {
         let open = runningApps()
         await withTaskGroup(of: (String, Int64).self) { group in
             for spot in Junk.spots(home: NSHomeDirectory()) {
-                let keep = self.keep(spot, open: open)
+                let keep = await self.keep(spot, open: open)
                 group.addTask(priority: .utility) { (spot.id, spot.size(keeping: keep)) }
             }
             for await (id, size) in group { junk[id] = size }
@@ -124,23 +124,15 @@ final class Monitor {
 
     /// What clearing a folder leaves: open apps' caches, what running
     /// commands use, and what the ignore list names in it.
-    func keep(_ spot: Junk, open: Set<String>) -> Set<String> {
-        (spot.id == "caches" ? open : []).union(ignore.names(in: spot.path))
-            .union(spot.id == "npx" ? spot.inUse(commands: Self.commands()) : [])
+    func keep(_ spot: Junk, open: Set<String>) async -> Set<String> {
+        let running = spot.id == "npx" ? spot.inUse(commands: await Self.commands()) : []
+        return (spot.id == "caches" ? open : []).union(ignore.names(in: spot.path)).union(running)
     }
 
     /// Every running process's command line, from ps.
-    nonisolated static func commands() -> [String] {
-        let p = Process()
-        let out = Pipe()
-        p.executableURL = URL(fileURLWithPath: "/bin/ps")
-        p.arguments = ["-Ao", "command"]
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return [] }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
+    nonisolated static func commands() async -> [String] {
+        guard let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", ["-Ao", "command"], env: [:]) else { return [] }
+        return r.output.split(separator: "\n").map(String.init)
     }
 
     /// Open apps' bundle ids, names and vendors: their caches stay while
@@ -195,7 +187,7 @@ extension Store {
         .appendingPathComponent("dev.zoolcoder.zccare/activity.json")
 
     func record(_ kind: ActivityEntry.Kind, _ title: String, freed bytes: Int64 = 0, trashed: [Trashed]? = nil) {
-        activity.add(ActivityEntry(kind: kind, title: title, bytes: bytes, trashed: trashed))
+        activity.add(ActivityEntry(kind: kind, title: title, bytes: bytes, trashed: trashed?.isEmpty == true ? nil : trashed))
         try? activity.save(to: Self.activityFile)
     }
 
@@ -234,22 +226,25 @@ extension Store {
     /// whose sizes `picked` gives.
     func clean(_ spot: Junk, only picked: [JunkEntry]? = nil) async {
         let size = monitor.junk[spot.id] ?? 0
+        let verb = deletesPermanently ? "permanently deletes" : "moves to the Trash"
         let what = picked.map {
-            "This deletes " + Self.counted($0.count, "item") + ", \(Self.bytes($0.reduce(0) { $0 + $1.size })), in \(spot.path):\n"
+            "This \(verb) " + Self.counted($0.count, "item") + ", \(Self.bytes($0.reduce(0) { $0 + $1.size })), in \(spot.path):\n"
                 + Alerts.lines($0.map { "\($0.name) (\(Self.bytes($0.size)))" })
-        } ?? "This deletes \(Self.bytes(size)) in \(spot.path)."
-        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\n\n\(spot.detail)", button: "Clear") else { return }
+        } ?? "This \(verb) \(Self.bytes(size)) in \(spot.path)."
+        let aftermath = deletesPermanently ? "It does not go to the Trash." : "My Activity can put it back until the Trash is emptied."
+        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\n\(aftermath)\n\n\(spot.detail)", button: "Clear") else { return }
         busy = "Clearing \(spot.title)"
         defer { busy = nil }
-        let keep = monitor.keep(spot, open: monitor.runningApps())
+        let keep = await monitor.keep(spot, open: monitor.runningApps())
         let only = picked.map { Set($0.map(\.name)) }
-        let stuck = await Task.detached { spot.empty(keeping: keep, only: only) }.value
+        let permanently = deletesPermanently
+        let removal = await Task.detached { spot.empty(keeping: keep, only: only, permanently: permanently) }.value
         let left = await Task.detached { spot.size(keeping: keep) }.value
         monitor.junk[spot.id] = left
         monitor.readDisk()
-        record(.junk, spot.title, freed: max(size - left, 0))
+        record(.junk, spot.title, freed: max(size - left, 0), trashed: removal.trashed)
         message = Message(text: "\(spot.title): freed \(Self.bytes(max(size - left, 0)))"
-                          + (stuck > 0 ? "; \(stuck) in use stayed." : "."), failed: false)
+                          + removal.ending, failed: false)
     }
 
     /// Clears every Free Up folder after one question, for Smart Care.
@@ -258,23 +253,29 @@ extension Store {
         let total = spots.reduce(Int64(0)) { $0 + (monitor.junk[$1.id] ?? 0) }
         let list = spots.map { "\($0.title): \(Self.bytes(monitor.junk[$0.id] ?? 0))" }.joined(separator: "\n")
         guard busy == nil, !spots.isEmpty,
-              Alerts.confirm("Clean up \(Self.bytes(total))?", list + "\n\nAll of it comes back on its own when needed.",
+              Alerts.confirm("Clean up \(Self.bytes(total))?", list + "\n\n" + (deletesPermanently
+                                 ? "This permanently deletes it; nothing goes to the Trash."
+                                 : "This moves it to the Trash; My Activity can put it back until the Trash is emptied.")
+                                 + " All of it comes back on its own when needed.",
                              button: "Clean Up") else { return }
         busy = "Cleaning up"
         defer { busy = nil }
         let open = monitor.runningApps()
-        var freed: Int64 = 0, stuck = 0
+        var freed: Int64 = 0, removal = Removal()
+        let permanently = deletesPermanently
         for spot in spots {
-            let keep = monitor.keep(spot, open: open)
+            let keep = await monitor.keep(spot, open: open)
             let size = monitor.junk[spot.id] ?? 0
-            stuck += await Task.detached { spot.empty(keeping: keep) }.value
+            let result = await Task.detached { spot.empty(keeping: keep, permanently: permanently) }.value
+            removal.failures += result.failures
+            removal.trashed += result.trashed
             let left = await Task.detached { spot.size(keeping: keep) }.value
             monitor.junk[spot.id] = left
             freed += max(size - left, 0)
         }
         monitor.readDisk()
-        record(.junk, "System Junk", freed: freed)
-        message = Message(text: "Freed \(Self.bytes(freed))" + (stuck > 0 ? "; \(stuck) in use stayed." : "."), failed: false)
+        record(.junk, "System Junk", freed: freed, trashed: removal.trashed)
+        message = Message(text: "Freed \(Self.bytes(freed))" + removal.ending, failed: false)
     }
 
     /// The Finder empties the Trash: the app cannot read it without Full

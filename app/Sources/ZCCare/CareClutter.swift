@@ -54,7 +54,7 @@ struct ClutterView: View {
                                         Text("\(group.best.name) · \(group.files.count) look alike, \(Store.bytes(group.wasted)) to free")
                                             .font(.callout.weight(.semibold))
                                         Spacer()
-                                        Button("Trash Others") { care.trashOthers(group) }.controlSize(.small)
+                                        Button("Trash Others") { Task { await care.trashOthers(group) } }.controlSize(.small)
                                     }
                                     .padding(.horizontal, 10)
                                     .padding(.top, 8)

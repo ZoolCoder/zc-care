@@ -39,7 +39,8 @@ struct ProtectionView: View {
                                 detail: [item.developer ?? "Unidentified developer", item.kind, item.executable]
                                     .compactMap { $0 }.joined(separator: " · "),
                                 value: item.enabled ? "Allowed" : "Off",
-                                flag: item.developer == nil && item.enabled ? "Unidentified" : nil) { EmptyView() }
+                                flag: care.isNew(background: item) ? "New" : item.developer == nil && item.enabled ? "Unidentified" : nil,
+                                flagColor: care.isNew(background: item) ? Theme.accent : Theme.warning) { EmptyView() }
                         }
                         HStack {
                             Text(care.backgroundItems.isEmpty
@@ -89,6 +90,8 @@ struct ProtectionView: View {
                                 CareRow(icon: SymbolTile(symbol: "hand.raised.fill", colors: p.allowed ? Tint.violet : Tint.gray, size: 32),
                                     title: p.client, detail: p.service, value: p.allowed ? "Allowed" : "Denied") { EmptyView() }
                             }
+                        } else if let error = care.permissionsError {
+                            Text("Permissions not read: \(error)").foregroundStyle(.secondary).padding(10)
                         } else {
                             HStack(alignment: .top, spacing: 12) {
                                 SymbolTile(symbol: "lock.fill", colors: Tint.gray, size: 32)

@@ -1,12 +1,18 @@
 #!/bin/sh
-# PreToolUse guard: asks the user before a Bash call runs `zc-care
-# apply` with -yes, or without a saved plan file. It never blocks on its own;
-# the user decides.
+# PreToolUse guard: asks the user before a Bash call runs `zc-care remove`, or
+# `zc-care apply` with -yes or without a saved plan file. It never blocks on
+# its own; the user decides.
 input=$(cat)
+
+reason=""
+if printf '%s' "$input" | grep -Eq 'zc-care[^|;&]*[[:space:]]remove([[:space:]]|"|$)'; then
+	reason="zc-care remove uninstalls software and drops it from the manifest."
+	printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$reason"
+	exit 0
+fi
 
 printf '%s' "$input" | grep -Eq 'zc-care[^|;&]*[[:space:]]apply([[:space:]]|"|$)' || exit 0
 
-reason=""
 if printf '%s' "$input" | grep -Eq '[[:space:]]-{1,2}yes([=[:space:]]|"|$)'; then
 	reason="zc-care apply with -yes deletes without a prompt."
 else

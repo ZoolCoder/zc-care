@@ -10,6 +10,8 @@ package manifest
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -49,8 +51,12 @@ func Sections(data []byte) []string {
 
 // Insert adds entry as the last line of section's block, matched without
 // regard to case. The empty section is the block above the first heading.
-// A section the file does not have is appended as a new block.
-func Insert(data []byte, section, entry string) []byte {
+// A section the file does not have is appended as a new block, which a
+// section with a line break cannot be.
+func Insert(data []byte, section, entry string) ([]byte, error) {
+	if strings.ContainsAny(section, "\r\n") {
+		return nil, fmt.Errorf("the section must be one line")
+	}
 	lines := scan(data)
 	at := -1
 	for n, l := range lines {
@@ -67,7 +73,7 @@ func Insert(data []byte, section, entry string) []byte {
 	default:
 		raw = append(raw, "", "# "+section, entry)
 	}
-	return []byte(strings.Join(raw, "\n") + "\n")
+	return []byte(strings.Join(raw, "\n") + "\n"), nil
 }
 
 // Drop removes the entry whose key is want, matched without regard to case,
@@ -91,6 +97,31 @@ func Line(entry, why string) (string, error) {
 		return entry, nil
 	}
 	return entry + " # " + why, nil
+}
+
+// WriteFile replaces path with data in one rename, so a crash or a reader at
+// the same moment sees the old file or the new one, never half. It writes
+// through a symlink instead of replacing it.
+func WriteFile(path string, data []byte, perm os.FileMode) error {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 type line struct {
