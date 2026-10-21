@@ -70,23 +70,33 @@ func (p Provider) read(ctx context.Context, t config.Target) ([]key, error) {
 
 // readKey fills in what the machine holds for k, if anything.
 func (p Provider) readKey(ctx context.Context, k *key) error {
-	out, err := p.r.Output(ctx, "defaults", "read", k.domain, k.name)
-	if err != nil {
-		if strings.Contains(err.Error(), "does not exist") {
-			return nil
-		}
+	have, typ, present, err := p.current(ctx, k.domain, k.name)
+	if err != nil || !present {
 		return err
 	}
-	k.have = strings.TrimSpace(string(out))
-	typ, err := p.r.Output(ctx, "defaults", "read-type", k.domain, k.name)
-	if err != nil {
-		return err
-	}
+	k.have = have
 	k.state = provider.Differs
-	if same(k.want, k.have, strings.TrimSpace(string(typ))) {
+	if same(k.want, have, typ) {
 		k.state = provider.InPlace
 	}
 	return nil
+}
+
+// current is the value defaults holds for a key and its type as read-type
+// words it; present is false for a key that is not set.
+func (p Provider) current(ctx context.Context, domain, name string) (have, typ string, present bool, err error) {
+	out, err := p.r.Output(ctx, "defaults", "read", domain, name)
+	if err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			return "", "", false, nil
+		}
+		return "", "", false, err
+	}
+	kind, err := p.r.Output(ctx, "defaults", "read-type", domain, name)
+	if err != nil {
+		return "", "", false, err
+	}
+	return strings.TrimSpace(string(out)), strings.TrimSpace(string(kind)), true, nil
 }
 
 // expand turns a leading ~/ in a string value into the home directory, for
@@ -150,18 +160,24 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		}
 		args := writeArgs(k.domain, k.name, k.want)
 		actions = append(actions, plan.Action{Op: op, Target: t.Name, Resource: k.resource(), Detail: detail,
-			Do: func(ctx context.Context) error { return p.r.Run(ctx, "defaults", args...) }})
+			Before: func(ctx context.Context) (plan.Undo, error) { return p.before(ctx, k.domain, k.name) },
+			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "defaults", args...) }})
 		if proc, ok := restarts[k.domain]; ok {
 			restart[proc] = true
 		}
 	}
 	for _, proc := range slices.Sorted(maps.Keys(restart)) {
-		actions = append(actions, plan.Action{Op: plan.OpUpdate, Target: t.Name, Resource: "restart " + proc,
-			Detail: "restart " + proc + " so it reads the new settings",
-			// A process that is not running has nothing to restart.
-			Do: func(ctx context.Context) error { _ = p.r.Run(ctx, "killall", proc); return nil }})
+		actions = append(actions, p.restartAction(t.Name, proc))
 	}
 	return actions, nil
+}
+
+func (p Provider) restartAction(target, proc string) plan.Action {
+	return plan.Action{Op: plan.OpUpdate, Target: target, Resource: "restart " + proc,
+		Detail: "restart " + proc + " so it reads the new settings",
+		Before: func(context.Context) (plan.Undo, error) { return plan.NoUndo(), nil },
+		// A process that is not running has nothing to restart.
+		Do: func(ctx context.Context) error { _ = p.r.Run(ctx, "killall", proc); return nil }}
 }
 
 func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, error) {

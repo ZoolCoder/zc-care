@@ -52,7 +52,8 @@ func (p Provider) PlanRemove(t config.Target, kind, name string) (plan.Action, e
 	}
 	return plan.Action{
 		Op: plan.OpDelete, Target: t.Name, Resource: i.resource(), Detail: detail,
-		Do: func(ctx context.Context) error { return p.uninstall(ctx, t, i) },
+		Before: beforeRemove(i),
+		Do:     func(ctx context.Context) error { return p.uninstall(ctx, t, i) },
 	}, nil
 }
 

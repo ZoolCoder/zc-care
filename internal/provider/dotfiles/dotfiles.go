@@ -117,6 +117,9 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		actions = append(actions, plan.Action{
 			Op: c.op, Target: t.Name, Resource: c.path, Detail: detail,
 			Destructive: c.outside || c.script,
+			Before: func(context.Context) (plan.Undo, error) {
+				return before(filepath.Join(dest, c.path), c.script)
+			},
 			// --force: the plan already showed the overwrite, and without a
 			// terminal chezmoi would fail on its own prompt.
 			Do: func(ctx context.Context) error {
