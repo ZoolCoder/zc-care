@@ -31,7 +31,8 @@ struct PerformanceView: View {
                                 title: agent.label,
                                 detail: (agent.broken ? "Program gone: " : care.managed(agent) ? "In your config: " : "")
                                     + (agent.program as NSString).abbreviatingWithTildeInPath,
-                                value: agent.broken ? "Broken" : agent.running ? "Running" : agent.runAtLoad ? "At login" : "On demand") {
+                                value: agent.broken ? "Broken" : agent.running ? "Running" : agent.runAtLoad ? "At login" : "On demand",
+                                flag: care.isNew(agent: agent) ? "New" : nil, flagColor: Theme.accent) {
                                 if agent.broken, agent.path.hasPrefix(NSHomeDirectory() + "/") {
                                     Button("Remove") { Task { await care.remove(agent) } }
                                         .controlSize(.small)

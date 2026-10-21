@@ -39,7 +39,8 @@ struct ProtectionView: View {
                                 detail: [item.developer ?? "Unidentified developer", item.kind, item.executable]
                                     .compactMap { $0 }.joined(separator: " · "),
                                 value: item.enabled ? "Allowed" : "Off",
-                                flag: item.developer == nil && item.enabled ? "Unidentified" : nil) { EmptyView() }
+                                flag: care.isNew(background: item) ? "New" : item.developer == nil && item.enabled ? "Unidentified" : nil,
+                                flagColor: care.isNew(background: item) ? Theme.accent : Theme.warning) { EmptyView() }
                         }
                         HStack {
                             Text(care.backgroundItems.isEmpty

@@ -63,6 +63,9 @@ final class Care {
     /// node_modules and the like in projects left alone for 90 days.
     var dependencies: [LargeFile] = []
     var models: [AIModel] = []
+    /// Nil when Docker is not installed or its daemon does not answer.
+    var docker: [DockerUsage]?
+    var xcodeSpots: [XcodeSpot] = []
     /// Caches, logs, temp files and old versions AI tools leave.
     var aiJunk: [AIJunk] = []
     var scanningAI = false
@@ -97,6 +100,8 @@ final class Care {
     var loadingApps = false
     var icons: [String: NSImage] = [:]
     var agents: [LaunchAgent] = []
+    /// When each launch agent and background item first appeared.
+    var sightings = Sightings.load(from: Care.savedSightings)
     var background: [NSRunningApplication] = []
     /// False until a scan runs in this launch: what shows before came from disk.
     var fresh = false
@@ -495,8 +500,67 @@ final class Care {
             return found.filter { !running.contains($0.id) }
         }.value
         async let found = Task.detached(priority: .utility) { AIModels.find(home: home) }.value
-        (dependencies, models) = await (stale, found)
+        async let xcode = Task.detached(priority: .utility) { XcodeSpots.find(home: home) }.value
+        async let usage: Void = scanDocker()
+        (dependencies, models, xcodeSpots) = await (stale, found, xcode)
+        await usage
         applyIgnoreList()
+    }
+
+    private var dockerProgram: String? {
+        store.program("docker") ?? ["/usr/local/bin/docker", "/Applications/Docker.app/Contents/Resources/bin/docker"]
+            .first(where: FileManager.default.isExecutableFile)
+    }
+
+    private func scanDocker() async {
+        guard let program = dockerProgram else { docker = nil; return }
+        docker = await Docker.usage(docker: program, env: store.loginEnv)
+    }
+
+    /// Runs a Docker prune after asking; `what` says what it removes.
+    func pruneDocker(_ title: String, arguments: [String], what: String) async {
+        guard store.busy == nil, let program = dockerProgram,
+              Alerts.confirm("\(title)?", what, button: "Prune") else { return }
+        store.busy = title
+        defer { store.busy = nil }
+        let before = docker?.reduce(0) { $0 + $1.size } ?? 0
+        let failed = await store.failure("docker exited with an error") {
+            try await ProcessRunner(timeout: 300).run(program, arguments, env: store.loginEnv)
+        }
+        await scanDocker()
+        let freed = max(before - (docker?.reduce(0) { $0 + $1.size } ?? before), 0)
+        if let failed {
+            store.message = Store.Message(text: "\(title): \(failed)", failed: true)
+        } else {
+            store.record(.developer, title, freed: freed)
+            store.message = Store.Message(text: "\(title): freed \(Store.bytes(freed)).", failed: false)
+        }
+        monitor.readDisk()
+    }
+
+    /// Moves an Xcode folder to the Trash, unless Xcode or the Simulator
+    /// has it open.
+    func trash(_ spot: XcodeSpot) async {
+        guard store.busy == nil, allowed([spot.url]) else { return }
+        if let open = spot.busyBundleIDs.first(where: isRunning) {
+            let name = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == open }?.localizedName ?? open
+            store.message = Store.Message(text: "\(name) is open. Quit it first, then move \(spot.title) to the Trash.", failed: true)
+            return
+        }
+        guard Alerts.confirm("Move \(spot.title) to the Trash?",
+                             "\(Store.bytes(spot.size)) in \((spot.url.path as NSString).abbreviatingWithTildeInPath). \(spot.detail)",
+                             button: "Move to Trash") else { return }
+        store.busy = "Moving \(spot.title) to the Trash"
+        defer { store.busy = nil }
+        let (failure, trashed) = await recycle([spot.url])
+        if let failure {
+            store.message = Store.Message(text: "\(spot.title): \(failure)", failed: true)
+        } else {
+            xcodeSpots.removeAll { $0.id == spot.id }
+            store.record(.developer, spot.title, freed: spot.size, trashed: trashed)
+            store.message = Store.Message(text: "\(spot.title) is in the Trash.", failed: false)
+        }
+        monitor.readDisk()
     }
 
     func trashDependencies(_ folders: [LargeFile]) async {
@@ -604,15 +668,17 @@ final class Care {
         applyIgnoreList()
     }
 
-    /// Deletes the picked junk for good, as Cleanup clears caches: each tool
-    /// makes it again when it needs it.
+    /// Clears the picked junk as Cleanup clears caches: each tool makes it
+    /// again when it needs it. It goes to the Trash unless Settings says to delete.
     func cleanAI(_ picked: [AIJunk]) async {
         guard store.busy == nil, !picked.isEmpty else { return }
         let total = picked.reduce(0) { $0 + $1.size }
         let list = picked.map { "\($0.tool), \($0.kind): \(Store.bytes($0.size))" }.joined(separator: "\n")
             + "\n\n" + Alerts.lines(picked.flatMap(\.paths).map { ($0.path as NSString).abbreviatingWithTildeInPath })
         guard Alerts.confirm("Clear \(Store.bytes(total)) of AI clutter?",
-                             list + "\n\nChats, settings, sessions and whatever is running stay. The rest is deleted for good, not moved to the Trash.",
+                             list + "\n\nChats, settings, sessions and whatever is running stay. "
+                                 + (store.deletesPermanently ? "The rest is deleted for good, not moved to the Trash."
+                                                             : "The rest moves to the Trash; My Activity can put it back."),
                              button: "Clear") else { return }
         store.busy = "Clearing AI clutter"
         defer { store.busy = nil }
@@ -621,13 +687,14 @@ final class Care {
         let ignored = store.ignoreList
         let open = monitor.runningApps()
         let commands = await Monitor.commands()
+        let permanently = store.deletesPermanently
         let removal = await Task.detached {
-            Removal.delete(AIClutter.stillJunk(picked, in: AIClutter.find(home: home, claudeTemp: temp, open: open, commands: commands))
-                .filter { !ignored.covers($0) })
+            Removal.remove(AIClutter.stillJunk(picked, in: AIClutter.find(home: home, claudeTemp: temp, open: open, commands: commands))
+                .filter { !ignored.covers($0) }, permanently: permanently)
         }.value
         await scanAI()
         let freed = max(total - picked.reduce(0) { sum, p in sum + (aiJunk.first { $0.id == p.id }?.size ?? 0) }, 0)
-        store.record(.ai, picked.count == 1 ? picked[0].tool : "AI Clutter", freed: freed)
+        store.record(.ai, picked.count == 1 ? picked[0].tool : "AI Clutter", freed: freed, trashed: removal.trashed)
         monitor.readDisk()
         store.message = Store.Message(text: "AI clutter: freed \(Store.bytes(freed))" + removal.ending,
                                       failed: false)
@@ -932,8 +999,21 @@ final class Care {
         }
         // Broken ones first: they are the ones to act on.
         agents = found.filter(\.broken) + found.filter { !$0.broken }
+        noteSightings("agent", ids: found.map(\.label))
         readBackground()
     }
+
+    private static let savedSightings = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("dev.zoolcoder.zccare/sightings.json")
+
+    private func noteSightings(_ kind: String, ids: [String]) {
+        sightings.record(kind, ids: ids)
+        try? sightings.save(to: Self.savedSightings)
+    }
+
+    /// Whether the agent or background item first showed up in the last week.
+    func isNew(agent: LaunchAgent) -> Bool { sightings.isNew("agent", agent.label) }
+    func isNew(background item: BackgroundItem) -> Bool { sightings.isNew("background", item.id) }
 
     /// Apps that run without a Dock icon, such as menu bar extras; macOS's
     /// own helpers are left out.
@@ -1083,14 +1163,17 @@ final class Care {
         default: "\(trace.browser) downloads pages again as you visit them."
         }
         guard Alerts.confirm("Clear \(trace.browser)'s \(trace.kind.lowercased())?",
-                             "This permanently deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)); nothing goes to the Trash.\n\n" + effect,
+                             (store.deletesPermanently
+                                 ? "This permanently deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)); nothing goes to the Trash.\n\n"
+                                 : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect,
                              button: "Clear") else { return }
         store.busy = "Clearing \(trace.browser) \(trace.kind.lowercased())"
         defer { store.busy = nil }
-        let removal = await Task.detached { BrowserPrivacy.clear(trace) }.value
+        let permanently = store.deletesPermanently
+        let removal = await Task.detached { BrowserPrivacy.clear(trace, permanently: permanently) }.value
         await loadBrowserTraces()
         let left = browserTraces?.first { $0.id == trace.id }?.size ?? 0
-        store.record(.privacy, "\(trace.browser) \(trace.kind)", freed: max(trace.size - left, 0))
+        store.record(.privacy, "\(trace.browser) \(trace.kind)", freed: max(trace.size - left, 0), trashed: removal.trashed)
         monitor.readDisk()
         store.message = Store.Message(text: "\(trace.browser) \(trace.kind.lowercased()) cleared" + removal.ending,
                                       failed: removal.stayed > 0)
@@ -1117,6 +1200,7 @@ final class Care {
         }
         backgroundItems = BackgroundItems.parse(r.output, uid: getuid())
             .sorted { ($0.developer ?? "~", $0.name) < ($1.developer ?? "~", $1.name) }
+        noteSightings("background", ids: backgroundItems.map(\.id))
     }
 
     /// Nil without Full Disk Access: macOS keeps both databases from apps
@@ -1171,7 +1255,7 @@ final class Care {
             store.message = Store.Message(text: "Space Lens could not read \(home).", failed: true)
             return
         }
-        let scan = SpaceScan(scannedAt: .now, root: root)
+        let scan = space?.followed(by: root) ?? SpaceScan(scannedAt: .now, root: root)
         space = scan
         try? scan.save(to: Self.savedSpace)
     }

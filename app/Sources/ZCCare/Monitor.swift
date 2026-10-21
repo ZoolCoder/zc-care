@@ -187,7 +187,7 @@ extension Store {
         .appendingPathComponent("dev.zoolcoder.zccare/activity.json")
 
     func record(_ kind: ActivityEntry.Kind, _ title: String, freed bytes: Int64 = 0, trashed: [Trashed]? = nil) {
-        activity.add(ActivityEntry(kind: kind, title: title, bytes: bytes, trashed: trashed))
+        activity.add(ActivityEntry(kind: kind, title: title, bytes: bytes, trashed: trashed?.isEmpty == true ? nil : trashed))
         try? activity.save(to: Self.activityFile)
     }
 
@@ -226,20 +226,23 @@ extension Store {
     /// whose sizes `picked` gives.
     func clean(_ spot: Junk, only picked: [JunkEntry]? = nil) async {
         let size = monitor.junk[spot.id] ?? 0
+        let verb = deletesPermanently ? "permanently deletes" : "moves to the Trash"
         let what = picked.map {
-            "This permanently deletes " + Self.counted($0.count, "item") + ", \(Self.bytes($0.reduce(0) { $0 + $1.size })), in \(spot.path):\n"
+            "This \(verb) " + Self.counted($0.count, "item") + ", \(Self.bytes($0.reduce(0) { $0 + $1.size })), in \(spot.path):\n"
                 + Alerts.lines($0.map { "\($0.name) (\(Self.bytes($0.size)))" })
-        } ?? "This permanently deletes \(Self.bytes(size)) in \(spot.path)."
-        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\nIt does not go to the Trash.\n\n\(spot.detail)", button: "Clear") else { return }
+        } ?? "This \(verb) \(Self.bytes(size)) in \(spot.path)."
+        let aftermath = deletesPermanently ? "It does not go to the Trash." : "My Activity can put it back until the Trash is emptied."
+        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\n\(aftermath)\n\n\(spot.detail)", button: "Clear") else { return }
         busy = "Clearing \(spot.title)"
         defer { busy = nil }
         let keep = await monitor.keep(spot, open: monitor.runningApps())
         let only = picked.map { Set($0.map(\.name)) }
-        let removal = await Task.detached { spot.empty(keeping: keep, only: only) }.value
+        let permanently = deletesPermanently
+        let removal = await Task.detached { spot.empty(keeping: keep, only: only, permanently: permanently) }.value
         let left = await Task.detached { spot.size(keeping: keep) }.value
         monitor.junk[spot.id] = left
         monitor.readDisk()
-        record(.junk, spot.title, freed: max(size - left, 0))
+        record(.junk, spot.title, freed: max(size - left, 0), trashed: removal.trashed)
         message = Message(text: "\(spot.title): freed \(Self.bytes(max(size - left, 0)))"
                           + removal.ending, failed: false)
     }
@@ -250,22 +253,28 @@ extension Store {
         let total = spots.reduce(Int64(0)) { $0 + (monitor.junk[$1.id] ?? 0) }
         let list = spots.map { "\($0.title): \(Self.bytes(monitor.junk[$0.id] ?? 0))" }.joined(separator: "\n")
         guard busy == nil, !spots.isEmpty,
-              Alerts.confirm("Clean up \(Self.bytes(total))?", list + "\n\nThis permanently deletes it; nothing goes to the Trash. All of it comes back on its own when needed.",
+              Alerts.confirm("Clean up \(Self.bytes(total))?", list + "\n\n" + (deletesPermanently
+                                 ? "This permanently deletes it; nothing goes to the Trash."
+                                 : "This moves it to the Trash; My Activity can put it back until the Trash is emptied.")
+                                 + " All of it comes back on its own when needed.",
                              button: "Clean Up") else { return }
         busy = "Cleaning up"
         defer { busy = nil }
         let open = monitor.runningApps()
         var freed: Int64 = 0, removal = Removal()
+        let permanently = deletesPermanently
         for spot in spots {
             let keep = await monitor.keep(spot, open: open)
             let size = monitor.junk[spot.id] ?? 0
-            removal.failures += await Task.detached { spot.empty(keeping: keep) }.value.failures
+            let result = await Task.detached { spot.empty(keeping: keep, permanently: permanently) }.value
+            removal.failures += result.failures
+            removal.trashed += result.trashed
             let left = await Task.detached { spot.size(keeping: keep) }.value
             monitor.junk[spot.id] = left
             freed += max(size - left, 0)
         }
         monitor.readDisk()
-        record(.junk, "System Junk", freed: freed)
+        record(.junk, "System Junk", freed: freed, trashed: removal.trashed)
         message = Message(text: "Freed \(Self.bytes(freed))" + removal.ending, failed: false)
     }
 

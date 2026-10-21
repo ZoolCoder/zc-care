@@ -61,6 +61,8 @@ struct DeveloperView: View {
                             .padding(10)
                         }
                     }
+                    if !care.xcodeSpots.isEmpty { xcode }
+                    if let usage = care.docker, !usage.isEmpty { docker(usage) }
                     CareSection("Local AI Models") {
                         if care.models.isEmpty {
                             Text(care.scanningDeveloper ? "Looking for models…"
@@ -87,6 +89,57 @@ struct DeveloperView: View {
                 .padding(.horizontal, 28)
                 .padding(.bottom, 70)
             }
+        }
+    }
+
+    private var xcode: some View {
+        CareSection("Xcode") {
+            ForEach(care.xcodeSpots) { spot in
+                CareRow(icon: SymbolTile(symbol: "hammer.fill", colors: Tint.blue, size: 32),
+                    title: spot.title, detail: spot.detail, value: Store.bytes(spot.size)) {
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([spot.url]) } label: {
+                        Image(systemName: "magnifyingglass").accessibilityLabel("Show in Finder")
+                    }
+                    .controlSize(.small)
+                    .help("Show in Finder")
+                    Button("Trash") { Task { await care.trash(spot) } }
+                        .controlSize(.small)
+                        .disabled(care.store.busy != nil)
+                }
+            }
+        }
+    }
+
+    private func docker(_ usage: [DockerUsage]) -> some View {
+        CareSection("Docker") {
+            ForEach(usage) { item in
+                CareRow(icon: SymbolTile(symbol: "shippingbox.fill", colors: Tint.cyan, size: 32),
+                    title: item.type,
+                    detail: "\(item.total) in all, \(item.active) in use · \(Store.bytes(item.reclaimable)) can be pruned",
+                    value: Store.bytes(item.size)) { EmptyView() }
+            }
+            HStack {
+                Text("Pruning removes what no container uses; images are pulled or built again.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Prune Build Cache") {
+                    Task {
+                        await care.pruneDocker("Prune Docker build cache", arguments: Docker.pruneBuildCache,
+                                               what: "Removes Docker's build cache. The next build is slower and rebuilds it.")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(care.store.busy != nil)
+                Button("Prune Dangling Images") {
+                    Task {
+                        await care.pruneDocker("Prune dangling Docker images", arguments: Docker.pruneDanglingImages,
+                                               what: "Removes images with no tag and no container. Tagged images stay.")
+                    }
+                }
+                .controlSize(.small)
+                .disabled(care.store.busy != nil)
+            }
+            .padding(10)
         }
     }
 

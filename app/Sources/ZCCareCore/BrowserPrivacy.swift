@@ -37,9 +37,9 @@ public enum BrowserPrivacy {
         }
     }
 
-    /// Deletes a trace's files for good; returns what would not go.
-    public static func clear(_ trace: BrowserTrace) -> Removal {
-        Removal.delete(trace.paths)
+    /// Moves a trace's files to the Trash, or deletes them for good; returns what would not go.
+    public static func clear(_ trace: BrowserTrace, permanently: Bool = false) -> Removal {
+        Removal.remove(trace.paths, permanently: permanently)
     }
 
     static func browsers(home: String) -> [Browser] {

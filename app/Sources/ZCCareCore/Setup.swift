@@ -57,14 +57,27 @@ extension CareCLI {
 }
 
 extension Fix {
+    /// A failed check and the command that fixes it as root.
+    public struct RootStep: Sendable, Equatable, Identifiable {
+        public var title: String
+        public var command: String
+
+        public var id: String { title }
+    }
+
+    /// The root fix of each failed check, in order.
+    public static func rootSteps(for checks: [Check]) -> [RootStep] {
+        checks.filter { !$0.isOK }.compactMap { check in
+            if case .command(let c) = Fix(for: check) { return RootStep(title: check.title, command: c) }
+            return nil
+        }
+    }
+
     /// The root fixes of every failed check, run as one command, so one
     /// password dialog secures the Mac. Nil when none can run as root.
     public static func rootCommands(for checks: [Check]) -> String? {
-        let commands = checks.filter { !$0.isOK }.compactMap { check -> String? in
-            if case .command(let c) = Fix(for: check) { return c }
-            return nil
-        }
-        return commands.isEmpty ? nil : commands.joined(separator: "; ")
+        let steps = rootSteps(for: checks)
+        return steps.isEmpty ? nil : steps.map(\.command).joined(separator: "; ")
     }
 }
 

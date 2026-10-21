@@ -76,6 +76,7 @@ final class Store {
         static let vitalsAlerts = "vitalsAlerts"
         static let vitalLimits = "vitalLimits"
         static let barStats = "barStats"
+        static let deletesPermanently = "deletesPermanently"
     }
 
     /// A reading the menu bar can show beside the mark.
@@ -127,6 +128,7 @@ final class Store {
         weeklyScan = UserDefaults.standard.bool(forKey: Keys.weeklyScan)
         ignoreList = IgnoreList(UserDefaults.standard.stringArray(forKey: Keys.ignoreList) ?? [])
         vitalsAlerts = UserDefaults.standard.bool(forKey: Keys.vitalsAlerts)
+        deletesPermanently = UserDefaults.standard.bool(forKey: Keys.deletesPermanently)
         vitalLimits = UserDefaults.standard.data(forKey: Keys.vitalLimits)
             .flatMap { try? JSONDecoder().decode(VitalLimits.self, from: $0) } ?? VitalLimits()
         barStats = Set((UserDefaults.standard.stringArray(forKey: Keys.barStats) ?? []).compactMap(BarStat.init))
@@ -157,6 +159,12 @@ final class Store {
     /// checked each minute whether the panel shows or not.
     var vitalsAlerts: Bool {
         didSet { UserDefaults.standard.set(vitalsAlerts, forKey: Keys.vitalsAlerts) }
+    }
+
+    /// Cache, browser and AI clutter cleanups go to the Trash, where My
+    /// Activity can put them back, unless this is on.
+    var deletesPermanently: Bool {
+        didSet { UserDefaults.standard.set(deletesPermanently, forKey: Keys.deletesPermanently) }
     }
 
     var vitalLimits: VitalLimits {
@@ -362,10 +370,9 @@ final class Store {
     }
 
     /// Fixes every failed check that runs as root, behind one password
-    /// dialog.
+    /// dialog. The caller has shown the commands and had them confirmed.
     func secureAll() async {
-        guard busy == nil, let command = Fix.rootCommands(for: snapshot?.security ?? []),
-              Alerts.confirm(fix: command, for: "this Mac") else { return }
+        guard busy == nil, let command = Fix.rootCommands(for: snapshot?.security ?? []) else { return }
         busy = "Securing this Mac"
         defer { busy = nil }
         let failed = await asRoot(command)

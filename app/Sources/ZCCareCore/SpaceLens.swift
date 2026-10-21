@@ -86,13 +86,62 @@ public enum SpaceLens {
 }
 
 /// A Space Lens scan, kept on disk: du over the home folder takes minutes.
+/// It keeps the scan before it too, to show what grew since.
 public struct SpaceScan: Codable, Sendable, Equatable {
     public var scannedAt: Date
     public var root: SpaceNode
+    public var previousAt: Date?
+    public var previousRoot: SpaceNode?
 
-    public init(scannedAt: Date, root: SpaceNode) {
+    public init(scannedAt: Date, root: SpaceNode, previousAt: Date? = nil, previousRoot: SpaceNode? = nil) {
         self.scannedAt = scannedAt
         self.root = root
+        self.previousAt = previousAt
+        self.previousRoot = previousRoot
+    }
+
+    /// Scans closer together than this are one baseline: a rescan an hour
+    /// later must not wipe out the week it should be compared with.
+    static let baselineGap: TimeInterval = 86400
+    /// Growth below this is noise: files come and go all day.
+    public static let noticeable: Int64 = 50_000_000
+
+    /// A new scan after this one. It compares with this one, or with the
+    /// baseline this one already had, when this one is newer than the gap.
+    public func followed(by root: SpaceNode, at date: Date = .now) -> SpaceScan {
+        if date.timeIntervalSince(scannedAt) < Self.baselineGap, previousRoot != nil {
+            return SpaceScan(scannedAt: date, root: root, previousAt: previousAt, previousRoot: previousRoot)
+        }
+        return SpaceScan(scannedAt: date, root: root, previousAt: scannedAt, previousRoot: self.root)
+    }
+
+    /// How much a folder grew since the previous scan; nil when either
+    /// scan did not reach it.
+    public func growth(of path: String) -> Int64? {
+        guard let before = previousRoot?.find(path), let now = root.find(path) else { return nil }
+        return now.size - before.size
+    }
+
+    /// The folders under `path` (the whole scan by default) that grew most,
+    /// biggest first. A folder whose growth is mostly one child's gives way
+    /// to that child, the better place to look.
+    public func growers(under path: String? = nil, from minimum: Int64 = noticeable, limit: Int = 5) -> [Grower] {
+        guard previousRoot != nil else { return [] }
+        var found: [Grower] = []
+        func walk(_ node: SpaceNode) {
+            for child in node.children {
+                if let grew = growth(of: child.path), grew >= minimum { found.append(Grower(path: child.path, grew: grew)) }
+                walk(child)
+            }
+        }
+        walk(path.flatMap(root.find) ?? root)
+        let grew = Dictionary(found.map { ($0.path, $0.grew) }, uniquingKeysWith: { a, _ in a })
+        return found
+            .filter { grower in
+                !(root.find(grower.path)?.children ?? []).contains { (grew[$0.path] ?? 0) * 2 >= grower.grew }
+            }
+            .sorted { $0.grew > $1.grew }
+            .prefix(limit).map { $0 }
     }
 
     public static func load(from url: URL) -> SpaceScan? {
@@ -103,5 +152,30 @@ public struct SpaceScan: Codable, Sendable, Equatable {
     public func save(to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(self).write(to: url, options: .atomic)
+    }
+}
+
+/// A folder that grew since the previous Space Lens scan.
+public struct Grower: Sendable, Equatable, Identifiable {
+    public var path: String
+    public var grew: Int64
+
+    public var id: String { path }
+}
+
+/// The Care module that handles a kind of folder Space Lens only measures.
+public enum SpaceDestination: String, Sendable {
+    case clutter, developer, cloud
+
+    public static func of(_ path: String, home: String) -> SpaceDestination? {
+        guard path.hasPrefix(home + "/") else { return nil }
+        let rest = String(path.dropFirst(home.count + 1))
+        func within(_ folders: [String]) -> Bool { folders.contains { rest == $0 || rest.hasPrefix($0 + "/") } }
+        if within(["Library/Mobile Documents", "Library/CloudStorage"]) { return .cloud }
+        if within(["Library/Developer", "Library/Containers/com.docker.docker", "Developer", ".gradle", ".npm", ".cargo"]) {
+            return .developer
+        }
+        if within(["Downloads", "Documents", "Desktop"]) { return .clutter }
+        return nil
     }
 }
