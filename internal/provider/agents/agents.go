@@ -85,6 +85,12 @@ func Load(path string) (Manifest, error) {
 		if (s.Command == "") == (s.URL == "") {
 			errs = append(errs, fmt.Errorf("%s: server %s needs a command or a url, not both", path, name))
 		}
+		_ = eachValue(&s, func(v string) (string, error) {
+			if !wellFormed(v) {
+				errs = append(errs, fmt.Errorf("%s: server %s has a malformed secret reference; write ${keychain:service} or ${keychain:service/account}", path, name))
+			}
+			return v, nil
+		})
 	}
 	if len(m.Clients) == 0 {
 		m.Clients = slices.Sorted(maps.Keys(clients))
@@ -115,11 +121,15 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 	if err != nil {
 		return nil, err
 	}
+	servers, err := p.resolve(ctx, m.Servers)
+	if err != nil {
+		return nil, err
+	}
 	var out []change
 	for _, name := range m.Clients {
 		c := clients[name]
-		for _, s := range slices.Sorted(maps.Keys(m.Servers)) {
-			ch, err := p.server(t.Name, name, c, s, m.Servers[s])
+		for _, s := range slices.Sorted(maps.Keys(servers)) {
+			ch, err := p.server(t.Name, name, c, s, servers[s])
 			if err != nil {
 				return nil, err
 			}
@@ -147,6 +157,21 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 	}
 	models, err := p.models(ctx, t.Name, m.Models)
 	return append(out, models...), err
+}
+
+// resolve reads the secrets the servers refer to. The result is for
+// comparing and writing only: it must never reach a plan or a message.
+func (p Provider) resolve(ctx context.Context, servers map[string]Server) (map[string]Server, error) {
+	k := newKeychain(p.r)
+	out := make(map[string]Server, len(servers))
+	for _, name := range slices.Sorted(maps.Keys(servers)) {
+		s, err := k.server(ctx, servers[name])
+		if err != nil {
+			return nil, fmt.Errorf("server %s: %w", name, err)
+		}
+		out[name] = s
+	}
+	return out, nil
 }
 
 // Plan lists what is not in place yet.

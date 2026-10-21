@@ -206,6 +206,9 @@ func runConfigured(cmd string, args []string, stdin io.Reader, stdout, stderr io
 		return err
 	}
 	if cmd == "validate" {
+		if err := validateManifests(cfg); err != nil {
+			return err
+		}
 		_, err := fmt.Fprintf(stdout, "%s: %d target(s), valid\n", f.path, len(cfg.Targets))
 		return err
 	}
