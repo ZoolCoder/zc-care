@@ -4,7 +4,10 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
-## Unreleased
+## v0.2.0 — 2026-10-21
+
+Set Up This Mac, safer cleanups that go to the Trash, and a CLI that can undo
+an apply, fix security findings and compare two Macs.
 
 ### ZC Care
 
