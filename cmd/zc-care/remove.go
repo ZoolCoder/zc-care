@@ -2,8 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
-	"fmt"
 	"io"
 )
 
@@ -19,9 +17,7 @@ func init() {
 // uninstall, shown and confirmed like any plan that deletes. Apply only ever
 // adds, so removing is always a request for one named item.
 func runRemove(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("remove", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
+	flags := newFlags("remove", stderr)
 	path := flags.String("config", "", "config file")
 	item := flags.String("item", "", "kind:name, such as cask:raycast; or the first argument")
 	yes := flags.Bool("yes", false, "skip the confirmation prompt")
