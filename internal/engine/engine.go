@@ -136,39 +136,81 @@ func (e *Engine) each(f func(n int, t config.Target)) {
 	wg.Wait()
 }
 
+// Outcome is what happened to one action Apply ran: Err is nil when it
+// succeeded. Actions Apply never reached, after an interrupt, have none.
+type Outcome struct {
+	Target, Resource string
+	Err              error
+}
+
 // Apply runs every executable action in order. A failed action is reported
 // and the rest still run, so one broken package does not hold up the others.
-// Then it re-plans: an action that reported success but left the target
-// still different is a failure too.
-func (e *Engine) Apply(ctx context.Context, p plan.Plan, w io.Writer) error {
+// A cancelled ctx stops it before the next action. Then it re-plans: an
+// action that reported success but left the target still different is a
+// failure too. It returns the outcome of each action it ran, even on error.
+func (e *Engine) Apply(ctx context.Context, p plan.Plan, w io.Writer) ([]Outcome, error) {
+	var outcomes []Outcome
 	var failed []error
+	var done []plan.Action
+	skipped := 0
 	for _, a := range p.Executable() {
-		if err := a.Do(ctx); err != nil {
+		if ctx.Err() != nil {
+			skipped++
+			continue
+		}
+		err := a.Do(ctx)
+		outcomes = append(outcomes, Outcome{Target: a.Target, Resource: a.Resource, Err: err})
+		if err != nil {
 			err = fmt.Errorf("%s %s %s: %w", a.Op, a.Target, a.Resource, err)
 			fmt.Fprintf(w, "failed  %v\n", err)
 			failed = append(failed, err)
 			continue
 		}
+		done = append(done, a)
 		fmt.Fprintf(w, "done  %s %s %s\n", a.Op, a.Target, a.Resource)
 	}
+	var errs []error
 	if len(failed) > 0 {
-		return fmt.Errorf("%d change(s) failed: %w", len(failed), errors.Join(failed...))
+		errs = append(errs, fmt.Errorf("%d change(s) failed: %w", len(failed), errors.Join(failed...)))
+	}
+	if skipped > 0 {
+		errs = append(errs, fmt.Errorf("interrupted: %d change(s) not run", skipped))
+	} else if err := e.verify(ctx, done); err != nil {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return outcomes, errors.Join(errs...)
+	}
+	_, err := fmt.Fprintln(w, "applied and verified")
+	return outcomes, err
+}
+
+// verify re-plans and reports any of the done actions that is still
+// outstanding. Only those are checked: a plan cut down with -only leaves the
+// rest outstanding on purpose, and a failed action is already reported.
+func (e *Engine) verify(ctx context.Context, done []plan.Action) error {
+	if len(done) == 0 {
+		return nil
 	}
 	after, err := e.Plan(ctx)
 	if err != nil {
 		return fmt.Errorf("verify: %w", err)
 	}
-	// Only what this plan changed is checked: a plan cut down with -only
-	// leaves the rest outstanding on purpose.
-	applied := make([]string, 0, len(p.Actions))
-	for _, a := range p.Actions {
-		applied = append(applied, a.Resource)
+	type key struct{ target, resource string }
+	applied := make(map[key]bool, len(done))
+	for _, a := range done {
+		applied[key{a.Target, a.Resource}] = true
 	}
-	if left := after.Only(applied).Executable(); len(left) > 0 {
-		return fmt.Errorf("applied, but %d change(s) are still outstanding; run plan to see them", len(left))
+	left := 0
+	for _, a := range after.Executable() {
+		if applied[key{a.Target, a.Resource}] {
+			left++
+		}
 	}
-	_, err = fmt.Fprintln(w, "applied and verified")
-	return err
+	if left > 0 {
+		return fmt.Errorf("applied, but %d change(s) are still outstanding; run plan to see them", left)
+	}
+	return nil
 }
 
 // TargetStatus is one target's live summary. InPlace and Declared are set

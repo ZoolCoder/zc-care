@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/zoolcoder/zc-care/internal/config"
 	"github.com/zoolcoder/zc-care/internal/engine"
@@ -218,7 +220,9 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
+	// Ctrl-C stops apply between actions, so the ones that ran are still logged.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if cmd == "status" {
 		return writeStatus(stdout, eng.Status(ctx), *asJSON)
@@ -264,8 +268,8 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		}
 	}
 	fmt.Fprintln(stdout)
-	err = eng.Apply(ctx, p, stdout)
-	recordApply(p, *via, err)
+	outcomes, err := eng.Apply(ctx, p, stdout)
+	recordApply(outcomes, *via)
 	return err
 }
 
