@@ -11,7 +11,9 @@ Usage:
   zc-care list     [flags]        every package, dotfile and runtime, with versions
   zc-care capture  -target t      write t's manifest from what this machine has
   zc-care validate [flags]        check the config offline
-  zc-care doctor   [-json]        health: system, config, programs, targets
+  zc-care doctor   [-json] [-fix] health: system, config, programs, targets; -fix plans
+                                 the fixes it can make
+  zc-care undo     [-n N] [-plan] revert the last apply, from what it replaced
   zc-care upgrade  [flags]        save what is outdated, then upgrade it
   zc-care history  [-n 20] [-json] what was applied, newest first
   zc-care drift    [-last] [-json] count what differs from the config, and save it;
@@ -60,4 +62,7 @@ Flags:
   -kind list       list: only these kinds, comma-separated (brew,cask,dotfile,...)
   -adoc            list: the declared packages and runtimes, with why each is
                    there, as an AsciiDoc page
+  -fix             doctor: plan the fixes it can make, and apply them after a yes
+  -n N             undo: revert the last N applies (default 1); -id picks one by
+                   the id -list shows; -plan shows the reverts and changes nothing
 ----

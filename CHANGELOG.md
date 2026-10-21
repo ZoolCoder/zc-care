@@ -15,6 +15,22 @@ here with what to edit.
   `zccare://setup` opens it.
 - **Choose Apps** picks several profiles at once, starting from the Mac's
   own.
+- **Cleanups go to the Trash** by default: junk, browser data and AI caches
+  are recorded in My Activity and can be put back. A new Settings toggle,
+  "Delete permanently instead of moving to the Trash", restores the old
+  behaviour, and the confirmations say which one applies.
+- **Secure All previews the commands**: a sheet lists each failing check with
+  the exact root command before the single password dialog.
+- **Space Lens shows growth**: it keeps the scan before and marks each folder
+  that grew since then, lists the top growers, and links to the module that
+  can clean them.
+- **Developer** covers Docker, when its CLI is installed and the daemon
+  answers, with sizes and Prune Build Cache and Prune Dangling Images, and
+  Xcode: DerivedData, Archives, iOS DeviceSupport and simulator caches, each
+  with its size and a Trash button.
+- **New since last week**: launch agents, daemons and background items that
+  appeared in the last seven days carry a New badge in Performance and
+  Protection.
 
 ### CLI
 
@@ -33,6 +49,15 @@ here with what to edit.
   url, env or header. Plans, history and errors show the reference, not the
   secret. `validate` flags a malformed one. For dotfiles use chezmoi's
   `keyring` template function.
+- `zc-care undo` reverts the last apply, or the last `-n N`. It builds the
+  reverse as a plan, shows it, and asks first when it would uninstall a
+  package or overwrite a file. Settings go back to their old value or are
+  deleted, dotfiles come back from a private copy, installed packages are
+  uninstalled and removed ones reinstalled. Upgrades, runtimes and scripts
+  are listed as cannot be undone. `-plan` and `-json` change nothing.
+- `zc-care doctor -fix` turns each fixable security finding into a plan
+  action, lists the exact commands (`sudo` included), asks, runs them and
+  checks again. Findings with no safe command stay advice.
 
 ## v0.1.0 — 2026-10-18
 

@@ -413,7 +413,8 @@ brew "lazygit"   # git TUI for staging hunks
 | `validate` | Checks the config offline, and agents manifests for bad `${keychain:...}` references. |
 | `export [-o file]` | Saves what this Mac has, per target, as a JSON snapshot without secrets. |
 | `diff a.json [b.json]` | Shows what differs between two snapshots, or one and this Mac. |
-| `doctor` | Checks programs, config, targets and macOS security settings, each with its fix. |
+| `doctor [-fix]` | Checks programs, config, targets and macOS security settings, each with its fix. With `-fix` it plans those fixes, lists the exact commands and runs them after a yes. |
+| `undo [-n N] [-plan]` | Plans the reverse of the last apply (settings, dotfiles, packages), shows it and runs it after a yes. |
 | `skip [-undo] kind:name` | Lists or changes the packages this machine leaves out. |
 | `mcp` | Starts the MCP server for AI agents, over stdio. |
 

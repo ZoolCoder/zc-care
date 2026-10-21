@@ -16,6 +16,8 @@
 | `diff A.json [B.json]` | What differs between two snapshots, or between one and this Mac. See <<Compare two Macs>>.
 | `doctor` | Machine health: binary, system, config, the programs targets need, and each target. It also warns about weak security settings, keys without a passphrase, unsigned commits, secrets in the shell history and risky AI agent configs, each with its fix. xref:security.adoc#_what_doctor_checks[Every check].
 | `upgrade` | Save what is outdated to the state folder, then `apply -upgrade`. The review skill reads the snapshot to say what moved from what to what.
+| `doctor -fix` | Run `doctor`, then plan a fix for each failing security check that has one, as `sudo` commands where they need root. It lists the exact commands, asks for a yes, runs them and checks again. A finding with no command, such as FileVault, stays advice.
+| `undo` | Put back what the last `apply` replaced, or the last `-n N`, or one entry (`-id`, from `-list`). It plans the reverse, shows it and asks first when it uninstalls or overwrites. `-plan` shows it and changes nothing; `-json` prints it. See xref:#_undo[Undo].
 | `history` | What was applied, newest first: when, which target, from the terminal, ZC Care or an agent, and whether it worked. Drift changes show here too.
 | `drift` | Plan, and save how many changes are outstanding to `~/.local/state/zc-care/drift.json`, which ZC Care shows. `-last` prints the saved one; `-plist` prints a launchd agent that runs it every morning.
 | `mcp` | The MCP server on standard input and output.
@@ -39,7 +41,9 @@
 | `-exit-code` | `plan`: exit 2 for changes, 3 for manual-only.
 | `-upgrade` | `plan`, `apply`: also upgrade outdated packages and runtimes, as if every `packages` and `tools` target said `upgrade: true`.
 | `-only RESOURCE` | `plan`, `apply`: only the change to this resource, such as `brew:tmux`; repeat for several. A saved plan remembers `-upgrade` and `-only`.
-| `-yes` | `apply`: skip the confirmation prompt for deletions.
+| `-fix` | `doctor`: plan and apply the fixes, after a yes. Cannot be combined with `-json`.
+| `-n N`, `-id ID`, `-list` | `undo`: how many applies to revert, which one, or list them.
+| `-yes` | `apply`, `undo`, `doctor -fix`: skip the confirmation prompt.
 |===
 
 == Compare two Macs
@@ -185,6 +189,28 @@ a plan that deletes is applied at a terminal.
 * The item is `kind:name` as `list` shows it. An item the manifest does not
   declare is still uninstalled, so leftovers go through the tool too.
 * An App Store app that is not declared is named by its id.
+
+== Undo
+
+Each `apply` records what it replaced, in `undo/` beside the activity log:
+the old value of a macOS setting, the old content of a dotfile, the packages
+it installed or removed. `zc-care undo` builds the reverse as a plan, shows
+it and runs it through the same engine.
+
+* A setting goes back to its old value and type, or is deleted if it was not
+  set before.
+* A dotfile is restored from a private copy (mode `0600`, never in the
+  history), or removed if the apply created it.
+* A package the apply installed is uninstalled; one it removed is reinstalled.
+  Undo does not edit the manifest: after an uninstall the next `plan` installs
+  the package again, and a reinstalled one needs its line added back.
+
+Some changes are listed as `MANUAL` with the reason, because there is no safe
+way back: upgrades and runtime installs (no downgrades), dotfile scripts, and
+settings that hold an array or a dictionary. Uninstalling and overwriting a
+file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
+`history` as from `undo`, but it cannot be undone, and neither can
+`doctor -fix`. The MCP server does not offer `undo`.
 
 == Capture
 
