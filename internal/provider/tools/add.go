@@ -50,7 +50,7 @@ func (p Provider) Add(t config.Target, e provider.Entry) error {
 	if _, ok := declaredTools(data)[name]; ok {
 		return fmt.Errorf("%s already declares %s", t.File, name)
 	}
-	return os.WriteFile(t.File, insertTool(data, line), info.Mode().Perm())
+	return manifest.WriteFile(t.File, insertTool(data, line), info.Mode().Perm())
 }
 
 // declaredTools reads the [tools] table's comments, by tool name.
