@@ -53,7 +53,9 @@ Usage:
   ` + name + ` list     [flags]        every package, dotfile and runtime, with versions
   ` + name + ` capture  -target t      write t's manifest from what this machine has
   ` + name + ` validate [flags]        check the config offline
-  ` + name + ` doctor   [-json]        health: system, config, programs, targets
+  ` + name + ` doctor   [-json] [-fix] health: system, config, programs, targets; -fix plans
+                                 the fixes it can make
+  ` + name + ` undo     [-n N] [-plan] revert the last apply, from what it replaced
   ` + name + ` upgrade  [flags]        save what is outdated, then upgrade it
   ` + name + ` history  [-n 20] [-json] what was applied, newest first
   ` + name + ` drift    [-last] [-json] count what differs from the config, and save it;
@@ -88,6 +90,9 @@ Flags:
   -kind list       list: only these kinds, comma-separated (brew,cask,dotfile,...)
   -adoc            list: the declared packages and runtimes, with why each is
                    there, as an AsciiDoc page
+  -fix             doctor: plan the fixes it can make, and apply them after a yes
+  -n N             undo: revert the last N applies (default 1); -id picks one by
+                   the id -list shows; -plan shows the reverts and changes nothing
 `
 
 func usage() string {
@@ -148,6 +153,8 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return runHistory(args, stdin, stdout, stderr)
 	case "drift":
 		return runDrift(args, stdin, stdout, stderr)
+	case "undo":
+		return runUndo(args, stdin, stdout, stderr)
 	case "plan", "apply", "status", "list", "capture", "validate":
 		return runConfigured(cmd, args, stdin, stdout, stderr)
 	}
@@ -302,7 +309,7 @@ func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.
 		if f.path == "-" {
 			return errors.New("this plan deletes things, overwrites outside edits or runs scripts, and the config came from stdin; pass -yes to confirm")
 		}
-		if !confirm(stdin, stdout) {
+		if !confirm(stdin, stdout, destructiveWhy) {
 			return errCancelled
 		}
 	}
@@ -418,8 +425,10 @@ func writeStatus(w io.Writer, rows []engine.TargetStatus, asJSON bool) error {
 	return nil
 }
 
-func confirm(stdin io.Reader, stdout io.Writer) bool {
-	fmt.Fprint(stdout, "\nthis plan deletes things, overwrites edits made outside the tool or runs scripts. type yes to continue: ")
+const destructiveWhy = "this plan deletes things, overwrites edits made outside the tool or runs scripts"
+
+func confirm(stdin io.Reader, stdout io.Writer, why string) bool {
+	fmt.Fprintf(stdout, "\n%s. type yes to continue: ", why)
 	var answer string
 	if _, err := fmt.Fscanln(stdin, &answer); err != nil {
 		return false

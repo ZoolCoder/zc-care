@@ -16,10 +16,15 @@ import (
 // activityLog is the log ZC Care, the CLI and the MCP server share, so
 // every apply shows in one place whichever way it ran.
 func activityLog(dataDir string) *activity.Log {
+	return &activity.Log{Path: filepath.Join(dataFolder(dataDir), "activity.jsonl")}
+}
+
+// dataFolder is where the activity log and the undo journal live.
+func dataFolder(dataDir string) string {
 	if dataDir == "" {
-		dataDir = activity.DataDir(name)
+		return activity.DataDir(name)
 	}
-	return &activity.Log{Path: filepath.Join(dataDir, "activity.jsonl")}
+	return dataDir
 }
 
 // recordApply writes one entry per target that ran an action: failed when
@@ -37,6 +42,12 @@ func recordApply(outcomes []engine.Outcome, via string) {
 	for _, t := range order {
 		detail, ok := applyDetail(byTarget[t], via)
 		_ = log.Append(activity.Entry{At: time.Now(), Kind: "apply", Target: t, Detail: detail, OK: ok})
+	}
+	// An undo is not itself undone: running it again would only redo. A
+	// doctor fix keeps no record either: it changes system settings undo
+	// cannot restore.
+	if via != viaUndo && via != viaDoctor {
+		_ = saveJournal("", outcomes, via)
 	}
 }
 
