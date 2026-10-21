@@ -595,7 +595,7 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(names == ["History", "History-journal", "Cookies", "Default", "cookies.sqlite"])
 
     let history = try #require(traces.first)
-    #expect(BrowserPrivacy.clear(history) == 0)
+    #expect(BrowserPrivacy.clear(history).stayed == 0)
     #expect(!FileManager.default.fileExists(atPath: home.path + "/" + chrome + "Default/History"))
     #expect(FileManager.default.fileExists(atPath: home.path + "/" + chrome + "Default/Bookmarks"))
 }

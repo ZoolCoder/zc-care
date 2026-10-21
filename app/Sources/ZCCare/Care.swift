@@ -82,6 +82,8 @@ final class Care {
     var gatekeeper: Bool?
     /// Nil until read; the TCC databases need Full Disk Access.
     var permissions: [Permission]?
+    /// Why the permissions could not be read, when it was not Full Disk Access.
+    var permissionsError: String?
     var loadingProtection = false
     /// History, cookies and caches per browser; nil until read.
     var browserTraces: [BrowserTrace]?
@@ -306,11 +308,10 @@ final class Care {
         scanningFiles = true
         let home = NSHomeDirectory()
         let args = ["-onlyin", home, LargeFiles.query(minimum: Self.duplicateFile)]
-        guard let r = try? await ProcessRunner(timeout: 120).run("/usr/bin/mdfind", args, env: [:]) else {
+        guard let paths = await spotlight(args, for: "Large files") else {
             scanningFiles = false
             return
         }
-        let paths = r.output.split(whereSeparator: \.isNewline).map(String.init)
         let downloads = URL(fileURLWithPath: home + "/Downloads")
         let installers = [downloads, URL(fileURLWithPath: home + "/Desktop")]
         let same = Task.detached(priority: .utility) { Duplicates.groups(paths: paths, home: home, minimum: Self.duplicateFile) }
@@ -325,19 +326,36 @@ final class Care {
         duplicates = store.ignoreList.keep(await same.value)
     }
 
+    /// The paths Spotlight finds; nil, with why in a message, when mdfind fails.
+    private func spotlight(_ args: [String], for what: String) async -> [String]? {
+        do {
+            let r = try await ProcessRunner(timeout: 120).run("/usr/bin/mdfind", args, env: [:])
+            guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "mdfind exited \(r.status)") }
+            return r.output.split(whereSeparator: \.isNewline).map(String.init)
+        } catch {
+            store.message = Store.Message(text: "\(what) not scanned: \(error.localizedDescription)", failed: true)
+            return nil
+        }
+    }
+
+    /// Whether an app has any of the files open, which then stay put; a
+    /// disk image a VM runs from or a video in an editor. Says which app.
+    private func openInApp(_ urls: [URL]) async -> Bool {
+        guard let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--"] + urls.map(\.path), env: [:]),
+              let app = OpenFile.holders(r.output).first else { return false }
+        let what = urls.count == 1 ? "\(urls[0].lastPathComponent) is" : "\(Store.counted(urls.count, "of these files")) may be"
+        store.message = Store.Message(text: "\(what) open in \(app). Close it first.", failed: true)
+        return true
+    }
+
     func trash(_ file: LargeFile) async {
         guard store.busy == nil, allowed([file.url]) else { return }
-        // A disk image a VM runs from or a video in an editor stays put.
-        if let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--", file.url.path], env: [:]),
-           let app = OpenFile.holders(r.output).first {
-            store.message = Store.Message(text: "\(file.name) is open in \(app). Close it first.", failed: true)
-            return
-        }
+        guard await !openInApp([file.url]) else { return }
         // A folder from Space Lens: a project with a server or a shell in it.
         if (try? file.url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
             let cwds = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["-a", "-d", "cwd", "-Fcn"], env: [:])
             let using = OpenFile.workingIn(file.url.path, cwds?.output ?? "")
-            let commands = await Task.detached { Monitor.commands() }.value
+            let commands = await Monitor.commands()
             if let app = using.first ?? (AIClutter.used(file.url, by: commands) ? "a running command" : nil) {
                 store.message = Store.Message(text: "\(file.name) is in use by \(app). Stop it first.", failed: true)
                 return
@@ -382,16 +400,15 @@ final class Care {
         defer { scanningImages = false }
         let home = NSHomeDirectory()
         let args = SimilarImages.folders(home: home).flatMap { ["-onlyin", $0] } + [SimilarImages.query]
-        guard let r = try? await ProcessRunner(timeout: 120).run("/usr/bin/mdfind", args, env: [:]) else { return }
-        let paths = r.output.split(whereSeparator: \.isNewline).map(String.init)
+        guard let paths = await spotlight(args, for: "Similar images") else { return }
         similar = await Task.detached(priority: .utility) { SimilarImages.groups(paths: paths, home: home) }.value
         applyIgnoreList()
     }
 
     /// Moves every image but the best of a group to the Trash.
-    func trashOthers(_ group: SimilarGroup) {
+    func trashOthers(_ group: SimilarGroup) async {
         let others = group.others
-        guard store.busy == nil, allowed(others.map(\.url)), Alerts.confirm("Move \(Store.counted(others.count, "similar image")) to the Trash?",
+        guard store.busy == nil, allowed(others.map(\.url)), await !openInApp(others.map(\.url)), Alerts.confirm("Move \(Store.counted(others.count, "similar image")) to the Trash?",
                                                 "\(Store.bytes(group.wasted)). \(group.best.name) stays.",
                                                 button: "Move to Trash") else { return }
         var moved: [LargeFile] = []
@@ -412,18 +429,23 @@ final class Care {
     func keepOldest(_ group: DuplicateGroup) async {
         guard store.busy == nil else { return }
         let keeper = group.keeper
-        store.busy = "Comparing copies of \(keeper.name)"
-        let others = await Task.detached { Duplicates.stillSame(group) }.value
-        store.busy = nil
+        let others = await stillSame(group)
         guard !others.isEmpty else {
             store.message = Store.Message(text: "The copies of \(keeper.name) changed since the scan; Rescan to compare them again.", failed: true)
             return
         }
-        guard allowed(others.map(\.url)),
+        guard allowed(others.map(\.url)), await !openInApp(others.map(\.url)),
               Alerts.confirm("Move \(Store.counted(others.count, "copy", "copies")) of \(keeper.name) to the Trash?",
                              "\(Store.bytes(group.size * Int64(others.count))). \((keeper.url.path as NSString).abbreviatingWithTildeInPath) stays.\n\n"
                                  + Alerts.lines(others.map { ($0.url.path as NSString).abbreviatingWithTildeInPath }),
                              button: "Move to Trash") else { return }
+        // Again: a copy may have changed while the alert was up.
+        let confirmed = Set(others.map(\.id))
+        let unchanged = await stillSame(group).filter { confirmed.contains($0.id) }
+        guard unchanged.count == others.count else {
+            store.message = Store.Message(text: "The copies of \(keeper.name) changed while you decided; Rescan to compare them again.", failed: true)
+            return
+        }
         var moved: [LargeFile] = []
         var trashed: [Trashed] = []
         for file in others {
@@ -441,6 +463,13 @@ final class Care {
         monitor.readDisk()
         store.record(.files, "Copies of \(keeper.name)", freed: moved.reduce(0) { $0 + $1.size }, trashed: trashed)
         store.message = Store.Message(text: "\(moved.count) of \(Store.counted(others.count, "copy", "copies")) in the Trash.", failed: moved.count < others.count)
+    }
+
+    /// The copies still byte for byte the same as the keeper.
+    private func stillSame(_ group: DuplicateGroup) async -> [LargeFile] {
+        store.busy = "Comparing copies of \(group.keeper.name)"
+        defer { store.busy = nil }
+        return await Task.detached { Duplicates.stillSame(group) }.value
     }
 
     private func drop(_ ids: Set<String>) {
@@ -462,7 +491,7 @@ final class Care {
         let home = NSHomeDirectory()
         async let stale = Task.detached(priority: .utility) {
             let found = ProjectDependencies.find(roots: ProjectDependencies.roots(home: home))
-            let running = Set(ProjectDependencies.running(found, commands: Monitor.commands()).map(\.id))
+            let running = Set(ProjectDependencies.running(found, commands: await Monitor.commands()).map(\.id))
             return found.filter { !running.contains($0.id) }
         }.value
         async let found = Task.detached(priority: .utility) { AIModels.find(home: home) }.value
@@ -474,7 +503,7 @@ final class Care {
         guard store.busy == nil, !folders.isEmpty, allowed(folders.map(\.url)) else { return }
         // A project may have started since the scan, or have a shell open in it.
         let cwds = (try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["-a", "-d", "cwd", "-Fcn"], env: [:]))?.output ?? ""
-        let running = ProjectDependencies.running(folders, commands: await Task.detached { Monitor.commands() }.value)
+        let running = ProjectDependencies.running(folders, commands: await Monitor.commands())
             + folders.filter { !OpenFile.workingIn($0.url.deletingLastPathComponent().path, cwds).isEmpty }
         if !running.isEmpty {
             let ids = Set(running.map(\.id))
@@ -562,13 +591,15 @@ final class Care {
     // MARK: AI Clutter
 
     func scanAI() async {
+        guard !scanningAI else { return }
         scanningAI = true
         defer { scanningAI = false }
         let home = NSHomeDirectory()
         let temp = "/private/tmp/claude-\(getuid())"
         let open = monitor.runningApps()
+        let commands = await Monitor.commands()
         aiJunk = await Task.detached(priority: .utility) {
-            AIClutter.find(home: home, claudeTemp: temp, open: open, commands: Monitor.commands())
+            AIClutter.find(home: home, claudeTemp: temp, open: open, commands: commands)
         }.value
         applyIgnoreList()
     }
@@ -581,7 +612,7 @@ final class Care {
         let list = picked.map { "\($0.tool), \($0.kind): \(Store.bytes($0.size))" }.joined(separator: "\n")
             + "\n\n" + Alerts.lines(picked.flatMap(\.paths).map { ($0.path as NSString).abbreviatingWithTildeInPath })
         guard Alerts.confirm("Clear \(Store.bytes(total)) of AI clutter?",
-                             list + "\n\nChats, settings, sessions and whatever is running stay.",
+                             list + "\n\nChats, settings, sessions and whatever is running stay. The rest is deleted for good, not moved to the Trash.",
                              button: "Clear") else { return }
         store.busy = "Clearing AI clutter"
         defer { store.busy = nil }
@@ -589,16 +620,16 @@ final class Care {
         let temp = "/private/tmp/claude-\(getuid())"
         let ignored = store.ignoreList
         let open = monitor.runningApps()
-        let stuck = await Task.detached {
-            AIClutter.stillJunk(picked, in: AIClutter.find(home: home, claudeTemp: temp, open: open, commands: Monitor.commands()))
-                .filter { !ignored.covers($0) }
-                .filter { (try? FileManager.default.removeItem(at: $0)) == nil }.count
+        let commands = await Monitor.commands()
+        let removal = await Task.detached {
+            Removal.delete(AIClutter.stillJunk(picked, in: AIClutter.find(home: home, claudeTemp: temp, open: open, commands: commands))
+                .filter { !ignored.covers($0) })
         }.value
         await scanAI()
         let freed = max(total - picked.reduce(0) { sum, p in sum + (aiJunk.first { $0.id == p.id }?.size ?? 0) }, 0)
         store.record(.ai, picked.count == 1 ? picked[0].tool : "AI Clutter", freed: freed)
         monitor.readDisk()
-        store.message = Store.Message(text: "AI clutter: freed \(Store.bytes(freed))" + (stuck > 0 ? "; \(stuck) in use stayed." : "."),
+        store.message = Store.Message(text: "AI clutter: freed \(Store.bytes(freed))" + removal.ending,
                                       failed: false)
     }
 
@@ -633,21 +664,16 @@ final class Care {
         }
         // An open app is in use now, whatever Spotlight recorded.
         let running = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleURL?.standardizedFileURL.path })
-        await withTaskGroup(of: (String, Int64, Date?, Date?).self) { group in
-            for url in found.map(\.url) {
-                group.addTask(priority: .utility) {
-                    let item = NSMetadataItem(url: url)
-                    let used = item?.value(forAttribute: "kMDItemLastUsedDate") as? Date
-                    let added = item?.value(forAttribute: "kMDItemDateAdded") as? Date
-                    return (url.path, DiskUsage.allocated(url), used, added)
-                }
-            }
-            for await (id, size, used, added) in group {
-                guard let i = apps.firstIndex(where: { $0.id == id }) else { continue }
-                apps[i].size = size
-                apps[i].lastUsed = running.contains(URL(fileURLWithPath: id).standardizedFileURL.path) ? .now : used
-                apps[i].added = added
-            }
+        await forEachConcurrently(found.map(\.url)) { url in
+            let item = NSMetadataItem(url: url)
+            let used = item?.value(forAttribute: "kMDItemLastUsedDate") as? Date
+            let added = item?.value(forAttribute: "kMDItemDateAdded") as? Date
+            return (url.path, DiskUsage.allocated(url), used, added)
+        } each: { id, size, used, added in
+            guard let i = apps.firstIndex(where: { $0.id == id }) else { return }
+            apps[i].size = size
+            apps[i].lastUsed = running.contains(URL(fileURLWithPath: id).standardizedFileURL.path) ? .now : used
+            apps[i].added = added
         }
     }
 
@@ -678,34 +704,44 @@ final class Care {
         switch method {
         case .remove(let target, let resource):
             if let cli = store.cli {
-                let r = try? await cli.run(["remove", "-target", target, resource])
-                if r?.status != 0 { failure = lastLine(r?.stderr) ?? "remove failed" }
+                failure = await store.cancellable {
+                    await self.store.failure("remove failed") { try await cli.run(["remove", "-target", target, resource]) }
+                }
             } else {
                 failure = "zc-care is not installed"
             }
         case .cask(let token):
             if let brew = store.program("brew") {
-                let r = try? await ProcessRunner().run(brew, ["uninstall", "--cask", token], env: store.loginEnv)
-                if r?.status != 0 { failure = lastLine(r?.stderr) ?? "brew uninstall failed" }
+                failure = await store.cancellable {
+                    await self.store.failure("brew uninstall failed") {
+                        try await ProcessRunner().run(brew, ["uninstall", "--cask", token], env: self.store.loginEnv)
+                    }
+                }
             } else {
                 failure = "Homebrew is not installed"
             }
         case .trash:
             (failure, trashed) = await recycle([app.url])
         }
-        if failure == nil, !leftovers.isEmpty {
+        let removed = failure == nil
+        var leftoverFailure: String?
+        if removed, !leftovers.isEmpty {
             await bootOut(Leftovers.agents(in: leftovers))
             let left: [Trashed]
-            (failure, left) = await recycle(leftovers.map(URL.init(fileURLWithPath:)))
+            (leftoverFailure, left) = await recycle(leftovers.map(URL.init(fileURLWithPath:)))
             trashed += left
         }
-        if let failure {
-            store.message = Store.Message(text: "\(app.name): \(failure)", failed: true)
-        } else {
+        if removed {
             apps.removeAll { $0.id == app.id }
             // Only an app that went to the Trash comes back whole; a
             // Homebrew or zc-care removal has nothing there to restore.
             store.record(.apps, app.name, freed: app.size ?? 0, trashed: trashed.isEmpty ? nil : trashed)
+        }
+        if let failure {
+            store.message = Store.Message(text: "\(app.name): \(failure)", failed: true)
+        } else if let leftoverFailure {
+            store.message = Store.Message(text: "\(app.name) is uninstalled, but its files stayed: \(leftoverFailure)", failed: true)
+        } else {
             store.message = Store.Message(text: "\(app.name) is uninstalled.", failed: false)
         }
         monitor.readDisk()
@@ -754,11 +790,11 @@ final class Care {
         defer { store.busy = nil }
         await bootOut(Leftovers.agents(in: data))
         let (failure, trashed) = await recycle(urls)
-        // cfprefsd keeps the settings in memory and would write them back.
-        _ = try? await ProcessRunner(timeout: 10).run("/usr/bin/killall", ["cfprefsd"], env: [:])
         if let failure {
             store.message = Store.Message(text: "\(app.name): \(failure)", failed: true)
         } else {
+            // cfprefsd keeps the settings in memory and would write them back.
+            _ = try? await ProcessRunner(timeout: 10).run("/usr/bin/killall", ["cfprefsd"], env: [:])
             store.record(.apps, "Reset \(app.name)", trashed: trashed)
             store.message = Store.Message(text: "\(app.name) is reset.", failed: false)
         }
@@ -793,6 +829,7 @@ final class Care {
     func trashOrphans(_ picked: [Orphan]) async {
         guard store.busy == nil, !picked.isEmpty,
               allowed(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
+        guard await !openInApp(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
         let total = picked.reduce(0) { $0 + $1.size }
         guard Alerts.confirm("Move what \(Store.counted(picked.count, "removed app")) left to the Trash?",
                              "\(Store.bytes(total)) in caches, settings and support files:\n\n"
@@ -836,9 +873,13 @@ final class Care {
                              button: "Adopt") else { return }
         store.busy = "Adopting \(app.name)"
         defer { store.busy = nil }
-        let install = try? await ProcessRunner().run(brew, ["install", "--cask", "--adopt", token], env: store.loginEnv)
-        guard install?.status == 0 else {
-            store.message = Store.Message(text: "\(app.name): \(lastLine(install?.stderr) ?? "brew install failed")", failed: true)
+        let installFailure = await store.cancellable {
+            await self.store.failure("brew install failed") {
+                try await ProcessRunner().run(brew, ["install", "--cask", "--adopt", token], env: self.store.loginEnv)
+            }
+        }
+        if let installFailure {
+            store.message = Store.Message(text: "\(app.name): \(installFailure)", failed: true)
             return
         }
         let add = try? await cli.run(["add", "-target", target, "-why", "Adopted from /Applications by ZC Care", "cask:" + token])
@@ -867,18 +908,27 @@ final class Care {
 
     private var domain: String { "gui/\(getuid())" }
 
+    private func launchctl(_ args: [String]) async throws -> String {
+        let r = try await ProcessRunner(timeout: 30).run("/bin/launchctl", args, env: [:])
+        guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "launchctl \(args[0]) exited \(r.status)") }
+        return r.output
+    }
+
     func loadAgents() async {
         let home = NSHomeDirectory()
         var found = await Task.detached {
             LaunchAgent.read(folders: [home + "/Library/LaunchAgents", "/Library/LaunchAgents"])
         }.value
-        async let disabledOut = try? ProcessRunner(timeout: 30).run("/bin/launchctl", ["print-disabled", domain], env: [:])
-        async let listOut = try? ProcessRunner(timeout: 30).run("/bin/launchctl", ["list"], env: [:])
-        let disabled = Launchd.parseDisabled(await disabledOut?.output ?? "")
-        let running = Launchd.parseRunning(await listOut?.output ?? "")
-        for i in found.indices {
-            if let off = disabled[found[i].label] { found[i].enabled = !off }
-            found[i].running = running.contains(found[i].label)
+        do {
+            let disabled = Launchd.parseDisabled(try await launchctl(["print-disabled", domain]))
+            let running = Launchd.parseRunning(try await launchctl(["list"]))
+            for i in found.indices {
+                if let off = disabled[found[i].label] { found[i].enabled = !off }
+                found[i].running = running.contains(found[i].label)
+            }
+        } catch {
+            store.message = Store.Message(text: "Launch agents: could not read which are on or running: \(error.localizedDescription)",
+                                          failed: true)
         }
         // Broken ones first: they are the ones to act on.
         agents = found.filter(\.broken) + found.filter { !$0.broken }
@@ -956,6 +1006,22 @@ final class Care {
         maintenance = Maintenance.tasks(brew: store.program("brew"), docker: store.program("docker"), xcode: xcode)
     }
 
+    /// Runs the task's steps; why one failed, if one did.
+    private func steps(of task: MaintenanceTask) async -> String? {
+        if task.admin {
+            return await store.failure("osascript failed") {
+                try await ProcessRunner().run("/usr/bin/osascript", ["-e", Maintenance.adminScript(task.steps)], env: [:])
+            }
+        }
+        for step in task.steps {
+            let failed = await store.failure("\(step[0]) failed") {
+                try await ProcessRunner().run(step[0], Array(step.dropFirst()), env: self.store.loginEnv)
+            }
+            if let failed { return failed }
+        }
+        return nil
+    }
+
     /// Runs one task after asking; admin tasks go through osascript, which
     /// asks for the password itself.
     func run(_ task: MaintenanceTask) async {
@@ -964,16 +1030,7 @@ final class Care {
                              button: "Run") else { return }
         store.busy = task.title
         defer { store.busy = nil }
-        var failure: String?
-        if task.admin {
-            let r = try? await ProcessRunner().run("/usr/bin/osascript", ["-e", Maintenance.adminScript(task.steps)], env: [:])
-            if r?.status != 0 { failure = lastLine(r?.stderr) ?? "osascript failed" }
-        } else {
-            for step in task.steps {
-                let r = try? await ProcessRunner().run(step[0], Array(step.dropFirst()), env: store.loginEnv)
-                if r?.status != 0 { failure = lastLine(r?.stderr) ?? "\(step[0]) failed"; break }
-            }
-        }
+        let failure = await store.cancellable { await self.steps(of: task) }
         if failure == nil { store.record(.maintenance, task.title) }
         store.message = failure.map { Store.Message(text: "\(task.title): \($0)", failed: true) }
             ?? Store.Message(text: "\(task.title): done.", failed: false)
@@ -994,14 +1051,12 @@ final class Care {
         gatekeeper = await status.map { $0.output.contains("assessments enabled") }
         permissions = await tcc
         await loadBrowserTraces()
-        await withTaskGroup(of: (String, Assessment).self) { group in
-            for app in apps where assessments[app.id] == nil {
-                group.addTask {
-                    let r = try? await ProcessRunner(timeout: 60).run("/usr/sbin/spctl", ["--assess", "-v", app.url.path], env: [:])
-                    return (app.id, Assessment.parse(r?.stderr ?? ""))
-                }
-            }
-            for await (id, a) in group { assessments[id] = a }
+        let unassessed = apps.filter { assessments[$0.id] == nil }.map { (id: $0.id, path: $0.url.path) }
+        await forEachConcurrently(unassessed) { app in
+            let r = try? await ProcessRunner(timeout: 60).run("/usr/sbin/spctl", ["--assess", "-v", app.path], env: [:])
+            return (app.id, Assessment.parse(r?.stderr ?? ""))
+        } each: { id, a in
+            assessments[id] = a
         }
     }
 
@@ -1028,17 +1083,17 @@ final class Care {
         default: "\(trace.browser) downloads pages again as you visit them."
         }
         guard Alerts.confirm("Clear \(trace.browser)'s \(trace.kind.lowercased())?",
-                             "This deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)).\n\n" + effect,
+                             "This permanently deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)); nothing goes to the Trash.\n\n" + effect,
                              button: "Clear") else { return }
         store.busy = "Clearing \(trace.browser) \(trace.kind.lowercased())"
         defer { store.busy = nil }
-        let stuck = await Task.detached { BrowserPrivacy.clear(trace) }.value
+        let removal = await Task.detached { BrowserPrivacy.clear(trace) }.value
         await loadBrowserTraces()
         let left = browserTraces?.first { $0.id == trace.id }?.size ?? 0
         store.record(.privacy, "\(trace.browser) \(trace.kind)", freed: max(trace.size - left, 0))
         monitor.readDisk()
-        store.message = Store.Message(text: "\(trace.browser) \(trace.kind.lowercased()) cleared" + (stuck > 0 ? "; " + Store.counted(stuck, "item") + " stayed." : "."),
-                                      failed: stuck > 0)
+        store.message = Store.Message(text: "\(trace.browser) \(trace.kind.lowercased()) cleared" + removal.ending,
+                                      failed: removal.stayed > 0)
     }
 
     /// What runs with the session, as Background Task Management keeps it.
@@ -1048,8 +1103,16 @@ final class Care {
         guard !loadingBackground else { return }
         loadingBackground = true
         defer { loadingBackground = false }
-        guard let r = try? await ProcessRunner(timeout: 120).run("/usr/bin/sfltool", ["dumpbtm"], env: [:]), r.status == 0 else {
-            store.message = Store.Message(text: "Background items not read: the password was not given.", failed: true)
+        let r: CommandResult
+        do {
+            r = try await ProcessRunner(timeout: 120).run("/usr/bin/sfltool", ["dumpbtm"], env: [:])
+        } catch {
+            let why = (error as? CLIError)?.timedOut == true ? "no password was given in time" : error.localizedDescription
+            store.message = Store.Message(text: "Background items not read: \(why).", failed: true)
+            return
+        }
+        guard r.status == 0 else {
+            store.message = Store.Message(text: "Background items not read: \(lastLine(r.stderr) ?? "the password was not given").", failed: true)
             return
         }
         backgroundItems = BackgroundItems.parse(r.output, uid: getuid())
@@ -1062,11 +1125,20 @@ final class Care {
         let dbs = [NSHomeDirectory() + "/Library/Application Support/com.apple.TCC/TCC.db",
                    "/Library/Application Support/com.apple.TCC/TCC.db"]
         var rows: [Permission]?
+        var failure: String?
         for db in dbs {
-            guard let r = try? await ProcessRunner(timeout: 30).run("/usr/bin/sqlite3", ["-readonly", "-separator", "|", db, Privacy.query], env: [:]),
-                  r.status == 0 else { continue }
-            rows = (rows ?? []) + Privacy.parse(r.output)
+            do {
+                let r = try await ProcessRunner(timeout: 30).run("/usr/bin/sqlite3", ["-readonly", "-separator", "|", db, Privacy.query], env: [:])
+                if r.status == 0 {
+                    rows = (rows ?? []) + Privacy.parse(r.output)
+                } else if !Privacy.lacksFullDiskAccess(stderr: r.stderr) {
+                    failure = lastLine(r.stderr) ?? "sqlite3 exited \(r.status)"
+                }
+            } catch {
+                failure = error.localizedDescription
+            }
         }
+        permissionsError = rows == nil ? failure : nil
         return rows?.sorted { ($0.service, $0.client) < ($1.service, $1.client) }
     }
 
@@ -1086,8 +1158,12 @@ final class Care {
         scanningSpace = true
         defer { scanningSpace = false }
         let home = NSHomeDirectory()
-        guard let r = try? await ProcessRunner(timeout: 900).run("/usr/bin/du", SpaceLens.arguments(root: home), env: [:]) else {
-            store.message = Store.Message(text: "Space Lens took too long to measure \(home).", failed: true)
+        let r: CommandResult
+        do {
+            r = try await ProcessRunner(timeout: 900).run("/usr/bin/du", SpaceLens.arguments(root: home), env: [:])
+        } catch {
+            let why = (error as? CLIError)?.timedOut == true ? "took too long to measure \(home)" : "could not measure \(home): \(error.localizedDescription)"
+            store.message = Store.Message(text: "Space Lens \(why).", failed: true)
             return
         }
         let text = r.output

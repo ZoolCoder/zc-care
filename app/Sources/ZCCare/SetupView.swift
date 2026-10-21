@@ -308,7 +308,7 @@ private struct IdentityStep: View {
             if let id {
                 NextCard(symbol: "hammer.fill", colors: Tint.gray, title: "Command line tools",
                          detail: id.tools ? "Installed: git, clang and make." : "Apple's git, clang and make. Homebrew needs them.") {
-                    if id.tools { done } else { Button("Install…") { installTools() } }
+                    if id.tools { done } else { Button("Install…") { Task { await installTools() } } }
                 }
                 NextCard(symbol: "person.text.rectangle.fill", colors: Tint.blue, title: "Name and email",
                          detail: "Every commit carries them.") {
@@ -365,8 +365,15 @@ private struct IdentityStep: View {
         id = new
     }
 
-    private func installTools() {
-        _ = try? Process.run(URL(fileURLWithPath: "/usr/bin/xcode-select"), arguments: ["--install"])
+    /// xcode-select opens Apple's installer and returns; it exits non-zero
+    /// when the tools are there already, or no installer could start.
+    private func installTools() async {
+        do {
+            let r = try await ProcessRunner(timeout: 30).run("/usr/bin/xcode-select", ["--install"], env: [:])
+            error = r.status == 0 ? nil : lastLine(r.stderr) ?? "xcode-select exited \(r.status)"
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private func saveGit() async {

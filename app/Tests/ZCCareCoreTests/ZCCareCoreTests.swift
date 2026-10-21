@@ -226,7 +226,7 @@ struct EchoEnvRunner: Runner {
 
     let junk = Junk(id: "t", title: "t", detail: "", path: dir.path, keep: ["homebrew"])
     #expect(junk.size() >= 10_000 && junk.size() < 20_000)
-    #expect(junk.empty() == 0)
+    #expect(junk.empty().stayed == 0)
     #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["Homebrew"])
     #expect(Junk.spots(home: "/h").allSatisfy { $0.path.hasPrefix("/h/") })
 }

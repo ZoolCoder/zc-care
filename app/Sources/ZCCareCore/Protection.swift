@@ -106,6 +106,14 @@ public enum Privacy {
     /// The query `sqlite3 -separator '|'` runs on each TCC.db.
     public static let query = "select service, client, auth_value from access"
 
+    /// Whether sqlite3's error is macOS keeping the database from an app
+    /// without Full Disk Access, and not another failure.
+    public static func lacksFullDiskAccess(stderr: String) -> Bool {
+        let text = stderr.lowercased()
+        return ["authorization denied", "not authorized", "operation not permitted", "unable to open database"]
+            .contains(where: text.contains)
+    }
+
     /// sqlite3's rows; auth_value 2 is allowed, 0 denied. Unknown services
     /// are left out; one row per service and client.
     public static func parse(_ text: String) -> [Permission] {

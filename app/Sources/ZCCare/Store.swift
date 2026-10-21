@@ -15,6 +15,8 @@ final class Store {
     var refreshing = false
     /// What a running change is doing, such as "Updating tmux".
     var busy: String?
+    /// Set while a change that can hang runs: the busy banner's Cancel.
+    var cancelBusy: (() -> Void)?
     /// The outcome of the last change, or why it failed.
     var message: Message?
     /// The plan Plan last showed.
@@ -329,6 +331,36 @@ final class Store {
         return result
     }
 
+    /// Runs body so the busy banner can cancel it; the programs it runs stop.
+    func cancellable<T: Sendable>(_ body: @escaping @MainActor () async -> T) async -> T {
+        let task = Task { await body() }
+        cancelBusy = { task.cancel() }
+        defer { cancelBusy = nil }
+        return await task.value
+    }
+
+    /// Why a program failed, or nil when it exited 0: its last line of
+    /// error, else fallback. A cancelled run and a launch error say so.
+    func failure(_ fallback: String, of run: () async throws -> CommandResult) async -> String? {
+        do {
+            let r = try await run()
+            return r.status == 0 ? nil : (ZCCareCore.lastLine(r.stderr) ?? fallback)
+        } catch is CancellationError {
+            return "Cancelled."
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Runs the command as root behind the password dialog; why it failed, if it did.
+    private func asRoot(_ command: String) async -> String? {
+        await cancellable {
+            await self.failure("osascript failed") {
+                try await ProcessRunner().run("/usr/bin/osascript", ["-e", adminScript(command)], env: [:])
+            }
+        }
+    }
+
     /// Fixes every failed check that runs as root, behind one password
     /// dialog.
     func secureAll() async {
@@ -336,10 +368,9 @@ final class Store {
               Alerts.confirm(fix: command, for: "this Mac") else { return }
         busy = "Securing this Mac"
         defer { busy = nil }
-        let r = try? await ProcessRunner().run("/usr/bin/osascript", ["-e", adminScript(command)], env: [:])
-        message = r?.status == 0
-            ? Message(text: "This Mac: fixed.", failed: false)
-            : Message(text: "This Mac: not changed. \(r?.stderr ?? "")", failed: true)
+        let failed = await asRoot(command)
+        message = failed.map { Message(text: "This Mac: not changed. \($0)", failed: true) }
+            ?? Message(text: "This Mac: fixed.", failed: false)
         await refresh()
     }
 
@@ -557,11 +588,9 @@ final class Store {
             guard Alerts.confirm(fix: command, for: check.title) else { return }
             busy = "Fixing \(check.title)"
             defer { busy = nil }
-            let script = adminScript(command)
-            let r = try? await ProcessRunner().run("/usr/bin/osascript", ["-e", script], env: [:])
-            message = r?.status == 0
-                ? Message(text: "\(check.title): fixed.", failed: false)
-                : Message(text: "\(check.title): not changed. \(r?.stderr ?? "")", failed: true)
+            let failed = await asRoot(command)
+            message = failed.map { Message(text: "\(check.title): not changed. \($0)", failed: true) }
+                ?? Message(text: "\(check.title): fixed.", failed: false)
             await refresh()
         case .settings(let url, let what):
             NSWorkspace.shared.open(url)

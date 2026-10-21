@@ -89,6 +89,8 @@ struct ProtectionView: View {
                                 CareRow(icon: SymbolTile(symbol: "hand.raised.fill", colors: p.allowed ? Tint.violet : Tint.gray, size: 32),
                                     title: p.client, detail: p.service, value: p.allowed ? "Allowed" : "Denied") { EmptyView() }
                             }
+                        } else if let error = care.permissionsError {
+                            Text("Permissions not read: \(error)").foregroundStyle(.secondary).padding(10)
                         } else {
                             HStack(alignment: .top, spacing: 12) {
                                 SymbolTile(symbol: "lock.fill", colors: Tint.gray, size: 32)

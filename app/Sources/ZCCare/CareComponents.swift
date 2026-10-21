@@ -80,6 +80,9 @@ struct Toast: View {
                 .foregroundStyle(failed ? Theme.bad : Theme.good)
                 .spinning(store.busy != nil)
             Text(store.busy.map { $0 + "…" } ?? store.message?.text ?? "").lineLimit(2)
+            if let cancel = store.cancelBusy {
+                Button("Cancel", action: cancel).buttonStyle(.zcLink)
+            }
             if store.busy == nil, store.message != nil {
                 Button { store.message = nil } label: { Image(systemName: "xmark").accessibilityLabel("Dismiss") }.buttonStyle(.plain)
             }

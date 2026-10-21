@@ -200,8 +200,8 @@ private struct JunkRow: View {
         guard open else { return }
         entries = nil
         let spot = spot
-        let keep = care.monitor.keep(spot, open: care.monitor.runningApps())
         Task {
+            let keep = await care.monitor.keep(spot, open: care.monitor.runningApps())
             let found = await Task.detached { spot.contents(keeping: keep) }.value
             entries = found
             picked = Set(found.map(\.id))
