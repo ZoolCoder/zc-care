@@ -70,6 +70,9 @@ final class Care {
     var aiJunk: [AIJunk] = []
     var scanningAI = false
     var scanningDeveloper = false
+    /// Whether a developer scan has finished: before one, a nil `docker`
+    /// means unknown, not down.
+    var scannedDeveloper = false
     /// Nil until looked for: what removed apps left in the Library.
     var orphans: [Orphan]?
     var loadingOrphans = false
@@ -520,6 +523,7 @@ final class Care {
         async let usage: Void = scanDocker()
         (dependencies, models, xcodeSpots) = await (stale, found, xcode)
         await usage
+        scannedDeveloper = true
         applyIgnoreList()
     }
 

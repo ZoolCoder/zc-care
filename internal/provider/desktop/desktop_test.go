@@ -58,7 +58,7 @@ func setup(t *testing.T, saver bool) machine {
 	r := &sh.Fake{Out: map[string]string{
 		store(p, "read", tg.Wallpaper): "1 3\n",
 		readSS:                         "http://www.google.com/\n",
-		sh.Line("plutil", "-convert", "json", "-o", "-", filepath.Join(saverDir, "Contents/Info.plist")): "{}",
+		sh.Line("plutil", "-convert", "xml1", "-o", "-", filepath.Join(saverDir, "Contents/Info.plist")): emptyPlist,
 		sh.Line("defaults", "read", "-g", "AppleAccentColor"):                                            "5\n",
 		store(p, "write", tg.Wallpaper):                                                                  "1 3\n",
 	}}
@@ -102,7 +102,7 @@ func TestPlanSetsWallpaperAndPointsTheSaver(t *testing.T) {
 		sh.Line("defaults", "write", "-g", "AppleHighlightColor", "-string", "0.698039 0.843137 1.000000 Blue"),
 	}
 	ran := strings.Join(m.r.Ran, "\n")
-	if tmp := tempJSON.FindString(ran); tmp != "" {
+	if tmp := tempPlist.FindString(ran); tmp != "" {
 		ran = strings.Replace(ran, tmp, "TMP", 1)
 	}
 	if ran != strings.Join(want, "\n") {
@@ -110,12 +110,13 @@ func TestPlanSetsWallpaperAndPointsTheSaver(t *testing.T) {
 	}
 }
 
-var tempJSON = regexp.MustCompile(`\S*zc-care-saver-\d+\.json`)
+var tempPlist = regexp.MustCompile(`\S*zc-care-saver-\d+\.plist`)
 
 func TestSaverPageGoesThroughATempFileNotTheArguments(t *testing.T) {
 	m := setup(t, true)
 	plist := filepath.Join(m.saver, "Contents/Info.plist")
-	m.r.Out[sh.Line("plutil", "-convert", "json", "-o", "-", plist)] = `{"CFBundleName":"x"}`
+	m.r.Out[sh.Line("plutil", "-convert", "xml1", "-o", "-", plist)] = plistWith(
+		"<key>CFBundleName</key>\n\t<string>x</string>\n\t<key>Scale</key>\n\t<real>1.0</real>\n\t<key>Built</key>\n\t<date>2026-01-02T03:04:05Z</date>")
 	var written string
 	m.r.OnRun = func(line string) {
 		if f := strings.Fields(line); len(f) > 1 && f[1] == "-convert" {
@@ -123,11 +124,16 @@ func TestSaverPageGoesThroughATempFileNotTheArguments(t *testing.T) {
 			written = string(b)
 		}
 	}
-	if err := m.p.setSaverPage(context.Background(), plist, "data:big"); err != nil {
+	if err := m.p.setSaverPage(context.Background(), plist, "data:big&<x>"); err != nil {
 		t.Fatal(err)
 	}
-	if written != `{"CFBundleName":"x","`+defaultURLKey+`":"data:big"}` {
-		t.Fatalf("temp file %q", written)
+	for _, want := range []string{
+		"<key>" + defaultURLKey + "</key>\n\t<string>data:big&amp;&lt;x&gt;</string>",
+		"<real>1.0</real>", "<date>2026-01-02T03:04:05Z</date>", "<string>x</string>",
+	} {
+		if !strings.Contains(written, want) {
+			t.Fatalf("temp file lacks %q:\n%s", want, written)
+		}
 	}
 	for _, line := range m.r.Ran {
 		if strings.Contains(line, "data:big") {
@@ -135,6 +141,26 @@ func TestSaverPageGoesThroughATempFileNotTheArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestSaverPageReplacesTheExistingAddress(t *testing.T) {
+	doc, err := withPlistString(plistWith("<key>"+defaultURLKey+"</key>\n\t<string>http://old/</string>\n\t<key>Z</key>\n\t<true/>"), defaultURLKey, "data:new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(doc, "http://old/") || strings.Count(doc, "<key>"+defaultURLKey+"</key>") != 1 || !strings.Contains(doc, "<string>data:new</string>") {
+		t.Fatalf("plist:\n%s", doc)
+	}
+	if _, err := withPlistString("<plist><array/></plist>", defaultURLKey, "x"); err == nil {
+		t.Fatal("a plist without a top-level dict was accepted")
+	}
+}
+
+// plistWith is an XML plist whose top-level dict holds entries.
+func plistWith(entries string) string {
+	return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n\t" + entries + "\n</dict>\n</plist>\n"
+}
+
+var emptyPlist = plistWith("")
 
 func TestStoppedWallpaperAgentIsNotAnError(t *testing.T) {
 	m := setup(t, true)

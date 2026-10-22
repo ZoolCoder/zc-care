@@ -64,7 +64,7 @@ struct DeveloperView: View {
                     if !care.xcodeSpots.isEmpty { xcode }
                     if let usage = care.docker, !usage.isEmpty {
                         docker(usage)
-                    } else if care.docker == nil, dockerInstalled {
+                    } else if care.docker == nil, care.scannedDeveloper, dockerInstalled {
                         dockerDown
                     }
                     CareSection("Local AI Models") {

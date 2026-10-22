@@ -13,7 +13,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
-	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"mime"
@@ -271,31 +271,48 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 
 // setSaverPage puts page into the plist. The page is a whole HTML file as a
 // data URL, too long for one command-line argument, so the plist goes out as
-// JSON, takes the key, and comes back through a temp file.
+// XML text, takes the key, and comes back through a temp file. The XML form
+// keeps every value as it is: a JSON round trip would turn a real into an
+// integer and refuse a date or data value.
 func (p Provider) setSaverPage(ctx context.Context, plist, page string) error {
-	out, err := p.r.Output(ctx, "plutil", "-convert", "json", "-o", "-", plist)
+	out, err := p.r.Output(ctx, "plutil", "-convert", "xml1", "-o", "-", plist)
 	if err != nil {
 		return err
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(out, &doc); err != nil {
+	doc, err := withPlistString(string(out), defaultURLKey, page)
+	if err != nil {
 		return fmt.Errorf("read %s: %w", plist, err)
 	}
-	doc[defaultURLKey] = page
-	data, err := json.Marshal(doc)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp("", "zc-care-saver-*.json")
+	tmp, err := os.CreateTemp("", "zc-care-saver-*.plist")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	_, werr := tmp.Write(data)
+	_, werr := tmp.WriteString(doc)
 	if err := errors.Join(werr, tmp.Close()); err != nil {
 		return err
 	}
 	return p.r.Run(ctx, "plutil", "-convert", "xml1", "-o", plist, tmp.Name())
+}
+
+var plistEnd = regexp.MustCompile(`\n?</dict>\s*</plist>\s*$`)
+
+// withPlistString returns the XML plist doc with key set to value, replaced
+// in place or added to the top-level dict.
+func withPlistString(doc, key, value string) (string, error) {
+	var escaped strings.Builder
+	if err := xml.EscapeText(&escaped, []byte(value)); err != nil {
+		return "", err
+	}
+	entry := "<key>" + key + "</key>\n\t<string>" + escaped.String() + "</string>"
+	existing := regexp.MustCompile(`<key>` + regexp.QuoteMeta(key) + `</key>\s*<string>[^<]*</string>`)
+	if existing.MatchString(doc) {
+		return existing.ReplaceAllLiteralString(doc, entry), nil
+	}
+	if !plistEnd.MatchString(doc) {
+		return "", errors.New("not an XML plist with a top-level dict")
+	}
+	return plistEnd.ReplaceAllLiteralString(doc, "\n\t"+entry+"\n</dict>\n</plist>\n"), nil
 }
 
 func manual(t config.Target, key string, s state) plan.Action {
