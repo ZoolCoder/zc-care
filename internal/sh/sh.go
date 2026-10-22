@@ -5,6 +5,7 @@ package sh
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -47,7 +48,7 @@ func (Exec) Output(ctx context.Context, name string, args ...string) ([]byte, er
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = killGrace
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && !onlyWaitDelay(err) {
 		return out, fmt.Errorf("%s: %w: %s", Line(name, args...), err, strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
@@ -58,10 +59,16 @@ func (e Exec) Run(ctx context.Context, name string, args ...string) error {
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = e.Stdin, e.Stdout, e.Stderr
 	cmd.Env = askpassEnv()
 	cmd.WaitDelay = killGrace
-	if err := cmd.Run(); err != nil {
+	if err := cmd.Run(); err != nil && !onlyWaitDelay(err) {
 		return fmt.Errorf("%s: %w", Line(name, args...), err)
 	}
 	return nil
+}
+
+// onlyWaitDelay reports a program that exited cleanly but left a grandchild
+// holding its output pipe open past killGrace: the command itself succeeded.
+func onlyWaitDelay(err error) bool {
+	return errors.Is(err, exec.ErrWaitDelay)
 }
 
 func (Exec) Has(name string) bool {

@@ -177,9 +177,11 @@ func Load(path string, stdin io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	cfg.Dir = dir
-	if cfg.Skip, err = ReadSkip(SkipPath()); err != nil {
+	var ignored []string
+	if cfg.Skip, ignored, err = ReadSkip(SkipPath()); err != nil {
 		return Config{}, err
 	}
+	WarnIgnoredSkips(os.Stderr, ignored)
 	if cfg.Profiles, err = ReadProfiles(ProfilesPath()); err != nil {
 		return Config{}, err
 	}
@@ -195,11 +197,28 @@ func Parse(data []byte) (Config, error) {
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return Config{}, err
 	}
-	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+	if hasSecondDocument(dec) {
 		return Config{}, errors.New("config has more than one YAML document")
 	}
 	cfg.cleanFileNames()
 	return cfg, cfg.Validate()
+}
+
+// hasSecondDocument reports whether dec holds another document with content.
+// A trailing bare --- decodes as an empty document, which is not one.
+func hasSecondDocument(dec *yaml.Decoder) bool {
+	var next yaml.Node
+	if err := dec.Decode(&next); err != nil {
+		return !errors.Is(err, io.EOF)
+	}
+	if next.Kind == 0 {
+		return false
+	}
+	doc := &next
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		doc = doc.Content[0]
+	}
+	return doc.Kind != yaml.ScalarNode || doc.Tag != "!!null"
 }
 
 // cleanFileNames rewrites each localdir file name to its clean form, so

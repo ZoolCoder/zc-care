@@ -315,6 +315,27 @@ func TestSkipAddsListsAndUndoes(t *testing.T) {
 	}
 }
 
+func TestSkipRefusesAnUnknownKindBeforeWritingAndUndoWorksOnABadFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skip")
+	t.Setenv(config.EnvSkip, path)
+	_, err := run(t, "", "skip", "cask:zed", "foo:bar")
+	if err == nil || !strings.Contains(err.Error(), "brew, cask, mas, tap") {
+		t.Fatalf("err %v", err)
+	}
+	if _, statErr := os.Stat(path); statErr == nil {
+		t.Fatal("a refused skip wrote the file")
+	}
+	if err := os.WriteFile(path, []byte("cask:zed\nfoo:bar\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "", "skip", "-undo", "foo:bar"); err != nil || !strings.HasPrefix(out, "cask:zed\n") {
+		t.Fatalf("undo: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "foo:bar") {
+		t.Fatalf("bad line kept:\n%s", b)
+	}
+}
+
 func TestInitWritesAStarterThatPlans(t *testing.T) {
 	scratch := t.TempDir()
 	t.Setenv(config.EnvSkip, filepath.Join(scratch, "skip"))

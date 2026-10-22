@@ -171,10 +171,14 @@ here with what to edit.
   tick no longer collide. `undo -id` with `-n` says "use -n or -id, not
   both".
 - A config with a second YAML document after `---` is refused instead of
-  silently ignored, and the skip list refuses an entry whose kind is not
-  brew, cask, mas or tap, naming the entry and the known kinds.
+  silently ignored; a bare trailing `---` still loads. A line in the skip
+  file whose kind is not brew, cask, mas or tap is ignored with a warning,
+  and `skip kind:name` refuses such an entry before it writes anything,
+  naming the known kinds.
 - A cancelled command no longer hangs when a child keeps its output open:
-  zc-care gives up on the output five seconds after the cancel. The sudo
+  zc-care gives up on the output five seconds after the cancel. A command
+  that exits cleanly while a background process holds its output open is
+  not reported as failed. The sudo
   password helper is replaced by a rename, so a symlink planted at its path
   is replaced, not followed, and it always has mode 0700.
 - Removing a Brewfile entry that spans several lines (`args: [` over
@@ -185,7 +189,8 @@ here with what to edit.
   action has a command but is marked manual, or has none and is not manual.
 - Undo refuses to overwrite or delete a file that was edited after the apply
   and says which path to fix by hand, and it no longer recreates a folder you
-  deleted. Undo records written before this release are undone as before.
+  deleted. An apply that changed one file twice is still undone in full.
+  Undo records written before this release are undone as before.
 - Flags placed before the subcommand, such as `zc-care -yes apply`, fail with
   a message instead of silently running a plan. A flag placed after an
   operand, such as `remove brew:htop -yes`, fails instead of being dropped.

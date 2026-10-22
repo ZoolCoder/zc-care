@@ -109,7 +109,13 @@ jobs:
             # asset on the release is the one users download and the first run
             # attested, so the cask takes its checksum from that asset, not from
             # this run's rebuild (whose attestation does not match the release).
-            gh release download "$GITHUB_REF_NAME" -p "ZCCare_${VERSION}.zip" -D dist --clobber
+            # A create that failed mid-upload leaves the release without its
+            # zip: upload this run's build then, and checksum what is published.
+            if gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' | grep -qx "ZCCare_${VERSION}.zip"; then
+              gh release download "$GITHUB_REF_NAME" -p "ZCCare_${VERSION}.zip" -D dist --clobber
+            else
+              gh release upload "$GITHUB_REF_NAME" "dist/ZCCare_${VERSION}.zip" --clobber
+            fi
             app/cask.sh "$VERSION" "$(shasum -a 256 "dist/ZCCare_${VERSION}.zip" | cut -d' ' -f1)" > dist/zc-care.rb
           else
             flags=()

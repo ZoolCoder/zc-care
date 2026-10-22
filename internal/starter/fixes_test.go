@@ -33,16 +33,18 @@ func TestAFailedWriteLeavesNoTempFilesAndTheOldFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// A full directory where the backup of mise.toml goes makes that step
-	// fail after Brewfile was already moved aside.
-	blocker := filepath.Join(dir, "mise.toml.bak")
-	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o755); err != nil {
+	// A staged file that is gone makes the second rename fail after both
+	// old files were moved aside.
+	staged := map[string]string{"Brewfile": filepath.Join(dir, "stage-b"), "mise.toml": filepath.Join(dir, "missing")}
+	if err := os.WriteFile(staged["Brewfile"], []byte("b"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := writeAll(dir, []string{"Brewfile", "mise.toml"}, map[string][]byte{"Brewfile": []byte("b"), "mise.toml": []byte("m")})
-	if err == nil {
-		t.Fatal("a blocked backup did not fail the write")
+	names := []string{"Brewfile", "mise.toml"}
+	backups := map[string]string{}
+	if err := swapIn(dir, names, staged, backups); err == nil {
+		t.Fatal("a missing staged file did not fail the swap")
 	}
+	restore(dir, names, staged, backups)
 	for name, body := range old {
 		if got, _ := os.ReadFile(filepath.Join(dir, name)); string(got) != body {
 			t.Errorf("%s is %q, want %q", name, got, body)
@@ -50,8 +52,29 @@ func TestAFailedWriteLeavesNoTempFilesAndTheOldFiles(t *testing.T) {
 	}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if _, kept := old[e.Name()]; !kept && e.Name() != "mise.toml.bak" {
+		if _, kept := old[e.Name()]; !kept && e.Name() != "stage-b" {
 			t.Errorf("file left: %s", e.Name())
 		}
+	}
+}
+
+func TestAUserBakFileSurvivesAWrite(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"Brewfile": "old", "Brewfile.bak": "mine"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writeAll(dir, []string{"Brewfile"}, map[string][]byte{"Brewfile": []byte("new")}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "Brewfile.bak")); string(got) != "mine" {
+		t.Fatalf("user .bak is %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "Brewfile")); string(got) != "new" {
+		t.Fatalf("Brewfile is %q", got)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
+		t.Fatalf("files left: %v", entries)
 	}
 }

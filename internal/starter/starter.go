@@ -160,7 +160,10 @@ func swapIn(dir string, names []string, staged, backups map[string]string) error
 		if _, err := os.Lstat(path); err != nil {
 			continue
 		}
-		bak := path + ".bak"
+		bak, err := backupName(dir, name)
+		if err != nil {
+			return err
+		}
 		if err := os.Rename(path, bak); err != nil {
 			return err
 		}
@@ -173,6 +176,20 @@ func swapIn(dir string, names []string, staged, backups map[string]string) error
 		delete(staged, name)
 	}
 	return nil
+}
+
+// backupName reserves a name beside the file that nothing else uses, so a
+// .bak the user keeps there is never touched.
+func backupName(dir, name string) (string, error) {
+	tmp, err := os.CreateTemp(dir, name+".bak-*")
+	if err != nil {
+		return "", err
+	}
+	_ = tmp.Close()
+	if err := os.Remove(tmp.Name()); err != nil {
+		return "", err
+	}
+	return tmp.Name(), nil
 }
 
 // restore removes the new files swapIn already placed, those no longer

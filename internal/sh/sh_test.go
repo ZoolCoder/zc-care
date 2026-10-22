@@ -103,3 +103,24 @@ func TestOutputReturnsPromptlyAfterCancel(t *testing.T) {
 		t.Fatalf("Output took %v after cancel", took)
 	}
 }
+
+func TestAGrandchildHoldingTheOutputOpenIsNotAFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the 5s kill grace")
+	}
+	if !(Exec{}).Has("sh") {
+		t.Skip("sh is not on PATH")
+	}
+	var buf strings.Builder
+	e := Exec{Stdout: &buf, Stderr: &buf}
+	if err := e.Run(context.Background(), "sh", "-c", "sleep 20 & echo hi"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(buf.String(), "hi") {
+		t.Fatalf("output %q", buf.String())
+	}
+	out, err := Exec{}.Output(context.Background(), "sh", "-c", "sleep 20 & echo hi")
+	if err != nil || strings.TrimSpace(string(out)) != "hi" {
+		t.Fatalf("Output %q, %v", out, err)
+	}
+}

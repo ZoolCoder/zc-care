@@ -109,11 +109,12 @@ func addSkips(resources []string) error {
 	if path == "" {
 		return errors.New("no home folder to keep the skip list in")
 	}
-	list, err := config.ReadSkip(path)
+	list, ignored, err := config.ReadSkip(path)
 	if err != nil {
 		return err
 	}
-	return config.WriteSkip(path, append(list, resources...))
+	// WriteSkip would drop the ignored lines, so keep them for the user to fix.
+	return config.WriteSkip(path, append(append(list, ignored...), resources...))
 }
 
 func writeProfiles(w io.Writer, asJSON bool) error {

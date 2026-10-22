@@ -99,3 +99,35 @@ func TestJournalIDsDoNotCollideAndBadFilesWarn(t *testing.T) {
 		t.Fatalf("%d entries, %v, warn %q", len(entries), err, warn.String())
 	}
 }
+
+func TestSaveJournalStampsOnlyTheNewestRecordPerPath(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "conf")
+	if err := os.WriteFile(file, []byte("final"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(dir, "other")
+	if err := os.WriteFile(other, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	outcomes := []engine.Outcome{
+		{Target: "t", Resource: "a", Undo: &plan.Undo{Provider: "p", Verb: "restore", Blob: []byte("v0"), Data: map[string]string{"path": file, "mode": "600"}}},
+		{Target: "t", Resource: "b", Undo: &plan.Undo{Provider: "p", Verb: "restore", Blob: []byte("v1"), Data: map[string]string{"path": file, "mode": "600"}}},
+		{Target: "t", Resource: "c", Undo: &plan.Undo{Provider: "p", Verb: "remove", Data: map[string]string{"path": other}}},
+	}
+	data := filepath.Join(dir, "data")
+	if err := saveJournal(data, outcomes, "apply"); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := loadJournal(data, io.Discard)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries %v, %v", entries, err)
+	}
+	u := entries[0].Undos
+	_, olderStamped := u[0].Data["digest"]
+	_, newerStamped := u[1].Data["digest"]
+	_, otherStamped := u[2].Data["digest"]
+	if olderStamped || !newerStamped || !otherStamped {
+		t.Fatalf("stamps older=%v newer=%v other=%v", olderStamped, newerStamped, otherStamped)
+	}
+}

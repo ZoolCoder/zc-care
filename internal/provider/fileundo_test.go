@@ -143,3 +143,33 @@ func TestRevertRemoveRefusesAFileEditedAfterTheApply(t *testing.T) {
 		t.Fatal("file survived")
 	}
 }
+
+func TestTwoRecordsForOnePathRevertInOrder(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "conf")
+	blobs := []string{filepath.Join(dir, "b1"), filepath.Join(dir, "b2")}
+	for i, content := range []string{"v0", "v1"} {
+		if err := os.WriteFile(blobs[i], []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(file, []byte("v2"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	first := SavedFileUndo("p", file, []byte("v0"), 0o600)
+	first.Data["blob"] = blobs[0]
+	second := SavedFileUndo("p", file, []byte("v1"), 0o600)
+	second.Data["blob"] = blobs[1]
+	// The journal stamps only the newest record; the older one is unstamped.
+	second = StampFileUndo(second)
+	// Undo runs newest first.
+	actions := RevertFiles([]plan.Undo{second, first})
+	for i, a := range actions {
+		if err := a.Do(context.Background()); err != nil {
+			t.Fatalf("revert %d: %v", i, err)
+		}
+	}
+	if got, _ := os.ReadFile(file); string(got) != "v0" {
+		t.Fatalf("content %q", got)
+	}
+}

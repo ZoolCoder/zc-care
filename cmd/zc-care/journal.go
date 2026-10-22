@@ -67,6 +67,7 @@ func saveJournal(dataDir string, outcomes []engine.Outcome, via string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	newest := newestPerPath(undos)
 	for n, u := range undos {
 		if len(u.Blob) > 0 {
 			path := filepath.Join(dir, fmt.Sprintf("%s.%d.blob", e.ID, n))
@@ -79,10 +80,33 @@ func saveJournal(dataDir string, outcomes []engine.Outcome, via string) error {
 			}
 			u.Data["blob"] = path
 		}
-		// The apply is over, so the file holds what it wrote.
-		e.Undos = append(e.Undos, provider.StampFileUndo(u))
+		// The apply is over, so the file holds what it wrote. Only the
+		// newest record of a path is stamped: undo reverts it first, and
+		// the older record would then find the file in the middle state.
+		if newest[n] {
+			u = provider.StampFileUndo(u)
+		}
+		e.Undos = append(e.Undos, u)
 	}
 	return e.write(dir)
+}
+
+// newestPerPath marks the index of the last undo for each file path; undos
+// without a path are all marked.
+func newestPerPath(undos []plan.Undo) map[int]bool {
+	last := map[string]int{}
+	for n, u := range undos {
+		if p := u.Data["path"]; p != "" {
+			last[p] = n
+		}
+	}
+	newest := map[int]bool{}
+	for n, u := range undos {
+		if p := u.Data["path"]; p == "" || last[p] == n {
+			newest[n] = true
+		}
+	}
+	return newest
 }
 
 // newJournalID sorts by time; the random tail keeps two saves in the same

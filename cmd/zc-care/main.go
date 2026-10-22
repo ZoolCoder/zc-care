@@ -268,7 +268,11 @@ func parseCLIFlags(cmd string, args []string, stderr io.Writer) (cliFlags, error
 	// With flags first the command is the default plan, and `-yes apply`
 	// would leave apply an ignored operand: nothing applied, exit 0.
 	if isCommand(flags.Arg(0)) {
-		rest := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == flags.Arg(0) })
+		// Drop only the first copy: a later one may be a real operand.
+		rest := slices.Clone(args)
+		if i := slices.Index(rest, flags.Arg(0)); i >= 0 {
+			rest = slices.Delete(rest, i, i+1)
+		}
 		return f, fmt.Errorf("put flags after the subcommand: %s %s %s", name, flags.Arg(0), strings.Join(rest, " "))
 	}
 	if err := rejectTrailingFlags(cmd, flags.Args()); err != nil {
