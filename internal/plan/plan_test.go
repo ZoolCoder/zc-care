@@ -2,16 +2,19 @@ package plan
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 )
 
+func noop(context.Context) error { return nil }
+
 func sample() Plan {
 	var p Plan
 	p.Add(
-		Action{Op: OpUpdate, Target: "b", Resource: "x.txt", Detail: "content differs"},
-		Action{Op: OpDelete, Target: "a", Resource: "old.txt", Detail: "not in the config"},
+		Action{Op: OpUpdate, Target: "b", Resource: "x.txt", Detail: "content differs", Do: noop},
+		Action{Op: OpDelete, Target: "a", Resource: "old.txt", Detail: "not in the config", Do: noop},
 		Action{Op: OpManual, Target: "a", Resource: "secret.txt", Detail: "yours to write"},
 	)
 	return p
@@ -59,11 +62,11 @@ func TestWriteJSONAndPredicates(t *testing.T) {
 
 func TestDestructiveCountsOverwritesAndScripts(t *testing.T) {
 	var p Plan
-	p.Add(Action{Op: OpCreate, Resource: "a"}, Action{Op: OpUpdate, Resource: "b"})
+	p.Add(Action{Op: OpCreate, Resource: "a", Do: noop}, Action{Op: OpUpdate, Resource: "b", Do: noop})
 	if p.Destructive() {
 		t.Fatal("create and update are not destructive")
 	}
-	p.Add(Action{Op: OpUpdate, Resource: "c", Destructive: true})
+	p.Add(Action{Op: OpUpdate, Resource: "c", Destructive: true, Do: noop})
 	if !p.Destructive() {
 		t.Fatal("a flagged update is destructive")
 	}
@@ -164,5 +167,77 @@ func TestSavedRefusesWhenTheContentCannotBeRead(t *testing.T) {
 func TestSavedWithNoDigestsComparesTheRest(t *testing.T) {
 	if err := savedWithDigest(t, "").Matches(sample()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWriteStripsControlCharacters(t *testing.T) {
+	var p Plan
+	p.Add(Action{Op: OpUpdate, Target: "t\x1b[2J", Resource: "r\x7f", Detail: "a\tb\x1b]0;owned\x07c\r", Do: noop})
+	var out bytes.Buffer
+	if err := p.Write(&out); err != nil {
+		t.Fatal(err)
+	}
+	if want := "UPDATE  t[2J  r  a\tb]0;ownedc\n"; out.String() != want {
+		t.Fatalf("got %q, want %q", out.String(), want)
+	}
+	out.Reset()
+	if err := p.WriteJSON(&out); err != nil || !strings.Contains(out.String(), `\u001b`) {
+		t.Fatalf("json must keep the raw detail: %v %s", err, out.String())
+	}
+}
+
+func TestDoIsNilExactlyForManual(t *testing.T) {
+	for _, bad := range []Action{
+		{Op: OpUpdate, Resource: "no-do"},
+		{Op: OpManual, Resource: "has-do", Do: noop},
+	} {
+		var p Plan
+		p.Add(bad)
+		var out bytes.Buffer
+		if err := p.Write(&out); err == nil || !strings.Contains(err.Error(), bad.Resource) {
+			t.Errorf("%s: Write accepted it: %v", bad.Resource, err)
+		}
+		if err := p.WriteJSON(&out); err == nil {
+			t.Errorf("%s: WriteJSON accepted it", bad.Resource)
+		}
+	}
+}
+
+func TestMissingProgramIsAWaitingManual(t *testing.T) {
+	a := MissingProgram("t", "chezmoi", "install it")
+	if a.Op != OpManual || !a.Waiting || a.Do != nil || a.Target != "t" || a.Resource != "chezmoi" || a.Detail != "install it" {
+		t.Fatalf("%+v", a)
+	}
+	if err := a.valid(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOnlyKeepsTheNamedResources(t *testing.T) {
+	p := sample()
+	if got := p.Only(nil); len(got.Actions) != 3 {
+		t.Fatalf("no filter: %d actions", len(got.Actions))
+	}
+	got := p.Only([]string{"old.txt", "nothing"})
+	if len(got.Actions) != 1 || got.Actions[0].Resource != "old.txt" {
+		t.Fatalf("only: %+v", got.Actions)
+	}
+	if got := p.Only([]string{"nothing"}); !got.Empty() {
+		t.Fatalf("unknown resource kept %d actions", len(got.Actions))
+	}
+}
+
+// Matches compares what a reviewer read: op, target, resource, detail and
+// content digest. Destructive and Waiting are derived from those, so a flip
+// alone does not make a saved plan stale.
+func TestSavedMatchesIgnoresDestructiveAndWaiting(t *testing.T) {
+	saved := sample().Snapshot(nil)
+	flipped := sample()
+	for i := range flipped.Actions {
+		flipped.Actions[i].Destructive = !flipped.Actions[i].Destructive
+		flipped.Actions[i].Waiting = !flipped.Actions[i].Waiting
+	}
+	if err := saved.Matches(flipped); err != nil {
+		t.Fatalf("flags alone made the plan stale: %v", err)
 	}
 }

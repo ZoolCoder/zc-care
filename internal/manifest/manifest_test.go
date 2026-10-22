@@ -27,12 +27,18 @@ func brewKey(l string) (string, bool) {
 func TestDropRemovesContinuationLinesToo(t *testing.T) {
 	key := func(l string) (string, bool) {
 		kind, name, _ := strings.Cut(l, " ")
-		return kind + ":" + strings.Trim(name, `",`), kind == "brew"
+		name, _, _ = strings.Cut(name, ",")
+		return kind + ":" + strings.Trim(name, `"`), kind == "brew"
 	}
 	data := "brew \"a\"\nbrew \"x\", # why\n  args: [\"with-foo\"],\n  link: true\nbrew \"b\"\n"
 	got, ok := Drop([]byte(data), key, "brew:x")
 	if want := "brew \"a\"\nbrew \"b\"\n"; !ok || string(got) != want {
 		t.Fatalf("got %q ok %v, want %q", got, ok, want)
+	}
+	multi := "brew \"a\"\nbrew \"x\", args: [\n  \"--foo\",\n  \"--b]ar\"\n]\nbrew \"b\"\n"
+	got, ok = Drop([]byte(multi), key, "brew:x")
+	if want := "brew \"a\"\nbrew \"b\"\n"; !ok || string(got) != want {
+		t.Fatalf("open bracket: got %q ok %v, want %q", got, ok, want)
 	}
 }
 
@@ -103,16 +109,16 @@ func TestWriteFileReplacesInOneRenameAndKeepsASymlink(t *testing.T) {
 
 func TestInsert(t *testing.T) {
 	for _, c := range []struct{ section, want string }{
-		{"terminal", "brew \"tmux\"\nX\n\n# Git"},
-		{"", "tap \"a/b\"\nX\n\n# Terminal"},
-		{"Cloud", "GitHub from the terminal\n\n# Cloud\nX\n"},
+		{"terminal", "tap \"a/b\"\n\n# Terminal\ncask \"ghostty\" # fast native terminal\nbrew \"tmux\"\nX\n\n# Git [Developer, ops]\n# More about git tools.\nbrew \"gh\" # GitHub from the terminal\n"},
+		{"", "tap \"a/b\"\nX\n\n# Terminal\ncask \"ghostty\" # fast native terminal\nbrew \"tmux\"\n\n# Git [Developer, ops]\n# More about git tools.\nbrew \"gh\" # GitHub from the terminal\n"},
+		{"Cloud", brewfile + "\n# Cloud\nX\n"},
 	} {
-		if got := insert(t, brewfile, c.section); !strings.Contains(got, c.want) {
-			t.Fatalf("section %q:\n%s", c.section, got)
+		if got := insert(t, brewfile, c.section); got != c.want {
+			t.Fatalf("section %q:\n%q\nwant\n%q", c.section, got, c.want)
 		}
 	}
-	if got := insert(t, "# Only\nbrew \"a\"\n", ""); !strings.HasPrefix(got, "X\n\n# Only") {
-		t.Fatalf("empty top block:\n%s", got)
+	if got, want := insert(t, "# Only\nbrew \"a\"\n", ""), "X\n\n# Only\nbrew \"a\"\n"; got != want {
+		t.Fatalf("empty top block:\n%q", got)
 	}
 }
 
@@ -130,10 +136,12 @@ func TestTopCommentIsAboutTheFile(t *testing.T) {
 	if got := strings.Join(Sections(data), ","); got != "Git,Work" {
 		t.Fatalf("sections %s", got)
 	}
-	if got := insert(t, string(data), ""); !strings.Contains(got, "tap \"a/b\"\nX\n") {
-		t.Fatalf("top block:\n%s", got)
+	top := "# About this file.\n# More.\n\ntap \"a/b\"\nX\n\n# Git\nbrew \"gh\"\n\n# Work\n# Empty for now.\n"
+	if got := insert(t, string(data), ""); got != top {
+		t.Fatalf("top block:\n%q", got)
 	}
-	if got := insert(t, string(data), "work"); !strings.HasSuffix(got, "# Empty for now.\nX\n") {
-		t.Fatalf("empty last section:\n%s", got)
+	last := "# About this file.\n# More.\n\ntap \"a/b\"\n\n# Git\nbrew \"gh\"\n\n# Work\n# Empty for now.\nX\n"
+	if got := insert(t, string(data), "work"); got != last {
+		t.Fatalf("empty last section:\n%q", got)
 	}
 }

@@ -77,21 +77,44 @@ func Insert(data []byte, section, entry string) ([]byte, error) {
 }
 
 // Drop removes the entry whose key is want, matched without regard to case,
-// and reports whether there was one. An entry whose line ends in a comma goes
-// on in the next line, as in a Brewfile, and those lines go with it.
+// and reports whether there was one. An entry whose line ends in a comma or
+// leaves a [ open goes on in the next line, as in a Brewfile, and those lines
+// go with it.
 func Drop(data []byte, key Key, want string) ([]byte, bool) {
 	raw := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 	lines := scan(data)
 	for n, l := range lines {
 		if k, ok := key(l.entry); ok && strings.EqualFold(k, want) {
-			end := n
-			for end+1 < len(lines) && strings.HasSuffix(lines[end].entry, ",") {
+			end, open := n, openBrackets(l.entry)
+			for end+1 < len(lines) && (open > 0 || strings.HasSuffix(lines[end].entry, ",")) {
 				end++
+				open += openBrackets(lines[end].entry)
 			}
 			return []byte(strings.Join(slices.Delete(raw, n, end+1), "\n") + "\n"), true
 		}
 	}
 	return data, false
+}
+
+// openBrackets counts the [ a line opens beyond the ] it closes, outside
+// quotes.
+func openBrackets(entry string) int {
+	depth, quote := 0, rune(0)
+	for _, r := range entry {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '"' || r == '\'':
+			quote = r
+		case r == '[':
+			depth++
+		case r == ']':
+			depth--
+		}
+	}
+	return depth
 }
 
 // Line is an entry and its why, as one manifest line.

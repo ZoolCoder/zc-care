@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -52,6 +53,22 @@ type Action struct {
 // is installed.
 func MissingProgram(target, resource, detail string) Action {
 	return Action{Op: OpManual, Target: target, Resource: resource, Detail: detail, Waiting: true}
+}
+
+// valid enforces that Do is nil exactly when Op is OpManual.
+func (a Action) valid() error {
+	if manual := a.Op == OpManual; manual != (a.Do == nil) {
+		return fmt.Errorf("invalid action %s %s %s: Do must be nil exactly when Op is %s", a.Op, a.Target, a.Resource, OpManual)
+	}
+	return nil
+}
+
+func (p Plan) validate() error {
+	var errs []error
+	for _, a := range p.Actions {
+		errs = append(errs, a.valid())
+	}
+	return errors.Join(errs...)
 }
 
 func (a Action) destroys() bool { return a.Op == OpDelete || a.Destructive }
@@ -107,6 +124,9 @@ func (p Plan) Destructive() bool {
 
 // Write renders the plan as aligned columns.
 func (p Plan) Write(w io.Writer) error {
+	if err := p.validate(); err != nil {
+		return err
+	}
 	if p.Empty() {
 		_, err := fmt.Fprintln(w, "no changes: everything matches the config")
 		return err
@@ -114,17 +134,28 @@ func (p Plan) Write(w io.Writer) error {
 	sorted := p.sorted()
 	opW, targetW, resW := 0, 0, 0
 	for _, a := range sorted {
-		opW, targetW, resW = max(opW, len(a.Op)), max(targetW, len(a.Target)), max(resW, len(a.Resource))
+		opW, targetW, resW = max(opW, len(a.Op)), max(targetW, len(plain(a.Target))), max(resW, len(plain(a.Resource)))
 	}
 	var b strings.Builder
 	for _, a := range sorted {
-		fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", opW, string(a.Op), targetW, a.Target, resW, a.Resource, a.Detail)
+		fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", opW, string(a.Op), targetW, plain(a.Target), resW, plain(a.Resource), plain(a.Detail))
 	}
 	if manual := p.Manual(); len(manual) > 0 {
 		fmt.Fprintf(&b, "\n%d of these cannot be automated and are yours to do.\n", len(manual))
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// plain drops the control characters a terminal would act on, such as an
+// escape sequence in a package name or a command's output.
+func plain(s string) string {
+	return strings.Map(func(r rune) rune {
+		if (r < 0x20 && r != '\t') || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // JSONAction is one action in the machine-readable plan.
@@ -141,6 +172,9 @@ type JSONAction struct {
 
 // WriteJSON renders the plan for a CI step, ZC Care or an agent.
 func (p Plan) WriteJSON(w io.Writer) error {
+	if err := p.validate(); err != nil {
+		return err
+	}
 	out := struct {
 		Changes int          `json:"changes"`
 		Manual  int          `json:"manual"`

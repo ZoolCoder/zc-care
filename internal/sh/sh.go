@@ -11,7 +11,13 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+	"time"
 )
+
+// killGrace is how long Wait lets a cancelled program's output pipes drain.
+// Without it a grandchild that inherited the pipe keeps Wait blocked after
+// the program itself was killed.
+const killGrace = 5 * time.Second
 
 // Runner starts programs.
 type Runner interface {
@@ -39,6 +45,7 @@ func (Exec) Output(ctx context.Context, name string, args ...string) ([]byte, er
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stderr = &stderr
+	cmd.WaitDelay = killGrace
 	out, err := cmd.Output()
 	if err != nil {
 		return out, fmt.Errorf("%s: %w: %s", Line(name, args...), err, strings.TrimSpace(stderr.String()))
@@ -50,6 +57,7 @@ func (e Exec) Run(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = e.Stdin, e.Stdout, e.Stderr
 	cmd.Env = askpassEnv()
+	cmd.WaitDelay = killGrace
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: %w", Line(name, args...), err)
 	}

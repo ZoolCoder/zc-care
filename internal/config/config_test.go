@@ -62,7 +62,17 @@ func TestParseRefusesUnknownKeys(t *testing.T) {
 	}
 }
 
+// isolate points the skip and profiles files at an empty directory, so a test
+// never reads the developer's own.
+func isolate(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(EnvSkip, filepath.Join(dir, "skip"))
+	t.Setenv(EnvProfiles, filepath.Join(dir, "profiles"))
+}
+
 func TestLoadResolvesPathsAgainstTheFile(t *testing.T) {
+	isolate(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tool.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\ntargets:\n  - {name: a, provider: localdir, path: out}\n"), 0o600); err != nil {
@@ -128,6 +138,7 @@ func TestResolveExpandsHomeAndRelativePaths(t *testing.T) {
 }
 
 func TestExampleConfigIsValid(t *testing.T) {
+	isolate(t)
 	if _, err := Load(filepath.Join("..", "..", "zc-care.example.yaml"), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -196,5 +207,34 @@ func TestParseRefusesPathsItDoesNotExpand(t *testing.T) {
 		if _, err := Parse([]byte("version: 1\ntargets:\n  - name: n\n    provider: localdir\n    path: " + `"` + path + `"` + "\n")); err != nil {
 			t.Errorf("%s: %v", path, err)
 		}
+	}
+}
+
+func TestParseRefusesASecondYAMLDocument(t *testing.T) {
+	_, err := Parse([]byte("version: 1\n---\nversion: 2\n"))
+	if err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
+		t.Fatalf("second document accepted: %v", err)
+	}
+	if _, err := Parse([]byte("version: 1\n")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSkipListRefusesAnUnknownKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skip")
+	for _, bad := range []string{"casks:zed", "zed"} {
+		if err := os.WriteFile(path, []byte("brew:tmux\n"+bad+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadSkip(path)
+		if err == nil || !strings.Contains(err.Error(), `"`+bad+`"`) || !strings.Contains(err.Error(), "brew, cask, mas, tap") {
+			t.Errorf("%s: %v", bad, err)
+		}
+	}
+	if err := os.WriteFile(path, []byte("brew:tmux\ncask:zed\nmas:Xcode\ntap:a/b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSkip(path); err != nil {
+		t.Fatal(err)
 	}
 }

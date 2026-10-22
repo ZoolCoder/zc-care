@@ -31,7 +31,23 @@ func SkipPath() string {
 
 // ReadSkip lists the resources in a skip file, such as cask:ghostty, one a
 // line; # starts a comment. No file is an empty list.
-func ReadSkip(path string) ([]string, error) { return readList(path, "skip list") }
+func ReadSkip(path string) ([]string, error) {
+	list, err := readList(path, "skip list")
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range list {
+		kind, _, hasKind := strings.Cut(entry, ":")
+		if !hasKind || !slices.Contains(skipKinds, kind) {
+			return nil, fmt.Errorf("skip list %s: %q must be kind:name with kind one of %s, such as cask:ghostty", path, entry, strings.Join(skipKinds, ", "))
+		}
+	}
+	return list, nil
+}
+
+// skipKinds are the kinds the packages provider names its resources by, the
+// only provider that reads the skip list.
+var skipKinds = []string{"brew", "cask", "mas", "tap"}
 
 // readList reads a file of one name a line; # starts a comment.
 func readList(path, what string) ([]string, error) {

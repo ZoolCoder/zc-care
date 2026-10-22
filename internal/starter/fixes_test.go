@@ -27,20 +27,31 @@ func TestForceReplacesALinkInsteadOfWritingThroughIt(t *testing.T) {
 
 func TestAFailedWriteLeavesNoTempFilesAndTheOldFiles(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "zc-care.yaml"), []byte("old"), 0o600); err != nil {
+	old := map[string]string{"zc-care.yaml": "old", "Brewfile": "old brewfile", "mise.toml": "old mise"}
+	for name, body := range old {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A full directory where the backup of mise.toml goes makes that step
+	// fail after Brewfile was already moved aside.
+	blocker := filepath.Join(dir, "mise.toml.bak")
+	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// A directory where mise.toml goes makes the last rename fail.
-	if err := os.Mkdir(filepath.Join(dir, "mise.toml"), 0o755); err != nil {
-		t.Fatal(err)
+	err := writeAll(dir, []string{"Brewfile", "mise.toml"}, map[string][]byte{"Brewfile": []byte("b"), "mise.toml": []byte("m")})
+	if err == nil {
+		t.Fatal("a blocked backup did not fail the write")
 	}
-	if err := writeAll(dir, []string{"Brewfile", "mise.toml"}, map[string][]byte{"Brewfile": []byte("b"), "mise.toml": []byte("m")}); err == nil {
-		t.Fatal("rename over a directory worked")
+	for name, body := range old {
+		if got, _ := os.ReadFile(filepath.Join(dir, name)); string(got) != body {
+			t.Errorf("%s is %q, want %q", name, got, body)
+		}
 	}
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
-		if e.Name() != "zc-care.yaml" && e.Name() != "mise.toml" && e.Name() != "Brewfile" {
-			t.Errorf("temp file left: %s", e.Name())
+		if _, kept := old[e.Name()]; !kept && e.Name() != "mise.toml.bak" {
+			t.Errorf("file left: %s", e.Name())
 		}
 	}
 }

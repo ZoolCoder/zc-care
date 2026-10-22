@@ -118,10 +118,10 @@ func Write(o Options) (Result, error) {
 	return res, nil
 }
 
-// writeAll stages every file in a temp file beside its place first, then
-// renames them all, so a failed write leaves the old files whole. A rename
-// replaces a symlink itself, so -force never writes through a link to
-// somewhere else.
+// writeAll stages every file in a temp file beside its place first, moves
+// the files it replaces aside, then renames the new ones in. A failure puts
+// the old files back whole and removes the new ones. A rename replaces a
+// symlink itself, so -force never writes through a link to somewhere else.
 func writeAll(dir string, names []string, content map[string][]byte) error {
 	staged := map[string]string{}
 	defer func() {
@@ -141,6 +141,31 @@ func writeAll(dir string, names []string, content map[string][]byte) error {
 			return err
 		}
 	}
+	backups := map[string]string{}
+	if err := swapIn(dir, names, staged, backups); err != nil {
+		restore(dir, names, staged, backups)
+		return err
+	}
+	for _, bak := range backups {
+		_ = os.Remove(bak)
+	}
+	return nil
+}
+
+// swapIn moves each existing file to a backup beside it, then renames its
+// staged replacement into place.
+func swapIn(dir string, names []string, staged, backups map[string]string) error {
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if _, err := os.Lstat(path); err != nil {
+			continue
+		}
+		bak := path + ".bak"
+		if err := os.Rename(path, bak); err != nil {
+			return err
+		}
+		backups[name] = bak
+	}
 	for _, name := range names {
 		if err := os.Rename(staged[name], filepath.Join(dir, name)); err != nil {
 			return err
@@ -148,6 +173,20 @@ func writeAll(dir string, names []string, content map[string][]byte) error {
 		delete(staged, name)
 	}
 	return nil
+}
+
+// restore removes the new files swapIn already placed, those no longer
+// staged, and moves the backups back.
+func restore(dir string, names []string, staged, backups map[string]string) {
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if _, pending := staged[name]; !pending {
+			_ = os.Remove(path)
+		}
+		if bak, ok := backups[name]; ok {
+			_ = os.Rename(bak, path)
+		}
+	}
 }
 
 // keep appends captured's entries that brewfile lacks under their own

@@ -195,6 +195,9 @@ func Parse(data []byte) (Config, error) {
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return Config{}, err
 	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return Config{}, errors.New("config has more than one YAML document")
+	}
 	cfg.cleanFileNames()
 	return cfg, cfg.Validate()
 }

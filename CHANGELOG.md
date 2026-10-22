@@ -134,6 +134,19 @@ here with what to edit.
 - Undo journal IDs carry a random suffix, so two saves in the same clock
   tick no longer collide. `undo -id` with `-n` says "use -n or -id, not
   both".
+- A config with a second YAML document after `---` is refused instead of
+  silently ignored, and the skip list refuses an entry whose kind is not
+  brew, cask, mas or tap, naming the entry and the known kinds.
+- A cancelled command no longer hangs when a child keeps its output open:
+  zc-care gives up on the output five seconds after the cancel. The sudo
+  password helper is replaced by a rename, so a symlink planted at its path
+  is replaced, not followed, and it always has mode 0700.
+- Removing a Brewfile entry that spans several lines (`args: [` over
+  multiple lines) removes the whole entry. `init -force` moves the old files
+  aside and puts them back whole if writing any new file fails.
+- Plan text output strips control characters from target, resource and
+  detail (JSON is unchanged), and rendering fails with a clear error when an
+  action has a command but is marked manual, or has none and is not manual.
 - A missing `mas` waits for the apply that installs it through brew, so App
   Store apps are retried in the follow-up pass. The localdir provider refuses
   to write through a symlink to a missing file or to a directory, naming the
