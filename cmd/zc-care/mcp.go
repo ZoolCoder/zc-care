@@ -245,6 +245,9 @@ func structuredRemove(run command, args []string, stdin io.Reader, stdout, stder
 			cmd = append(cmd, "-target", shellQuote(t))
 		}
 	}
+	if c := flagValue(args, "config"); c != "" {
+		cmd = append(cmd, "-config", shellQuote(c))
+	}
 	cmd = append(cmd, shellQuote(flagValue(args, "remove")))
 	planJSON := json.RawMessage(bytes.TrimSpace(out.Bytes()))
 	if !json.Valid(planJSON) {

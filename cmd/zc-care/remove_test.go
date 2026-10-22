@@ -92,7 +92,7 @@ func TestMCPRemoveOnlyPlansAndNamesTheTerminalCommand(t *testing.T) {
 		reply.Plan.Actions[0].Op != "DELETE" || !reply.Plan.Actions[0].Destructive {
 		t.Fatalf("remove %q: %v", text, err)
 	}
-	if reply.Appliable || reply.ID != "" || reply.Command != name+" remove -target pkgs brew:htop" {
+	if reply.Appliable || reply.ID != "" || reply.Command != name+" remove -target pkgs -config "+shellQuote(cfg)+" brew:htop" {
 		t.Fatalf("remove reply %q", text)
 	}
 	unchanged(t, brewfile)

@@ -8,6 +8,8 @@
 set -euo pipefail
 
 step() { printf '\n\033[1;34m==>\033[0m %s\n' "$1"; }
+# -r /dev/tty is true with no controlling terminal; opening it is the real test.
+have_tty() { ( : </dev/tty ) 2>/dev/null; }
 
 # Brings a clone up to date; when it cannot fast-forward it says so and keeps the clone.
 update_clone() {
@@ -49,7 +51,7 @@ main() {
   if ! command -v brew >/dev/null && [[ ! -x /opt/homebrew/bin/brew && ! -x /usr/local/bin/brew ]]; then
     step "Installing Homebrew (asks for your password; also installs the Xcode command line tools)"
     # The installer asks questions: give it the terminal, not the piped script.
-    if [[ -r /dev/tty ]]; then
+    if have_tty; then
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/tty
     else
       NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
@@ -104,7 +106,7 @@ main() {
 
   # On a terminal, ZC Care asks which of the config's apps this Mac gets; what is
   # left out goes on this Mac's skip list, which the plan below honours.
-  if [[ -t 1 && -r /dev/tty && -z ${ZC_NO_PICKER:-} ]]; then
+  if [[ -t 1 && -z ${ZC_NO_PICKER:-} ]] && have_tty; then
     step "Choosing apps in ZC Care"
     open "zccare://apps" </dev/null
     read -r -p "Pick your apps in ZC Care, press Install, then press Enter here. " </dev/tty
@@ -112,11 +114,17 @@ main() {
 
   step "Plan"
   zc-care plan </dev/null
+  # apply asks before deleting, so it needs a terminal to answer on; without
+  # one it would read EOF, cancel and stop the script.
+  if ! have_tty; then
+    echo "Run zc-care apply at a terminal to review and confirm." >&2
+    return 0
+  fi
   step "Applying"
-  zc-care apply </dev/null
+  zc-care apply </dev/tty
   # Targets planned before the packages arrived, such as runtimes, are finished by a second pass.
   if ! zc-care plan -exit-code >/dev/null 2>&1 </dev/null; then
-    zc-care apply </dev/null
+    zc-care apply </dev/tty
   fi
 
   step "Done"

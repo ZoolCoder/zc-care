@@ -65,9 +65,19 @@ here with what to edit.
 - `add` no longer accepts a `config` argument and returns `{file,item,section}`;
   `validate` returns structured JSON; `remove` only plans and names the
   terminal command.
-- The plugin hook parses the real command, so it also catches `yes |`, here-doc
-  input and `-yes` on any subcommand. It has a 36-case test run by
+- The plugin hook fails closed: it allows only read-only subcommands in plain
+  commands and asks for every `apply` (a saved plan file no longer counts),
+  `undo`, `upgrade`, `remove`, `init`, `add`, `skip`, `profile`, `mcp`,
+  `-yes` and `-fix`, and for any `zc-care` command with quotes, `$`,
+  backticks or `;`, which closes quoting, substitution and alias bypasses.
+  It parses the real command, so it also catches `yes |` and here-doc input,
+  and no longer asks on `printf x | tee $LOG`. Its 100-case test runs with
   `make hook-test` and `make lint`.
+- MCP `remove` includes `-config` in the terminal command it returns, so the
+  command runs against the config the plan was made for.
+- `bootstrap.sh` opens `/dev/tty` to detect a terminal and gives `apply` the
+  terminal for its prompts; without one it says to run `zc-care apply` by
+  hand instead of stopping on EOF.
 - The five agent adapters are generated from one `COMMON.md` and checked by a
   Go test; they no longer allow `-yes`.
 - Eight new evals cover stale plans, plan_id reuse, MANUAL items, prompt

@@ -172,12 +172,15 @@ func TestAdaptersCarryCommon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, _ := filepath.Glob(filepath.Join(dir, "*", "*"))
-	if len(files) != 5 {
-		t.Fatalf("adapters %v", files)
-	}
-	for _, f := range files {
-		b, _ := os.ReadFile(f)
+	for _, name := range []string{
+		"cloud/AGENTS.md", "codex/AGENTS.md", "copilot/copilot-instructions.md",
+		"cursor/zc-care.mdc", "gemini/GEMINI.md",
+	} {
+		f := filepath.Join(dir, name)
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
 		_, rest, _ := strings.Cut(string(b), "<!-- common:start -->\n")
 		block, _, ok := strings.Cut(rest, "<!-- common:end -->")
 		if !ok || block != string(common) {
