@@ -6,6 +6,18 @@ here with what to edit.
 
 ## Unreleased
 
+### Release and CI
+
+- The security workflow scans `go.mod` with osv-scanner; the scanner has no
+  extractor for `go.sum` and failed every run. `osv-scanner.toml` lists the
+  two findings it skips, with the reason for each.
+
+## v0.3.0 — 2026-10-23
+
+Undo that refuses to overwrite a later edit, saved plans checked against the
+live state, a hook that asks before launchers and globs, Setapp and cloud
+aware cleanup, and pinned, reproducible release builds.
+
 ### ZC Care
 
 - Remove buttons say **Move to Trash** or **Delete** to match the Settings
