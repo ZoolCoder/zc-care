@@ -22,6 +22,7 @@ health.
 
 ```console
 $ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew trust zoolcoder/zc-care    # newer Homebrew loads a third-party tap only once you trust it
 $ brew install --cask zc-care
 ```
 
@@ -125,6 +126,7 @@ or the caches of open apps.
 
 ```console
 $ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew trust zoolcoder/zc-care    # newer Homebrew loads a third-party tap only once you trust it
 $ brew install --cask zc-care    # or make app-install in a clone (macOS 14+)
 ```
 
@@ -256,6 +258,7 @@ reviewed the plan.
 
 ```console
 $ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew trust zoolcoder/zc-care    # newer Homebrew loads a third-party tap only once you trust it
 $ brew install --cask zc-care
 ```
 

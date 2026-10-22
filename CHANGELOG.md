@@ -6,6 +6,11 @@ here with what to edit.
 
 ## Unreleased
 
+### Docs
+
+- The install steps add `brew trust zoolcoder/zc-care`: Homebrew refuses to
+  load a cask from a third-party tap until the tap is trusted.
+
 ### Release and CI
 
 - The security workflow scans `go.mod` with osv-scanner; the scanner has no
