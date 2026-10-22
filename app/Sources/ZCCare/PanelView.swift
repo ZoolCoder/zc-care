@@ -279,6 +279,13 @@ private struct TargetDetail: View {
                     Text("Everything in place.").font(.caption).foregroundStyle(.secondary)
                 }
                 ForEach(items) { item in ItemRow(store: store, item: item) }
+            } else if let failure = store.targetErrors[target.target] {
+                HStack {
+                    Text("Could not load: \(failure)").font(.caption).foregroundStyle(Theme.bad).lineLimit(2)
+                    Spacer()
+                    Button("Retry") { Task { await store.loadItems(target.target) } }
+                        .controlSize(.small)
+                }
             } else {
                 ProgressView().controlSize(.small)
             }
@@ -675,6 +682,7 @@ private struct ServiceRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help(item.kind == "agent" ? "Run Now, Reload or Unload" : "Restart or Stop")
         }
         .disabled(store.busy != nil)
         .modifier(Hover())

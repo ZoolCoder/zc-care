@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/zoolcoder/zc-care/internal/plan"
+	"github.com/zoolcoder/zc-care/internal/provider"
 )
 
 func TestRevertRestoresContentAndMode(t *testing.T) {
@@ -70,5 +72,53 @@ func TestScriptsCannotBeUndone(t *testing.T) {
 	u, err := before("/home/me/install.sh", true)
 	if err != nil || u.Reason == "" {
 		t.Fatalf("undo %+v, %v", u, err)
+	}
+}
+
+func TestRevertRestoresASymlinkAsALink(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, ".zshrc")
+	// The link dangles: a stat would see no file and record "remove".
+	if err := os.Symlink(filepath.Join(dir, "gone"), file); err != nil {
+		t.Fatal(err)
+	}
+	u, err := before(file, false)
+	if err != nil || u.Verb != "symlink" || !u.KeepOnError {
+		t.Fatalf("undo %+v, %v", u, err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("applied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	actions := Provider{}.Revert([]plan.Undo{u})
+	if err := actions[0].Do(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(file); err != nil || got != filepath.Join(dir, "gone") {
+		t.Fatalf("link %q, %v", got, err)
+	}
+}
+
+func TestRevertRefusesAFileEditedAfterTheApply(t *testing.T) {
+	file := filepath.Join(t.TempDir(), ".new")
+	u, err := before(file, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	u = provider.StampFileUndo(u)
+	if err := os.WriteFile(file, []byte("edited by hand"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = Provider{}.Revert([]plan.Undo{u})[0].Do(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "changed since the apply") {
+		t.Fatalf("err %v", err)
+	}
+	if got, _ := os.ReadFile(file); string(got) != "edited by hand" {
+		t.Fatalf("edit lost: %q", got)
 	}
 }

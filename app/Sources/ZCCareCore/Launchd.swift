@@ -72,6 +72,13 @@ public enum Launchd {
         home + "/Library/LaunchAgents/" + label + ".plist"
     }
 
+    /// The plist that declares the label, which need not be named for it;
+    /// the label's own file name when none is found.
+    public static func agentPath(_ label: String, home: String) -> String {
+        LaunchAgent.read(folders: [home + "/Library/LaunchAgents"]).first { $0.label == label }?.path
+            ?? plistPath(label, home: home)
+    }
+
     /// Where the job writes: its StandardOutPath, or the state log the
     /// config's own scripts keep.
     public static func log(label: String, plist: [String: Any], home: String) -> String {
@@ -88,11 +95,11 @@ public enum Launchd {
         switch (item.kind, action) {
         case ("brew", .run): return nil
         case ("brew", _): return (brew, ["services", action.rawValue, item.name])
-        case ("agent", .start): return ("/bin/launchctl", ["bootstrap", domain, plistPath(item.name, home: home)])
-        case ("agent", .stop): return ("/bin/launchctl", ["bootout", domain, plistPath(item.name, home: home)])
+        case ("agent", .start): return ("/bin/launchctl", ["bootstrap", domain, agentPath(item.name, home: home)])
+        case ("agent", .stop): return ("/bin/launchctl", ["bootout", domain, agentPath(item.name, home: home)])
         case ("agent", .restart):
             // Reload: unload, then load. kickstart -k would run a calendar job.
-            let plist = plistPath(item.name, home: home)
+            let plist = agentPath(item.name, home: home)
             return ("/bin/sh", ["-c", "/bin/launchctl bootout \(domain) \"$1\"; /bin/launchctl bootstrap \(domain) \"$1\"", "sh", plist])
         case ("agent", .run): return ("/bin/launchctl", ["kickstart", domain + "/" + item.name])
         default: return nil

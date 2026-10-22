@@ -56,11 +56,21 @@ public struct Removal: Sendable, Equatable {
             do {
                 try step(url)
             } catch {
-                if (error as NSError).code == CocoaError.fileNoSuchFile.rawValue { continue }
+                if isGone(error) { continue }
                 removal.failures.append(Failure(name: url.lastPathComponent, reason: reason(for: error)))
             }
         }
         return removal
+    }
+
+    /// Already gone: Cocoa's "no such file" (4, or 260 when reading), or POSIX ENOENT, also as the underlying error.
+    static func isGone(_ error: any Error) -> Bool {
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain, [CocoaError.fileNoSuchFile, .fileReadNoSuchFile].contains(where: { $0.rawValue == ns.code }) {
+            return true
+        }
+        if ns.domain == NSPOSIXErrorDomain, ns.code == Int(ENOENT) { return true }
+        return (ns.userInfo[NSUnderlyingErrorKey] as? NSError).map(isGone) ?? false
     }
 
     static func reason(for error: any Error) -> Reason {

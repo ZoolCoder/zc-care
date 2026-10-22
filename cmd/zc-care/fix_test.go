@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -36,7 +37,7 @@ func TestFixPlanHasOnlyFailedFixableChecksAndShowsTheExactCommand(t *testing.T) 
 func TestFixNeedsAYesAndRunsTheListedCommands(t *testing.T) {
 	r := &sh.Fake{}
 	var out bytes.Buffer
-	err := fixFindings(context.Background(), findings(), r, false, strings.NewReader(""), &out)
+	err := fixFindings(context.Background(), findings(), r, false, strings.NewReader(""), &out, io.Discard)
 	if !errors.Is(err, errCancelled) || len(r.Ran) != 0 {
 		t.Fatalf("ran without a yes: %v %v", err, r.Ran)
 	}
@@ -50,7 +51,7 @@ func TestFixRunsAfterAYesAndNothingFixableSaysSo(t *testing.T) {
 	var out bytes.Buffer
 	// The re-check runs the real check commands against the fake, which
 	// answers nothing, so some may still fail; the fix itself must have run.
-	_ = fixFindings(context.Background(), findings(), r, true, strings.NewReader(""), &out)
+	_ = fixFindings(context.Background(), findings(), r, true, strings.NewReader(""), &out, io.Discard)
 	want := "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on"
 	if !slices.Contains(r.Ran, want) {
 		t.Fatalf("ran %q, want %q", r.Ran, want)
@@ -59,9 +60,21 @@ func TestFixRunsAfterAYesAndNothingFixableSaysSo(t *testing.T) {
 	out.Reset()
 	r = &sh.Fake{}
 	advice := []security.Result{{Name: "FileVault", Detail: "turn it on"}}
-	if err := fixFindings(context.Background(), advice, r, true, strings.NewReader(""), &out); err != nil ||
+	if err := fixFindings(context.Background(), advice, r, true, strings.NewReader(""), &out, io.Discard); err != nil ||
 		!strings.Contains(out.String(), "nothing doctor can fix") || len(r.Ran) != 0 {
 		t.Fatalf("%v %q %v", err, out.String(), r.Ran)
+	}
+}
+
+func TestFixThatCannotBeVerifiedSaysSoAndDoesNotFail(t *testing.T) {
+	r := &sh.Fake{} // answers no check, so every re-check is Unknown
+	var out bytes.Buffer
+	err := fixFindings(context.Background(), findings(), r, true, strings.NewReader(""), &out, io.Discard)
+	if err != nil {
+		t.Fatalf("an unverifiable fix failed the run: %v", err)
+	}
+	if !strings.Contains(out.String(), "could not verify firewall") || strings.Contains(out.String(), "fixed and verified") {
+		t.Fatalf("output:\n%s", out.String())
 	}
 }
 
@@ -72,9 +85,9 @@ func TestDoctorFixRefusesJSON(t *testing.T) {
 }
 
 func TestADoctorFixIsNotJournaled(t *testing.T) {
-	before, _ := loadJournal("")
-	recordApply([]engine.Outcome{{Target: "security", Resource: "firewall"}}, viaDoctor)
-	if after, _ := loadJournal(""); len(after) != len(before) {
+	before, _ := loadJournal("", io.Discard)
+	recordApply("", []engine.Outcome{{Target: "security", Resource: "firewall"}}, viaDoctor, io.Discard)
+	if after, _ := loadJournal("", io.Discard); len(after) != len(before) {
 		t.Fatalf("journaled %+v", after)
 	}
 }

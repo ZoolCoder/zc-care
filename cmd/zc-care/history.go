@@ -1,7 +1,7 @@
 package main
 
 import (
-	"flag"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -29,7 +29,7 @@ func dataFolder(dataDir string) string {
 
 // recordApply writes one entry per target that ran an action: failed when
 // any of its actions failed, naming each with its own error.
-func recordApply(outcomes []engine.Outcome, via string) {
+func recordApply(dataDir string, outcomes []engine.Outcome, via string, stderr io.Writer) {
 	byTarget := map[string][]engine.Outcome{}
 	var order []string
 	for _, o := range outcomes {
@@ -38,16 +38,20 @@ func recordApply(outcomes []engine.Outcome, via string) {
 		}
 		byTarget[o.Target] = append(byTarget[o.Target], o)
 	}
-	log := activityLog("")
+	log := activityLog(dataDir)
 	for _, t := range order {
 		detail, ok := applyDetail(byTarget[t], via)
-		_ = log.Append(activity.Entry{At: time.Now(), Kind: "apply", Target: t, Detail: detail, OK: ok})
+		if err := log.Append(activity.Entry{At: time.Now(), Kind: "apply", Target: t, Detail: detail, OK: ok}); err != nil {
+			fmt.Fprintf(stderr, "warning: activity log not written: %v\n", err)
+		}
 	}
 	// An undo is not itself undone: running it again would only redo. A
 	// doctor fix keeps no record either: it changes system settings undo
 	// cannot restore.
 	if via != viaUndo && via != viaDoctor {
-		_ = saveJournal("", outcomes, via)
+		if err := saveJournal(dataDir, outcomes, via); err != nil {
+			fmt.Fprintf(stderr, "warning: undo record not saved: %v\n", err)
+		}
 	}
 }
 
@@ -81,13 +85,15 @@ func short(names []string, n int) string {
 }
 
 func runHistory(args []string, _ io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("history", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags := newFlags("history", stderr)
 	limit := flags.Int("n", 20, "how many entries")
 	asJSON := flags.Bool("json", false, "machine-readable output")
 	data := flags.String("data", "", "directory of the activity log")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *limit < 1 {
+		return errors.New("-n must be at least 1")
 	}
 	entries, err := activityLog(*data).Recent(*limit)
 	if err != nil {

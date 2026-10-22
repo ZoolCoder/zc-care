@@ -51,5 +51,27 @@ func writeAskpass() (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
-	return path, os.WriteFile(path, []byte(askpassScript), 0o700)
+	return path, replaceFile(path, []byte(askpassScript), 0o700)
+}
+
+// replaceFile swaps in a fresh file by rename, so a symlink planted at path
+// is replaced, not followed, and the mode is always perm.
+func replaceFile(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".askpass-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }

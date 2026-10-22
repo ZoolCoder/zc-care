@@ -34,9 +34,19 @@ public enum SpaceLens {
     /// live, nor anything in the Library: iCloud Drive and app data are
     /// there, and Cleanup clears its caches. Nor a synced folder: what goes
     /// there goes from the cloud and every other device.
+    /// The path must be written plainly (no `..`, `.` or doubled or
+    /// trailing slash) and no part of it below home may be a symlink, which
+    /// could lead out of the folder it seems to be in.
     public static func canTrash(_ path: String, home: String) -> Bool {
-        guard path.hasPrefix(home + "/") else { return false }
+        let home = home.count > 1 && home.hasSuffix("/") ? String(home.dropLast()) : home
+        guard !home.isEmpty, home != "/", (path as NSString).standardizingPath == path,
+              path.hasPrefix(home + "/") else { return false }
         let parts = path.dropFirst(home.count + 1).split(separator: "/").map(String.init)
+        var walked = home
+        for part in parts {
+            walked += "/" + part
+            if isSymlink(walked) { return false }
+        }
         guard let top = parts.first, !top.hasPrefix("."),
               !["Dropbox", "Google Drive", "OneDrive", "iCloud", "Box", "Creative Cloud Files", "pCloud"]
                   .contains(where: { top.hasPrefix($0) }) else { return false }
@@ -45,6 +55,11 @@ public enum SpaceLens {
                      "Developer"].contains(top)
         }
         return top != "Library"
+    }
+
+    private static func isSymlink(_ path: String) -> Bool {
+        var info = stat()
+        return lstat(path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFLNK
     }
 
     /// Folders below this share of their parent fold into nothing: a ring
@@ -128,13 +143,20 @@ public struct SpaceScan: Codable, Sendable, Equatable {
     public func growers(under path: String? = nil, from minimum: Int64 = noticeable, limit: Int = 5) -> [Grower] {
         guard previousRoot != nil else { return [] }
         var found: [Grower] = []
+        let start: SpaceNode
+        if let path {
+            guard let node = root.find(path) else { return [] }
+            start = node
+        } else {
+            start = root
+        }
         func walk(_ node: SpaceNode) {
             for child in node.children {
                 if let grew = growth(of: child.path), grew >= minimum { found.append(Grower(path: child.path, grew: grew)) }
                 walk(child)
             }
         }
-        walk(path.flatMap(root.find) ?? root)
+        walk(start)
         let grew = Dictionary(found.map { ($0.path, $0.grew) }, uniquingKeysWith: { a, _ in a })
         return found
             .filter { grower in

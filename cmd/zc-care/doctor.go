@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/zoolcoder/toolshell/doctor"
 	"github.com/zoolcoder/zc-care/internal/config"
@@ -22,7 +24,7 @@ import (
 )
 
 // runDoctor checks the install: the binary on PATH, the config, and that
-// every target's live state can be read. On a Mac it also checks security.
+// every target's live state can be read. It also checks security.
 func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -37,12 +39,14 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return errors.New("-fix prints a plan and asks; it cannot also be -json")
 	}
 	*path = findConfig(*path)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	r := doctor.New(version)
 	r.AddCheck(doctor.Binary(name))
 	host, _ := os.Hostname()
 	r.Add("system", doctor.OK, fmt.Sprintf("%s %s/%s", host, runtime.GOOS, runtime.GOARCH))
-	cfg, err := config.Load(*path, nil)
+	cfg, err := config.Load(*path, stdin)
 	r.Err("config", err, fmt.Sprintf("%s, %d target(s)", *path, len(cfg.Targets)))
 	if err == nil {
 		eng, err := engine.New(cfg, engine.Default(), nil)
@@ -88,7 +92,7 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if !*fix {
 		return reportErr
 	}
-	return errors.Join(reportErr, fixFindings(context.Background(), found, sh.System(), *yes, stdin, stdout))
+	return errors.Join(reportErr, fixFindings(ctx, found, sh.System(), *yes, stdin, stdout, stderr))
 }
 
 // addShadows checks that the shell runs each tools target's commands from
@@ -133,14 +137,21 @@ func shadowDetail(shadows []tools.Shadow) string {
 	return strings.Join(names, ", ") + `; activate mise last in the shell profile, after anything else that adds to PATH, such as eval "$(mise activate zsh)"`
 }
 
+// statusUnknown marks a check that could not read its answer. It is not a
+// failure, so it never changes doctor's exit code.
+const statusUnknown = "unknown"
+
 // addSecurity reports a check. A weak setting is the owner's call, not a
 // broken install, so it warns.
 func addSecurity(r *doctor.Report, prefix string, res security.Result) {
-	if res.OK {
-		r.Add(prefix+res.Name, doctor.OK, "")
-	} else {
-		r.Add(prefix+res.Name, doctor.Warn, res.Detail)
+	status := doctor.Warn
+	switch {
+	case res.OK:
+		status = doctor.OK
+	case res.Unknown:
+		status = statusUnknown
 	}
+	r.Add(prefix+res.Name, status, res.Detail)
 }
 
 func writeJSON(w io.Writer, v any) error {

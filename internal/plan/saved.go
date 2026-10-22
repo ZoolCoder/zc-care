@@ -2,6 +2,7 @@ package plan
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -30,6 +31,7 @@ type SavedAction struct {
 	Target   string `json:"target"`
 	Resource string `json:"resource"`
 	Detail   string `json:"detail"`
+	Digest   string `json:"digest,omitempty"`
 }
 
 const savedVersion = 1
@@ -52,7 +54,7 @@ func (s Saved) Write(w io.Writer) error {
 func (p Plan) savedActions() []SavedAction {
 	out := make([]SavedAction, 0, len(p.Actions))
 	for _, a := range p.sorted() {
-		out = append(out, SavedAction{Op: string(a.Op), Target: a.Target, Resource: a.Resource, Detail: a.Detail})
+		out = append(out, SavedAction{Op: string(a.Op), Target: a.Target, Resource: a.Resource, Detail: a.Detail, Digest: a.Digest})
 	}
 	return out
 }
@@ -80,9 +82,33 @@ func (s Saved) Matches(fresh Plan) error {
 	}
 	for i := range now {
 		if now[i] != s.Actions[i] {
+			if err := digestGap(s.Actions[i], now[i]); err != nil {
+				return err
+			}
+			if describe(s.Actions[i]) == describe(now[i]) {
+				return fmt.Errorf("the live state changed since this plan was saved: the content of %s %s changed; re-run plan",
+					now[i].Target, now[i].Resource)
+			}
 			return fmt.Errorf("the live state changed since this plan was saved.\n  reviewed: %s\n  now:      %s\nre-run plan",
 				describe(s.Actions[i]), describe(now[i]))
 		}
+	}
+	return nil
+}
+
+// digestGap explains a mismatch that only a missing digest causes: a plan
+// saved before digests existed, or content that cannot be read now.
+func digestGap(saved, now SavedAction) error {
+	sameRest := saved
+	sameRest.Digest = now.Digest
+	if sameRest != now {
+		return nil
+	}
+	switch {
+	case saved.Digest == "":
+		return errors.New("this plan was saved before content digests existed; re-run plan")
+	case now.Digest == "":
+		return fmt.Errorf("the content of %s %s could not be read; re-run plan", now.Target, now.Resource)
 	}
 	return nil
 }

@@ -237,6 +237,23 @@ func TestCaptureWritesOnlyANewFileUnlessForced(t *testing.T) {
 	}
 }
 
+func TestForcedWriteTightensAnExistingWorldReadableFile(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "Brewfile")
+	if err := os.WriteFile(out, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(out, []byte("new\n"), true); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(out)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, %v", info.Mode(), err)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "new\n" {
+		t.Fatalf("content %q", got)
+	}
+}
+
 func TestAddWritesTheManifestOnly(t *testing.T) {
 	root := t.TempDir()
 	cfg := filepath.Join(root, name+".yaml")
@@ -298,6 +315,27 @@ func TestSkipAddsListsAndUndoes(t *testing.T) {
 	}
 }
 
+func TestSkipRefusesAnUnknownKindBeforeWritingAndUndoWorksOnABadFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skip")
+	t.Setenv(config.EnvSkip, path)
+	_, err := run(t, "", "skip", "cask:zed", "foo:bar")
+	if err == nil || !strings.Contains(err.Error(), "brew, cask, mas, tap") {
+		t.Fatalf("err %v", err)
+	}
+	if _, statErr := os.Stat(path); statErr == nil {
+		t.Fatal("a refused skip wrote the file")
+	}
+	if err := os.WriteFile(path, []byte("cask:zed\nfoo:bar\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "", "skip", "-undo", "foo:bar"); err != nil || !strings.HasPrefix(out, "cask:zed\n") {
+		t.Fatalf("undo: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "foo:bar") {
+		t.Fatalf("bad line kept:\n%s", b)
+	}
+}
+
 func TestInitWritesAStarterThatPlans(t *testing.T) {
 	scratch := t.TempDir()
 	t.Setenv(config.EnvSkip, filepath.Join(scratch, "skip"))
@@ -321,5 +359,24 @@ func TestInitWritesAStarterThatPlans(t *testing.T) {
 	}
 	if out, err := run(t, "", "init", "-list"); err != nil || !strings.Contains(out, "developer") {
 		t.Fatalf("list: %v\n%s", err, out)
+	}
+}
+
+func TestWarnNoProfile(t *testing.T) {
+	cfg := config.Config{Targets: []config.Target{
+		{Name: "a"}, {Name: "b", Profiles: []string{"work"}}, {Name: "c", Profiles: []string{"dev"}},
+	}}
+	var out bytes.Buffer
+	warnNoProfile(cfg, nil, &out)
+	want := "no profile set for this Mac: 2 target(s) restricted to profiles run anyway; run zc-care profile NAME\n"
+	if out.String() != want {
+		t.Fatalf("got %q", out.String())
+	}
+	out.Reset()
+	warnNoProfile(cfg, []string{"a"}, &out)
+	cfg.Profiles = []string{"work"}
+	warnNoProfile(cfg, nil, &out)
+	if out.Len() != 0 {
+		t.Fatalf("warned: %q", out.String())
 	}
 }

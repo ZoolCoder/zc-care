@@ -272,5 +272,6 @@ private struct SidebarRow: View {
         }
         .buttonStyle(.plain)
         .onHover { over = $0 }
+        .help(badge.map { "\(title): \($0)" } ?? title)
     }
 }

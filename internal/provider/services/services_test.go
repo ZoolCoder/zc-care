@@ -77,3 +77,21 @@ func TestPlanNeedsNoBrewForAgentsOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestItemsListServicesThenAgents(t *testing.T) {
+	items, err := Provider{r: machine(), uid: 501}.Items(context.Background(), target())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, i := range items {
+		got = append(got, i.Kind+":"+i.Name+"="+i.State)
+	}
+	want := []string{
+		"brew:sketchybar=in place", "brew:asimov=in place", "brew:colima=missing", "brew:borders=missing", "brew:postgresql=missing",
+		"agent:local.weekly=missing", "agent:local.ssh=in place",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("items\n got %q\nwant %q", got, want)
+	}
+}

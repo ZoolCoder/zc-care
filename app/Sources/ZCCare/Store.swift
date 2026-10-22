@@ -47,10 +47,15 @@ final class Store {
     /// The target whose items the overview shows, and what they are.
     var expanded: String?
     var targetItems: [String: [Item]] = [:]
+    var targetErrors: [String: String] = [:]
+    private var refreshAgain = false
     /// Every declared item, and the apply log; nil until My Workstation
     /// reads them.
     var inventory: [Item]?
     var history: [HistoryEntry]?
+    var loadingWorkstation = false
+    /// Why My Workstation could not read; Refresh tries again.
+    var workstationError: String?
     /// What ZC Care cleaned and ran, for My Activity.
     var activity = ActivityLog.load(from: Store.activityFile)
     /// Launch agents that run on a calendar, such as the weekly upkeep.
@@ -161,10 +166,18 @@ final class Store {
         didSet { UserDefaults.standard.set(vitalsAlerts, forKey: Keys.vitalsAlerts) }
     }
 
-    /// Cache, browser and AI clutter cleanups go to the Trash, where My
-    /// Activity can put them back, unless this is on.
+    /// Every removal goes to the Trash, where My Activity can put it back,
+    /// unless this is on: then it is deleted for good.
     var deletesPermanently: Bool {
         didSet { UserDefaults.standard.set(deletesPermanently, forKey: Keys.deletesPermanently) }
+    }
+
+    /// Where a removed item is, for a message: "in the Trash" or "deleted".
+    var removed: String { deletesPermanently ? "deleted" : "in the Trash" }
+    var removeButton: String { deletesPermanently ? "Delete" : "Move to Trash" }
+
+    func removeQuestion(_ what: String) -> String {
+        deletesPermanently ? "Delete \(what) for good?" : "Move \(what) to the Trash?"
     }
 
     var vitalLimits: VitalLimits {
@@ -282,20 +295,40 @@ final class Store {
         careCLI = CareCLI(binary: binary, config: config, env: env)
     }
 
+    /// A read asked for while another runs is queued, so a change made in
+    /// between is never left showing the old data.
     func refresh() async {
-        guard let careCLI, !refreshing else { return }
+        guard careCLI != nil else { return }
+        if refreshing { refreshAgain = true; return }
         refreshing = true
+        defer { refreshing = false }
+        repeat {
+            refreshAgain = false
+            await readOnce()
+        } while refreshAgain
+    }
+
+    private func readOnce() async {
+        guard let careCLI else { return }
         let old = snapshot
         let new = await careCLI.snapshot()
         snapshot = new
         refreshedAt = .now
         jobs = await readJobs(new.services)
-        targetItems = [:]
+        targetItems = targetItems.filter { $0.key == expanded }
         if let expanded { await loadItems(expanded) }
-        refreshing = false
         // The first read has nothing to compare with: what is already
         // outstanding at launch is the badge's to show.
         if notifies, let old { notifier.post(new.alerts(since: old, ignoring: ignored)) }
+    }
+
+    /// A remove or an adopt changed the config: what the lists and the
+    /// inventory showed is out of date.
+    func configChanged() async {
+        targetItems = [:]
+        targetErrors = [:]
+        if inventory != nil { await loadWorkstation() }
+        await refresh()
     }
 
     /// Opening the menu reads again once the last read is a few minutes old.
@@ -329,10 +362,11 @@ final class Store {
     /// Writes the starter config for who the Mac is for, then reads the
     /// Mac with it. Nothing is installed yet.
     func createConfig(profiles: [String], role: String?, fromMac: Bool) async throws -> InitResult {
-        await connected()
-        guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
+        guard busy == nil else { throw CLIError(message: "Another change is still running.") }
         busy = "Writing your config"
         defer { busy = nil }
+        await connected()
+        guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
         let result = try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac)
         UserDefaults.standard.set(result.config, forKey: Keys.config)
         await connect()
@@ -369,10 +403,15 @@ final class Store {
         }
     }
 
-    /// Fixes every failed check that runs as root, behind one password
-    /// dialog. The caller has shown the commands and had them confirmed.
-    func secureAll() async {
-        guard busy == nil, let command = Fix.rootCommands(for: snapshot?.security ?? []) else { return }
+    /// Runs exactly the steps the owner confirmed, behind one password
+    /// dialog. A refresh may have changed which checks fail since the
+    /// preview: then nothing runs and the owner reviews the new list.
+    func secureAll(_ confirmed: [Fix.RootStep]) async {
+        guard busy == nil else { return }
+        guard Fix.rootSteps(for: snapshot?.security ?? []) == confirmed, let command = Fix.joined(confirmed) else {
+            message = Message(text: "The failed checks changed. Review the fixes again.", failed: true)
+            return
+        }
         busy = "Securing this Mac"
         defer { busy = nil }
         let failed = await asRoot(command)
@@ -391,10 +430,12 @@ final class Store {
 
     func loadItems(_ target: String) async {
         guard let careCLI else { return }
+        targetErrors[target] = nil
         do {
             targetItems[target] = try await careCLI.items(targets: [target], states: ["missing", "differs", "manual"])
         } catch {
-            message = Message(text: error.localizedDescription, failed: true)
+            targetItems[target] = nil
+            targetErrors[target] = error.localizedDescription
         }
     }
 
@@ -439,7 +480,7 @@ final class Store {
 
     /// Shows what apply would change, without changing anything.
     func showPlan() async {
-        guard let careCLI else { return }
+        guard let careCLI, busy == nil else { return }
         busy = "Planning"
         defer { busy = nil }
         do {
@@ -464,12 +505,19 @@ final class Store {
                 return
             }
             if confirm || widened || doc.deletes, !Alerts.confirm(plan: doc) { return }
-            let result = try await careCLI.apply(saved: planFile)
+            let file = planFile
+            let applied = await cancellable { () -> Result<CommandResult, Error> in
+                do { return .success(try await careCLI.apply(saved: file)) } catch { return .failure(error) }
+            }
+            let result = try applied.get()
             let log = writeLog(result)
             plan = nil
             message = result.status == 0
                 ? Message(text: "\(label): done and verified.", failed: false, log: log)
                 : Message(text: lastLine(of: result) ?? "\(label) failed.", failed: true, log: log)
+        } catch is CancellationError {
+            plan = nil
+            message = Message(text: "\(label): cancelled; what already ran is in History.", failed: true)
         } catch {
             message = Message(text: error.localizedDescription, failed: true)
         }
@@ -510,13 +558,16 @@ final class Store {
     /// again off it, then installs the rest. True when the apply went through.
     func install(_ choice: AppChoice) async -> Bool {
         guard let careCLI, busy == nil else { return false }
+        busy = "Installing apps"
         do {
             try await careCLI.skip(choice.toSkip)
             try await careCLI.skip(choice.toUnskip, undo: true)
         } catch {
+            busy = nil
             message = Message(text: error.localizedDescription, failed: true)
             return false
         }
+        busy = nil
         let targets = packageTargets
         message = nil
         await change("Installing apps", confirm: false) {
@@ -552,7 +603,7 @@ final class Store {
         let home = NSHomeDirectory()
         var plists: [(String, [String: Any], [DateComponents])] = []
         for agent in services where agent.kind == "agent" {
-            let path = Launchd.plistPath(agent.name, home: home)
+            let path = Launchd.agentPath(agent.name, home: home)
             guard let data = FileManager.default.contents(atPath: path),
                   let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
             else { continue }
@@ -593,6 +644,10 @@ final class Store {
         switch Fix(for: check) {
         case .command(let command):
             guard Alerts.confirm(fix: command, for: check.title) else { return }
+            guard busy == nil else {
+                message = Message(text: "Another change is still running.", failed: true)
+                return
+            }
             busy = "Fixing \(check.title)"
             defer { busy = nil }
             let failed = await asRoot(command)
@@ -616,13 +671,16 @@ final class Store {
     /// Workstation.
     func loadWorkstation() async {
         guard let careCLI else { return }
+        loadingWorkstation = true
+        defer { loadingWorkstation = false }
         async let items = careCLI.items()
         async let log = careCLI.history()
         do {
             inventory = try await items
             history = try await log
+            workstationError = nil
         } catch {
-            message = Message(text: error.localizedDescription, failed: true)
+            workstationError = error.localizedDescription
         }
     }
 

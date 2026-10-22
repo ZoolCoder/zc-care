@@ -36,3 +36,11 @@ func TestAnUpgradeCannotBeUndone(t *testing.T) {
 		t.Fatalf("undo %+v, %v", u, err)
 	}
 }
+
+func TestRemoveRecordsAReinstall(t *testing.T) {
+	u, err := beforeRemove(item{Kind: "mas", Name: "Xcode", ID: "497799835"})(context.Background())
+	if err != nil || u.Verb != "install" || u.Provider != "packages" ||
+		u.Data["kind"] != "mas" || u.Data["name"] != "Xcode" || u.Data["id"] != "497799835" {
+		t.Fatalf("undo %+v, %v", u, err)
+	}
+}

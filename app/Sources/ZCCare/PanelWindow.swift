@@ -14,6 +14,7 @@ final class PanelWindow: NSObject, NSWindowDelegate {
     /// When a click elsewhere last closed the panel: a click on the bar item
     /// closes it that way first, and must not open it again.
     private var closedAt = Date.distantPast
+    private var waitingForIdle = false
 
     init(store: Store) {
         self.store = store
@@ -81,10 +82,32 @@ final class PanelWindow: NSObject, NSWindowDelegate {
     }
 
     /// Clicking elsewhere closes the panel, but not an alert the panel asked.
+    /// While a job runs the panel stays open to show it, and closes once the
+    /// job ends if the focus is still elsewhere.
     func windowDidResignKey(_ notification: Notification) {
-        guard NSApp.modalWindow == nil, store.busy == nil else { return }
+        guard NSApp.modalWindow == nil else { return }
+        guard store.busy == nil else { return closeWhenIdle() }
+        close()
+    }
+
+    private func close() {
         panel?.orderOut(nil)
         closedAt = .now
+    }
+
+    private func closeWhenIdle() {
+        guard !waitingForIdle else { return }
+        waitingForIdle = true
+        let store = store
+        withObservationTracking { _ = store.busy } onChange: { [weak self] in
+            Task { @MainActor in self?.busyChanged() }
+        }
+    }
+
+    private func busyChanged() {
+        waitingForIdle = false
+        if store.busy != nil { return closeWhenIdle() }
+        if let panel, panel.isVisible, !panel.isKeyWindow { close() }
     }
 }
 

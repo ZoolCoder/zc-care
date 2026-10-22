@@ -43,7 +43,8 @@ public enum CloudDrives {
 
     /// The downloaded files of at least `minimum` bytes, biggest first, and
     /// what every downloaded file takes together. A file still waiting to
-    /// upload counts but is not listed: its only copy is on this Mac.
+    /// upload, or one whose upload state is unknown (every non-iCloud
+    /// provider), counts but is not listed: its only copy may be on this Mac.
     public static func downloaded(in folder: URL, minimum: Int64, limit: Int = 60) -> (total: Int64, files: [LargeFile]) {
         let keys: [URLResourceKey] = [.isRegularFileKey, .totalFileAllocatedSizeKey, .contentModificationDateKey,
                                       .ubiquitousItemIsUploadedKey]
@@ -51,13 +52,16 @@ public enum CloudDrives {
                                                         options: [.skipsHiddenFiles, .skipsPackageDescendants]) else {
             return (0, [])
         }
+        // Only iCloud reports whether a file is uploaded; for the others a listed file could be trashed in the cloud.
+        let listable = !folder.path.contains("/Library/CloudStorage/")
         var total: Int64 = 0
         var files: [LargeFile] = []
         for case let url as URL in walk {
+            if Task.isCancelled { break }
             guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
                   let size = v.totalFileAllocatedSize, size > 0 else { continue }
             total += Int64(size)
-            if size >= minimum, v.ubiquitousItemIsUploaded != false { files.append(LargeFile(url: url, size: Int64(size), modified: v.contentModificationDate)) }
+            if listable, size >= minimum, v.ubiquitousItemIsUploaded == true { files.append(LargeFile(url: url, size: Int64(size), modified: v.contentModificationDate)) }
         }
         return (total, Array(files.sorted { $0.size > $1.size }.prefix(limit)))
     }

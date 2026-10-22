@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -71,7 +72,8 @@ func compact(m map[string]any) map[string]any {
 }
 
 // server compares one declared server with the client's config.
-func (p Provider) server(target, clientName string, c client, name string, s Server) (change, error) {
+func (p Provider) server(target, clientName string, c client, name string, s, template Server) (change, error) {
+	secret := hasRef(template)
 	path := filepath.Join(p.home, c.servers)
 	resource := name + " (" + clientName + ")"
 	ch := change{item: item(name, "mcp server", clientName, provider.InPlace)}
@@ -103,19 +105,62 @@ func (p Provider) server(target, clientName string, c client, name string, s Ser
 		ch.item.State = provider.Differs
 	}
 	ch.action = plan.Action{Op: op, Target: target, Resource: resource, Detail: "write to ~/" + c.servers,
+		Digest: serverDigest(clientName, name, template),
+		Before: func(context.Context) (plan.Undo, error) { return provider.FileBefore(providerName, path) },
 		Do: func(context.Context) error {
 			// Read again: the agent may have written the file since the plan.
-			now, err := os.ReadFile(path)
-			if err != nil && !os.IsNotExist(err) {
+			now, seen, err := readStamped(path)
+			if err != nil {
 				return err
 			}
 			next, err := write(now)
 			if err != nil {
 				return err
 			}
-			return writeFile(path, next)
+			if bytes.Equal(now, next) || jsonEqual(now, next) {
+				return nil
+			}
+			if err := unchanged(path, seen); err != nil {
+				return err
+			}
+			return writeFile(path, next, secret)
 		}}
 	return ch, nil
+}
+
+// serverDigest fingerprints the declared server as written in the manifest,
+// keychain references unresolved, so no secret is ever hashed.
+func serverDigest(client, name string, template Server) string {
+	b, _ := json.Marshal(template)
+	return provider.Digest([]byte(client), []byte(name), b)
+}
+
+// readStamped reads path and notes its mtime and size; a missing file reads
+// as empty with no stamp.
+func readStamped(path string) ([]byte, os.FileInfo, error) {
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := os.Stat(path)
+	return b, info, err
+}
+
+// unchanged fails when path is not as readStamped saw it: an agent writes its
+// own config while we hold the copy we are about to replace.
+func unchanged(path string, seen os.FileInfo) error {
+	now, err := os.Stat(path)
+	switch {
+	case seen == nil && os.IsNotExist(err):
+		return nil
+	case err != nil || seen == nil,
+		!now.ModTime().Equal(seen.ModTime()) || now.Size() != seen.Size():
+		return fmt.Errorf("%s changed while zc-care was writing it; re-run", path)
+	}
+	return nil
 }
 
 // jsonServer sets mcpServers[name] and leaves every other key as it was.
@@ -154,10 +199,16 @@ func decode(b []byte) (map[string]json.RawMessage, map[string]json.RawMessage, e
 	if err := json.Unmarshal(b, &doc); err != nil {
 		return nil, nil, err
 	}
+	if doc == nil { // the JSON was null
+		doc = map[string]json.RawMessage{}
+	}
 	if raw, ok := doc["mcpServers"]; ok {
 		if err := json.Unmarshal(raw, &servers); err != nil {
 			return nil, nil, fmt.Errorf("mcpServers: %w", err)
 		}
+	}
+	if servers == nil {
+		servers = map[string]json.RawMessage{}
 	}
 	return doc, servers, nil
 }
@@ -172,6 +223,9 @@ const (
 // so a server already declared outside the block is left to the user.
 func codexServer(have []byte, name string, s Server) (plan.Op, func([]byte) ([]byte, error), error) {
 	text := string(have)
+	if _, err := withBlock(text, codexBegin, codexEnd, ""); err != nil {
+		return "", nil, err
+	}
 	inside, outside := splitBlock(text)
 	header := regexp.MustCompile(`(?m)^\[mcp_servers\.` + regexp.QuoteMeta(manifest.TOMLKey(name)) + `(\.[a-z_]+)?\]`)
 	if header.MatchString(outside) {
@@ -187,7 +241,8 @@ func codexServer(have []byte, name string, s Server) (plan.Op, func([]byte) ([]b
 		for _, n := range slices.Sorted(maps.Keys(tables)) {
 			body.WriteString(tables[n])
 		}
-		return []byte(withBlock(string(now), codexBegin, codexEnd, body.String())), nil
+		out, err := withBlock(string(now), codexBegin, codexEnd, body.String())
+		return []byte(out), err
 	}
 	switch cur, ok := tables[name]; {
 	case !ok:

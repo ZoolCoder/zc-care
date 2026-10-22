@@ -4,6 +4,23 @@ import ZCCareCore
 
 // MARK: Shared pieces
 
+/// What a removal is called in a dialog: the Trash unless the setting deletes.
+@MainActor func removalVerb(_ store: Store) -> String { store.deletesPermanently ? "Delete" : "Move to Trash" }
+
+/// The same, short enough for a row's button.
+@MainActor func removalButton(_ store: Store) -> String { store.deletesPermanently ? "Delete" : "Trash" }
+
+/// One phrase for the Trash row, wherever it shows.
+let trashRowDetail = "Emptying deletes what is in it for good"
+
+/// The flag on a launch agent or background item that showed up since the last look.
+let appearedFlag = "Appeared"
+
+extension View {
+    /// Disabled while the Store runs a change; it ignores a second one.
+    func gatedOnBusy(_ store: Store) -> some View { disabled(store.busy != nil) }
+}
+
 /// A big glass card, as Smart Care draws its results.
 struct Glass: ViewModifier {
     func body(content: Content) -> some View {
@@ -58,9 +75,13 @@ struct CareHeader: View {
             Spacer()
             if busy { ProgressView().controlSize(.small) }
             if let action {
-                Button(action.title, action: action.run).disabled(busy)
-                    .keyboardShortcut("r")
-                    .help("\(action.title) (⌘R)")
+                if action.title == "Rescan" {
+                    Button(action.title, action: action.run).disabled(busy)
+                        .keyboardShortcut("r")
+                        .help("\(action.title) (⌘R)")
+                } else {
+                    Button(action.title, action: action.run).disabled(busy)
+                }
             }
         }
         .padding(.top, 40)
@@ -120,7 +141,10 @@ struct FileRow: View {
             }
             .controlSize(.small)
             .help("Show in Finder")
-            Button("Trash") { Task { await care.trash(file) } }.controlSize(.small)
+            Button(removalButton(care.store)) { Task { await care.trash(file) } }
+                .controlSize(.small)
+                .help(removalVerb(care.store))
+                .gatedOnBusy(care.store)
         }
         .contextMenu { IgnoreMenu(store: care.store, url: file.url) }
     }

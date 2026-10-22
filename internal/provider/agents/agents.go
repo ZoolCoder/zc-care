@@ -52,6 +52,8 @@ type Server struct {
 	Headers map[string]string `yaml:"headers"`
 }
 
+const providerName = "agents"
+
 type Provider struct {
 	r    sh.Runner
 	home string
@@ -129,7 +131,7 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 	for _, name := range m.Clients {
 		c := clients[name]
 		for _, s := range slices.Sorted(maps.Keys(servers)) {
-			ch, err := p.server(t.Name, name, c, s, servers[s])
+			ch, err := p.server(t.Name, name, c, s, servers[s], m.Servers[s])
 			if err != nil {
 				return nil, err
 			}
@@ -211,6 +213,9 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	return m, nil
 }
 
+// Revert puts back the config and rules files apply changed.
+func (Provider) Revert(undos []plan.Undo) []plan.Action { return provider.RevertFiles(undos) }
+
 // Programs lists ollama when the manifest asks for models.
 func (p Provider) Programs(t config.Target) []string {
 	if m, err := Load(t.File); err == nil && len(m.Models) > 0 {
@@ -231,15 +236,32 @@ func (p Provider) rules(target, client string, c client, src string) (change, er
 		return change{}, fmt.Errorf("read rules: %w", err)
 	}
 	path := filepath.Join(p.home, c.rules)
-	have, _ := os.ReadFile(path)
-	next := withBlock(string(have), "<!-- zc-care agents: begin -->", "<!-- zc-care agents: end -->", string(want))
+	have, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return change{}, fmt.Errorf("read ~/%s: %w", c.rules, err)
+	}
+	next, err := withBlock(string(have), "<!-- zc-care agents: begin -->", "<!-- zc-care agents: end -->", string(want))
+	if err != nil {
+		return change{}, fmt.Errorf("~/%s: %w", c.rules, err)
+	}
 	ch := change{item: item("rules", "rules", client, provider.InPlace)}
 	if next == string(have) {
 		return ch, nil
 	}
 	ch.item.State, ch.action = provider.Missing, plan.Action{Op: plan.OpUpdate, Target: target,
 		Resource: "rules (" + client + ")", Detail: "write " + filepath.Base(src) + " into ~/" + c.rules,
-		Do: func(context.Context) error { return writeFile(path, []byte(next)) }}
+		Digest: provider.Digest([]byte(next)),
+		Before: func(context.Context) (plan.Undo, error) { return provider.FileBefore(providerName, path) },
+		Do: func(context.Context) error {
+			now, _, err := readStamped(path)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(now, have) {
+				return fmt.Errorf("%s changed since the plan; re-run", path)
+			}
+			return writeFile(path, []byte(next), false)
+		}}
 	if len(have) == 0 {
 		ch.action.Op = plan.OpCreate
 	}
@@ -250,15 +272,18 @@ func (p Provider) rules(target, client string, c client, src string) (change, er
 func (p Provider) skill(target, client string, c client, src string) (change, error) {
 	name := filepath.Base(src)
 	resource := "skill " + name + " (" + client + ")"
-	want, err := tree(src)
+	want, err := tree(realPath(src))
 	if err != nil {
 		return change{}, fmt.Errorf("read skill %s: %w", name, err)
 	}
-	dst := filepath.Join(p.home, c.skills, name)
-	have, _ := tree(dst)
+	dst := realPath(filepath.Join(p.home, c.skills, name))
+	have, err := tree(dst)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return change{}, fmt.Errorf("read installed skill %s: %w", name, err)
+	}
 	var stale []string
-	for f, b := range want {
-		if !bytes.Equal(have[f], b) {
+	for f, w := range want {
+		if h, ok := have[f]; !ok || h.mode != w.mode || !bytes.Equal(h.data, w.data) {
 			stale = append(stale, f)
 		}
 	}
@@ -273,9 +298,10 @@ func (p Provider) skill(target, client string, c client, src string) (change, er
 	}
 	ch.item.State, ch.action = state, plan.Action{Op: op, Target: target, Resource: resource,
 		Detail: fmt.Sprintf("copy %d file(s) to ~/%s", len(stale), filepath.Join(c.skills, name)),
+		Digest: skillDigest(stale, want),
 		Do: func(context.Context) error {
 			for _, f := range stale {
-				if err := writeFile(filepath.Join(dst, f), want[f]); err != nil {
+				if err := writeFileMode(filepath.Join(dst, f), want[f].data, want[f].mode); err != nil {
 					return err
 				}
 			}
@@ -284,14 +310,23 @@ func (p Provider) skill(target, client string, c client, src string) (change, er
 	return ch, nil
 }
 
+// skillDigest fingerprints the files a skill copy writes, in name order.
+func skillDigest(names []string, files map[string]treeFile) string {
+	var parts [][]byte
+	for _, n := range names {
+		parts = append(parts, []byte(n), []byte(files[n].mode.String()), files[n].data)
+	}
+	return provider.Digest(parts...)
+}
+
 // models pulls the Ollama models that are not on this machine.
 func (p Provider) models(ctx context.Context, target string, models []string) ([]change, error) {
 	if len(models) == 0 {
 		return nil, nil
 	}
 	if !p.r.Has("ollama") {
-		return []change{{item: item("ollama", "model", "ollama", provider.Manual), action: plan.Action{
-			Op: plan.OpManual, Target: target, Resource: "ollama", Detail: "install Ollama to pull the models"}}}, nil
+		return []change{{item: item("ollama", "model", "ollama", provider.Manual), action: plan.MissingProgram(
+			target, "ollama", "install Ollama to pull the models")}}, nil
 	}
 	out, err := p.r.Output(ctx, "ollama", "list")
 	if err != nil {
@@ -317,44 +352,78 @@ func (p Provider) models(ctx context.Context, target string, models []string) ([
 }
 
 // withBlock puts body between the begin and end markers in text, replacing
-// the block there or adding one at the end.
-func withBlock(text, begin, end, body string) string {
+// the block there or adding one at the end. A begin marker with no end after
+// it means the file was edited by hand; adding a second block would corrupt it.
+func withBlock(text, begin, end, body string) (string, error) {
 	block := begin + "\n" + strings.TrimRight(body, "\n") + "\n" + end + "\n"
 	if i := strings.Index(text, begin); i >= 0 {
-		if j := strings.Index(text[i:], end); j >= 0 {
-			rest := strings.TrimPrefix(text[i+j+len(end):], "\n")
-			return text[:i] + block + rest
+		j := strings.Index(text[i:], end)
+		if j < 0 {
+			return "", fmt.Errorf("has %q with no matching end marker; fix or remove it", begin)
 		}
+		rest := strings.TrimPrefix(text[i+j+len(end):], "\n")
+		return text[:i] + block + rest, nil
 	}
 	if text != "" && !strings.HasSuffix(text, "\n\n") {
 		text = strings.TrimRight(text, "\n") + "\n\n"
 	}
-	return text + block
+	return text + block, nil
+}
+
+// realPath follows symlinks, as WalkDir does not follow a symlinked root.
+// A path that does not exist yet is returned as it is.
+func realPath(p string) string {
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		return real
+	}
+	return p
+}
+
+type treeFile struct {
+	data []byte
+	mode fs.FileMode
 }
 
 // tree reads every regular file under dir, by slash path.
-func tree(dir string) (map[string][]byte, error) {
-	files := map[string][]byte{}
+func tree(dir string) (map[string]treeFile, error) {
+	files := map[string]treeFile{}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return err
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
 		rel, _ := filepath.Rel(dir, path)
-		files[filepath.ToSlash(rel)], err = os.ReadFile(path)
+		files[filepath.ToSlash(rel)] = treeFile{data: data, mode: info.Mode().Perm()}
 		return err
 	})
 	return files, err
 }
 
 // writeFile writes path, and its folder if missing, keeping an existing
-// file's mode and else private to the user.
-func writeFile(path string, b []byte) error {
+// file's mode and else private to the user. A private file also loses any
+// group and other access, as it holds secrets.
+func writeFile(path string, b []byte, private bool) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	mode := os.FileMode(0o600)
 	if info, err := os.Stat(path); err == nil {
 		mode = info.Mode().Perm()
+	}
+	if private {
+		mode &^= 0o077
+	}
+	return manifest.WriteFile(path, b, mode)
+}
+
+// writeFileMode writes path, and its folder if missing, with exactly mode.
+func writeFileMode(path string, b []byte, mode fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
 	return manifest.WriteFile(path, b, mode)
 }

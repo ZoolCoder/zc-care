@@ -32,7 +32,7 @@ struct PerformanceView: View {
                                 detail: (agent.broken ? "Program gone: " : care.managed(agent) ? "In your config: " : "")
                                     + (agent.program as NSString).abbreviatingWithTildeInPath,
                                 value: agent.broken ? "Broken" : agent.running ? "Running" : agent.runAtLoad ? "At login" : "On demand",
-                                flag: care.isNew(agent: agent) ? "New" : nil, flagColor: Theme.accent) {
+                                flag: care.isNew(agent: agent) ? appearedFlag : nil, flagColor: Theme.accent) {
                                 if agent.broken, agent.path.hasPrefix(NSHomeDirectory() + "/") {
                                     Button("Remove") { Task { await care.remove(agent) } }
                                         .controlSize(.small)
@@ -55,7 +55,7 @@ struct PerformanceView: View {
                         ForEach(care.background, id: \.processIdentifier) { app in
                             CareRow(icon: Image(nsImage: app.icon ?? NSImage()).resizable().frame(width: 32, height: 32),
                                 title: app.localizedName ?? "?", detail: app.bundleIdentifier ?? "", value: "") {
-                                Button("Quit") { care.quit(app) }.controlSize(.small)
+                                Button("Quit") { care.quit(app) }.controlSize(.small).gatedOnBusy(care.store)
                             }
                         }
                     }

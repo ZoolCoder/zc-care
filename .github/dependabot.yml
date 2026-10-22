@@ -7,6 +7,9 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
     commit-message:
       prefix: ci
   - package-ecosystem: gomod
@@ -20,6 +23,15 @@ updates:
       prefix: build
   - package-ecosystem: npm
     directory: /
+    target-branch: develop
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+  - package-ecosystem: swift
+    directory: /app
     target-branch: develop
     schedule:
       interval: monthly

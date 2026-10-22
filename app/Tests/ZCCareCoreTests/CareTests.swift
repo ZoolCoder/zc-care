@@ -418,12 +418,12 @@ private func write(_ url: URL, bytes: Int) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("{\"layers\":[\(layers)]}".utf8).write(to: url)
     }
-    try manifest("library/llama3/latest", ["sha256:aa", "sha256:shared"])
-    try manifest("someone/coder/7b", ["sha256:bb", "sha256:shared"])
+    try manifest("library/llama3/latest", ["sha256:" + String(repeating: "a", count: 64), "sha256:" + String(repeating: "c", count: 64)])
+    try manifest("someone/coder/7b", ["sha256:" + String(repeating: "b", count: 64), "sha256:" + String(repeating: "c", count: 64)])
     let models = AIModels.ollama(root: root).sorted { $0.name < $1.name }
     #expect(models.map(\.name) == ["llama3:latest", "someone/coder:7b"])
     #expect(models[0].size == 200)
-    #expect(models[0].paths.map(\.lastPathComponent) == ["latest", "sha256-aa"])
+    #expect(models[0].paths.map(\.lastPathComponent) == ["latest", "sha256-" + String(repeating: "a", count: 64)])
 }
 
 @Test func huggingFaceFoldersNameModels() throws {
@@ -493,8 +493,10 @@ private func write(_ url: URL, bytes: Int) throws {
     let temp = home.appendingPathComponent("tmp/claude-501")
     try write(temp.appendingPathComponent("old/x"), bytes: 100_000)
     try write(temp.appendingPathComponent("busy/x"), bytes: 100_000)
-    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86400)],
-                                          ofItemAtPath: temp.appendingPathComponent("old").path)
+    for inside in ["old/x", "old"] {
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86400)],
+                                              ofItemAtPath: temp.appendingPathComponent(inside).path)
+    }
     try write(home.appendingPathComponent("Library/Application Support/Cursor/Cache/a"), bytes: 50_000)
     try write(home.appendingPathComponent("Library/Application Support/Cursor/User/settings.json"), bytes: 50_000)
 
@@ -600,11 +602,11 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(FileManager.default.fileExists(atPath: home.path + "/" + chrome + "Default/Bookmarks"))
 }
 
-@Test func similarImagesChainCloseNeighboursIntoGroups() {
-    // 0-1 close, 1-2 close, 0-2 far: one chain. 3-4 close. 5 alone.
+@Test func similarImagesDoNotChainIntoGroups() {
+    // 0-1 close, 1-2 close, 0-2 far: 2 stays out, as it is not close to 0. 3-4 close. 5 alone.
     let close: Set<[Int]> = [[0, 1], [1, 2], [3, 4]]
     let groups = SimilarImages.cluster(count: 6) { close.contains([$0, $1]) ? 0.1 : 0.9 }
-    #expect(groups == [[0, 1, 2], [3, 4]])
+    #expect(groups == [[0, 1], [3, 4]])
     #expect(SimilarImages.cluster(count: 0) { _, _ in 0 }.isEmpty)
 }
 
@@ -677,14 +679,15 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(CloudDrives.name(folder: "pCloud-Drive") == "pCloud")
 }
 
-@Test func cloudDrivesCountDownloadedFilesBiggestFirst() throws {
+@Test func cloudDrivesCountDownloadedFilesButListOnlyUploadedOnes() throws {
     let folder = try tempDir()
     defer { try? FileManager.default.removeItem(at: folder) }
     try write(folder.appendingPathComponent("a/big.mov"), bytes: 400_000)
     try write(folder.appendingPathComponent("mid.zip"), bytes: 200_000)
     try write(folder.appendingPathComponent("tiny.txt"), bytes: 10)
+    // Only iCloud says a file is uploaded; without that, nothing is offered for removal.
     let found = CloudDrives.downloaded(in: folder, minimum: 100_000)
-    #expect(found.files.map(\.name) == ["big.mov", "mid.zip"])
+    #expect(found.files.isEmpty)
     #expect(found.total >= 600_000)
 }
 

@@ -24,12 +24,29 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
         self.trashed = trashed
     }
 
-    /// Whether every item is still in the Trash and nothing took its old
-    /// place, so Put Back can move them all.
+    /// Whether some item is still in the Trash with nothing in its old
+    /// place, so Put Back can move it.
     public var canPutBack: Bool {
-        guard putBack == nil, let trashed, !trashed.isEmpty else { return false }
-        let fm = FileManager.default
-        return trashed.allSatisfy { fm.fileExists(atPath: $0.inTrash) && !fm.fileExists(atPath: $0.original) }
+        guard putBack == nil, let trashed else { return false }
+        return trashed.contains(where: \.canRestore)
+    }
+
+    /// Moves back what can go. What stayed remains in the entry for another
+    /// try, and the bytes of what came back stop counting as freed. Returns
+    /// the names of the items still in the Trash.
+    @discardableResult
+    public mutating func putBackFromTrash() -> [String] {
+        let items = trashed ?? []
+        let restored = items.filter { $0.canRestore && $0.restore() }
+        let remaining = items.filter { !restored.contains($0) }
+        if remaining.isEmpty {
+            putBack = .now
+            bytes = 0
+        } else {
+            trashed = remaining
+            bytes = max(bytes - restored.reduce(0) { $0 + DiskUsage.allocated(URL(fileURLWithPath: $1.original)) }, 0)
+        }
+        return remaining.map { URL(fileURLWithPath: $0.original).lastPathComponent }
     }
 }
 
@@ -43,25 +60,37 @@ public struct Trashed: Codable, Sendable, Equatable {
         self.inTrash = inTrash.path
     }
 
+    /// Still in the Trash, and nothing took its old place.
+    public var canRestore: Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: inTrash) && !fm.fileExists(atPath: original)
+    }
+
+    func restore() -> Bool {
+        let to = URL(fileURLWithPath: original)
+        do {
+            try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            try FileManager.default.moveItem(at: URL(fileURLWithPath: inTrash), to: to)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     /// Moves the items back; returns the names that could not go.
     public static func putBack(_ items: [Trashed]) -> [String] {
-        let fm = FileManager.default
-        return items.compactMap { item in
-            let to = URL(fileURLWithPath: item.original)
-            do {
-                try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try fm.moveItem(at: URL(fileURLWithPath: item.inTrash), to: to)
-                return nil
-            } catch {
-                return to.lastPathComponent
-            }
-        }
+        items.filter { !$0.restore() }.map { URL(fileURLWithPath: $0.original).lastPathComponent }
     }
 }
 
 /// Everything ZC Care did, kept on disk, newest last.
 public struct ActivityLog: Codable, Sendable, Equatable {
     public var entries: [ActivityEntry] = []
+    /// Set when a corrupt file could not be moved aside: saving would overwrite it.
+    public private(set) var readOnly = false
+
+    private enum CodingKeys: String, CodingKey { case entries }
 
     public init(entries: [ActivityEntry] = []) {
         self.entries = entries
@@ -108,10 +137,20 @@ public struct ActivityLog: Codable, Sendable, Equatable {
 
     public static func load(from url: URL) -> ActivityLog {
         guard let data = try? Data(contentsOf: url) else { return ActivityLog() }
-        return (try? JSONDecoder().decode(ActivityLog.self, from: data)) ?? ActivityLog()
+        if let log = try? JSONDecoder().decode(ActivityLog.self, from: data) { return log }
+        // The next save would overwrite what Put Back still needs: keep the file.
+        let stamp = Int(Date.now.timeIntervalSince1970)
+        var log = ActivityLog()
+        do {
+            try FileManager.default.moveItem(at: url, to: url.appendingPathExtension("broken-\(stamp)"))
+        } catch {
+            log.readOnly = true
+        }
+        return log
     }
 
     public func save(to url: URL) throws {
+        guard !readOnly else { throw CocoaError(.fileWriteNoPermission) }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(self).write(to: url, options: .atomic)
     }

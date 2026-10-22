@@ -28,7 +28,7 @@ struct ScriptRunner: Runner {
         Check(name: "security automatic update checks", status: "fail", detail: "sudo softwareupdate --schedule on"),
         Check(name: "security Time Machine backups", status: "fail", detail: "System Settings, General, Time Machine: add a backup disk"),
     ]
-    #expect(Fix.rootCommands(for: checks) == "socketfilterfw --setglobalstate on; softwareupdate --schedule on")
+    #expect(Fix.rootCommands(for: checks) == "socketfilterfw --setglobalstate on && softwareupdate --schedule on")
     #expect(Fix.rootCommands(for: [checks[1], checks[3]]) == nil)
     #expect(Fix.pane(for: checks[3].detail!).absoluteString.hasSuffix("Time-Machine-Settings.extension"))
 }
@@ -68,4 +68,10 @@ struct ScriptRunner: Runner {
     #expect(script.contains(#"ssh-keygen -t ed25519 -C 'o'\''neil@example.com' -f "$key""#))
     #expect(script.contains("--type authentication") && script.contains("--type signing"))
     #expect(script.contains("ssh-add --apple-use-keychain"))
+}
+
+@Test func joinedStepsRunAsOneCommandAndNoneRunsNothing() {
+    let steps = [Fix.RootStep(title: "a", command: "spctl --master-enable"), Fix.RootStep(title: "b", command: "softwareupdate --schedule on")]
+    #expect(Fix.joined(steps) == "spctl --master-enable && softwareupdate --schedule on")
+    #expect(Fix.joined([]) == nil)
 }

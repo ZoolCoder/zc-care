@@ -13,16 +13,19 @@ Usage:
   zc-care validate [flags]        check the config offline
   zc-care doctor   [-json] [-fix] health: system, config, programs, targets; -fix plans
                                  the fixes it can make
-  zc-care undo     [-n N] [-plan] revert the last apply, from what it replaced
+  zc-care undo     [-n N | -id id] [-list] [-plan] [-json] [-yes] [-data d]
+                                revert the last apply, from what it replaced
   zc-care upgrade  [flags]        save what is outdated, then upgrade it
-  zc-care history  [-n 20] [-json] what was applied, newest first
-  zc-care drift    [-last] [-json] count what differs from the config, and save it;
-                                 -plist prints a launchd agent that runs it daily
+  zc-care history  [-n 20] [-json] [-data d]
+                                what was applied, newest first
+  zc-care drift    [-config f] [-json] [-last] [-plist [-hour h]]
+                                count what differs from the config, and save it; exit 1 when
+                                it cannot plan; -plist prints a launchd agent that runs it daily
   zc-care add      -target t -why w [-section s] kind:name
                                 declare an item in t's manifest; plan and apply install it
-  zc-care export   [-o file] [-config f] [-target t]
+  zc-care export   [-o file [-force]] [-config f] [-target t]
                                 save what this Mac has, per target, as JSON
-  zc-care diff     [-json] a.json [b.json]
+  zc-care diff     [-json] [-exit-code] [-config f] a.json [b.json]
                                 what differs between two exports, or one and this Mac
   zc-care mcp                     stdio MCP server for agents
   zc-care remove   -target t kind:name
@@ -40,29 +43,42 @@ Exit codes:
   0  nothing to do, or the apply converged and was verified
   1  something failed
   2  with -exit-code: changes are outstanding
-  3  with -exit-code: nothing left but MANUAL items
+  3  with -exit-code: nothing left but MANUAL items; undo: nothing left but
+     MANUAL items, even without it
 
 Flags:
   -config string   config file, or "-" for standard input; default: $ZC_CARE_CONFIG,
                    then ./zc-care.yaml, then ~/.config/zc-care/zc-care.yaml
   -target value    limit to this target; repeat for several
   -yes             skip the confirmation prompt for deletions, overwrites of outside
-                   edits and scripts
-  -exit-code       plan: exit 2 for changes, 3 for manual-only
+                   edits or unrestorable values, and scripts
+  -exit-code       plan: exit 2 for changes, 3 for manual-only; diff: exit 2 when the
+                   snapshots differ
   -upgrade         plan and apply: also upgrade outdated packages and runtimes
   -only value      plan and apply: only the change to this resource, such as
                    brew:tmux; repeat for several
   -remove item     plan and apply: only uninstall this item, kind:name, and drop it
                    from -target's manifest
-  -json            plan, status and list: machine-readable
+  -json            plan, status, list, apply, validate, diff, doctor, history, drift
+                   and init: machine-readable; undo: the plan as JSON, changes nothing;
+                   capture does not take it
   -out string      plan: save the plan, to apply exactly what you reviewed;
                    capture: write the manifest to this file, not stdout
-  -force           capture: overwrite the -out file
+  -force           capture and export: overwrite the output file
+  -o file          export: write the snapshot to this file, not stdout
   -state list      list: only these states, comma-separated (missing,outdated,...)
   -kind list       list: only these kinds, comma-separated (brew,cask,dotfile,...)
   -adoc            list: the declared packages and runtimes, with why each is
                    there, as an AsciiDoc page
   -fix             doctor: plan the fixes it can make, and apply them after a yes
-  -n N             undo: revert the last N applies (default 1); -id picks one by
-                   the id -list shows; -plan shows the reverts and changes nothing
+  -n N             undo: revert the last N applies (default 1); history: show N
+                   entries (default 20)
+  -id id           undo: revert this journal entry, as -list shows it; not with -n
+  -list            undo: list what can be undone; init: show the profiles
+  -plan            undo: show the reverts and change nothing
+  -data dir        undo and history: the folder of the activity log and undo journal
+  -item kind:name  add and remove: the item, instead of the first argument
+  -last            drift: print the last saved drift, without planning
+  -plist           drift: print a launchd agent that runs drift every morning
+  -hour N          drift -plist: the hour to run at, 0 to 23 (default 9)
 ----

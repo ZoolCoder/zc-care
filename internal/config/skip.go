@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -30,8 +31,43 @@ func SkipPath() string {
 }
 
 // ReadSkip lists the resources in a skip file, such as cask:ghostty, one a
-// line; # starts a comment. No file is an empty list.
-func ReadSkip(path string) ([]string, error) { return readList(path, "skip list") }
+// line; # starts a comment. No file is an empty list. A line without a known
+// kind is not an error, so a hand edit never blocks every command: it comes
+// back in ignored for the caller to warn about.
+func ReadSkip(path string) (valid, ignored []string, err error) {
+	list, err := readList(path, "skip list")
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, entry := range list {
+		if ValidSkipItem(entry) {
+			valid = append(valid, entry)
+		} else {
+			ignored = append(ignored, entry)
+		}
+	}
+	return valid, ignored, nil
+}
+
+// ValidSkipItem reports whether item is kind:name with a known kind.
+func ValidSkipItem(item string) bool {
+	kind, name, ok := strings.Cut(item, ":")
+	return ok && name != "" && slices.Contains(skipKinds, kind)
+}
+
+// SkipKinds are the kinds a skip item can name.
+func SkipKinds() []string { return slices.Clone(skipKinds) }
+
+// WarnIgnoredSkips tells w about the skip lines ReadSkip left out.
+func WarnIgnoredSkips(w io.Writer, ignored []string) {
+	for _, line := range ignored {
+		fmt.Fprintf(w, "warning: skip: ignoring %s\n", line)
+	}
+}
+
+// skipKinds are the kinds the packages provider names its resources by, the
+// only provider that reads the skip list.
+var skipKinds = []string{"brew", "cask", "mas", "tap"}
 
 // readList reads a file of one name a line; # starts a comment.
 func readList(path, what string) ([]string, error) {

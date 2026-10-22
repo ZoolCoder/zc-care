@@ -15,13 +15,15 @@ struct SmartCareView: View {
                     CleanupCard(care: care)
                     PerformanceCard(care: care)
                 }
-                .frame(width: 230)
+                .frame(minWidth: 170, idealWidth: 230, maxWidth: 230)
                 HealthCard(care: care)
+                    .frame(minWidth: 220)
+                    .layoutPriority(1)
                 VStack(spacing: 14) {
                     UpdatesCard(care: care)
                     ClutterCard(care: care)
                 }
-                .frame(width: 230)
+                .frame(minWidth: 170, idealWidth: 230, maxWidth: 230)
             }
             .padding(.horizontal, 28)
             TuneUp(care: care)
@@ -39,11 +41,11 @@ struct SmartCareView: View {
     }
 
     private var canRun: Bool {
-        care.scannedAt != nil && (care.junk > 0 || !(care.store.snapshot?.outdated.isEmpty ?? true))
+        care.scannedAt != nil && (care.junk + care.ai > 0 || !(care.store.snapshot?.outdated.isEmpty ?? true))
     }
 
     private var summary: String {
-        canRun ? "Run cleans up \(Store.bytes(care.junk)) and updates \(care.store.snapshot?.outdated.count ?? 0) packages."
+        canRun ? "Run cleans up \(Store.bytes(care.junk + care.ai)) and updates \(Store.counted(care.store.snapshot?.outdated.count ?? 0, "package"))."
             : "Your Mac is in good shape."
     }
 }
@@ -305,6 +307,7 @@ private struct HealthCard: View {
                             Button("Fix") { Task { await care.store.fix(c) } }
                                 .controlSize(.small)
                                 .help(c.detail ?? "")
+                                .gatedOnBusy(care.store)
                         }
                     }
                 }

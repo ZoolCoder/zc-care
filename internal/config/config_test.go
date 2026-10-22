@@ -62,7 +62,17 @@ func TestParseRefusesUnknownKeys(t *testing.T) {
 	}
 }
 
+// isolate points the skip and profiles files at an empty directory, so a test
+// never reads the developer's own.
+func isolate(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv(EnvSkip, filepath.Join(dir, "skip"))
+	t.Setenv(EnvProfiles, filepath.Join(dir, "profiles"))
+}
+
 func TestLoadResolvesPathsAgainstTheFile(t *testing.T) {
+	isolate(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tool.yaml")
 	if err := os.WriteFile(path, []byte("version: 1\ntargets:\n  - {name: a, provider: localdir, path: out}\n"), 0o600); err != nil {
@@ -128,6 +138,7 @@ func TestResolveExpandsHomeAndRelativePaths(t *testing.T) {
 }
 
 func TestExampleConfigIsValid(t *testing.T) {
+	isolate(t)
 	if _, err := Load(filepath.Join("..", "..", "zc-care.example.yaml"), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -135,13 +146,13 @@ func TestExampleConfigIsValid(t *testing.T) {
 
 func TestSkipListRoundTrips(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "zc", "skip")
-	if got, err := ReadSkip(path); err != nil || got != nil {
+	if got, _, err := ReadSkip(path); err != nil || got != nil {
 		t.Fatalf("no file: %v, %v", got, err)
 	}
 	if err := WriteSkip(path, []string{"cask:zed", "brew:tmux", "cask:zed"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := ReadSkip(path)
+	got, _, err := ReadSkip(path)
 	if err != nil || strings.Join(got, ",") != "brew:tmux,cask:zed" {
 		t.Fatalf("read %v, %v", got, err)
 	}
@@ -182,5 +193,82 @@ func TestProfilesAreKebabCaseAndRoundTrip(t *testing.T) {
 	}
 	if got, err := ReadProfiles(path); err != nil || strings.Join(got, ",") != "developer,work" {
 		t.Fatalf("read %v %v", got, err)
+	}
+}
+
+func TestParseRefusesPathsItDoesNotExpand(t *testing.T) {
+	for _, path := range []string{"$HOME/x", "${HOME}/x", "~root/x", "~x", "a/$B"} {
+		_, err := Parse([]byte("version: 1\ntargets:\n  - name: n\n    provider: localdir\n    path: " + `"` + path + `"` + "\n"))
+		if err == nil || !strings.Contains(err.Error(), "is not supported") {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+	for _, path := range []string{"~", "~/x", "/abs/x", "rel/x"} {
+		if _, err := Parse([]byte("version: 1\ntargets:\n  - name: n\n    provider: localdir\n    path: " + `"` + path + `"` + "\n")); err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+}
+
+func TestParseRefusesASecondYAMLDocument(t *testing.T) {
+	_, err := Parse([]byte("version: 1\n---\nversion: 2\n"))
+	if err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
+		t.Fatalf("second document accepted: %v", err)
+	}
+	if _, err := Parse([]byte("version: 1\n")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSkipListRefusesAnUnknownKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "skip")
+	for _, bad := range []string{"casks:zed", "zed"} {
+		if err := os.WriteFile(path, []byte("brew:tmux\n"+bad+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		valid, ignored, err := ReadSkip(path)
+		if err != nil || len(valid) != 1 || len(ignored) != 1 || ignored[0] != bad {
+			t.Errorf("%s: %v %v %v", bad, valid, ignored, err)
+		}
+	}
+	if err := os.WriteFile(path, []byte("brew:tmux\ncask:zed\nmas:Xcode\ntap:a/b\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if valid, ignored, err := ReadSkip(path); err != nil || len(valid) != 4 || len(ignored) != 0 {
+		t.Fatal(valid, ignored, err)
+	}
+}
+
+func TestParseAcceptsATrailingEmptyDocumentButNotASecondOne(t *testing.T) {
+	base := "version: 1\ntargets: []\n"
+	for _, tail := range []string{"---\n", "---\n# nothing\n", "---\nnull\n"} {
+		if _, err := Parse([]byte(base + tail)); err != nil {
+			t.Errorf("tail %q: %v", tail, err)
+		}
+	}
+	_, err := Parse([]byte(base + "---\nversion: 1\n"))
+	if err == nil || !strings.Contains(err.Error(), "more than one YAML document") {
+		t.Fatalf("a second document: %v", err)
+	}
+}
+
+func TestReadSkipIgnoresUnknownEntriesAndLoadStillWorks(t *testing.T) {
+	dir := t.TempDir()
+	skip := filepath.Join(dir, "skip")
+	t.Setenv(EnvSkip, skip)
+	if err := os.WriteFile(skip, []byte("cask:zed\nzed\nfoo:bar\nbrew:\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	valid, ignored, err := ReadSkip(skip)
+	if err != nil || strings.Join(valid, ",") != "cask:zed" || strings.Join(ignored, ",") != "brew:,foo:bar,zed" {
+		t.Fatalf("valid %v ignored %v err %v", valid, ignored, err)
+	}
+	cfgPath := filepath.Join(dir, "zc.yaml")
+	body := "version: 1\ntargets:\n  - name: brew\n    provider: packages\n    file: Brewfile\n"
+	if err := os.WriteFile(cfgPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(cfgPath, nil); err != nil {
+		t.Fatalf("Load failed on a bad skip line: %v", err)
 	}
 }

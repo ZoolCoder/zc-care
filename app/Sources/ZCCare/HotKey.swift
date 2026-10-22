@@ -12,8 +12,11 @@ final class HotKey {
         self.action = action
     }
 
-    func register() {
-        guard ref == nil else { return }
+    /// The status of the registration: noErr, or why the shortcut is not
+    /// ours, such as another app holding ⌃⌥Z.
+    @discardableResult
+    func register() -> OSStatus {
+        guard ref == nil else { return noErr }
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, _, data in
             guard let data else { return noErr }
@@ -23,8 +26,8 @@ final class HotKey {
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
         let id = EventHotKeyID(signature: OSType(0x5A43_4252), id: 1) // "ZCBR"
-        RegisterEventHotKey(UInt32(kVK_ANSI_Z), UInt32(controlKey | optionKey), id,
-                            GetApplicationEventTarget(), 0, &ref)
+        return RegisterEventHotKey(UInt32(kVK_ANSI_Z), UInt32(controlKey | optionKey), id,
+                                   GetApplicationEventTarget(), 0, &ref)
     }
 
     func unregister() {

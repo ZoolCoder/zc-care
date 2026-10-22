@@ -13,6 +13,8 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/xml"
+	"errors"
 	"fmt"
 	"mime"
 	"net/url"
@@ -22,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/zoolcoder/zc-care/internal/config"
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/provider"
 	"github.com/zoolcoder/zc-care/internal/sh"
@@ -233,8 +236,10 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 				if _, err := p.runStore(ctx, "write", t.Wallpaper); err != nil {
 					return err
 				}
-				// The agent draws from the store only when it starts.
-				return p.r.Run(ctx, "killall", "WallpaperAgent")
+				// The agent draws from the store only when it starts; one that is
+				// not running has nothing to restart.
+				_ = p.r.Run(ctx, "killall", "WallpaperAgent")
+				return nil
 			}})
 	}
 	switch l.screensaver.state {
@@ -243,13 +248,8 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 	case provider.Differs:
 		actions = append(actions, plan.Action{Op: plan.OpUpdate, Target: t.Name, Resource: "screensaver",
 			Detail: "show " + filepath.Base(t.Screensaver) + " in WebViewScreenSaver; pick it once in System Settings, Screen Saver",
-			Do: func(ctx context.Context) error {
-				if err := p.r.Run(ctx, "plutil", "-replace", defaultURLKey, "-string", l.page, infoPlist(l.saver)); err != nil {
-					return err
-				}
-				// Editing Info.plist breaks the bundle's seal; sign it again, ad hoc as built.
-				return p.r.Run(ctx, "codesign", "--force", "--sign", "-", l.saver)
-			}})
+			Digest: provider.Digest([]byte(l.page)),
+			Do:     func(ctx context.Context) error { return p.pointSaver(ctx, l.saver, l.page) }})
 	}
 	if l.accent.state == provider.Differs {
 		a := accents[t.Accent]
@@ -263,6 +263,92 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 			}})
 	}
 	return actions, nil
+}
+
+// pointSaver sets the saver's page and signs the bundle again. Editing
+// Info.plist breaks the bundle's seal; the signature is ad hoc, as built. If
+// signing fails the plist goes back as it was, so the next plan still sees the
+// page as not set and tries again.
+func (p Provider) pointSaver(ctx context.Context, saver, page string) error {
+	plist := infoPlist(saver)
+	orig, err := os.ReadFile(plist)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(plist)
+	if err != nil {
+		return err
+	}
+	if err := p.setSaverPage(ctx, plist, page); err != nil {
+		return err
+	}
+	if err := p.r.Run(ctx, "codesign", "--force", "--sign", "-", saver); err != nil {
+		if rerr := manifest.WriteFile(plist, orig, info.Mode().Perm()); rerr != nil {
+			return errors.Join(err, fmt.Errorf("put back %s: %w", plist, rerr))
+		}
+		return err
+	}
+	return nil
+}
+
+// setSaverPage puts page into the plist. The page is a whole HTML file as a
+// data URL, too long for one command-line argument, so the plist goes out as
+// XML text, takes the key, and comes back through a temp file. The XML form
+// keeps every value as it is: a JSON round trip would turn a real into an
+// integer and refuse a date or data value.
+func (p Provider) setSaverPage(ctx context.Context, plist, page string) error {
+	out, err := p.r.Output(ctx, "plutil", "-convert", "xml1", "-o", "-", plist)
+	if err != nil {
+		return err
+	}
+	doc, err := withPlistString(string(out), defaultURLKey, page)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", plist, err)
+	}
+	tmp, err := os.CreateTemp("", "zc-care-saver-*.plist")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	_, werr := tmp.WriteString(doc)
+	if err := errors.Join(werr, tmp.Close()); err != nil {
+		return err
+	}
+	// plutil rewrites its output in place; point it at a file beside the
+	// plist and rename, so a failure leaves the plist whole.
+	info, err := os.Stat(plist)
+	if err != nil {
+		return err
+	}
+	converted := filepath.Join(filepath.Dir(plist), fmt.Sprintf(".Info.plist.zc-care-%d", os.Getpid()))
+	defer func() { _ = os.Remove(converted) }()
+	if err := p.r.Run(ctx, "plutil", "-convert", "xml1", "-o", converted, tmp.Name()); err != nil {
+		return err
+	}
+	if err := os.Chmod(converted, info.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Rename(converted, plist)
+}
+
+var plistEnd = regexp.MustCompile(`\n?</dict>\s*</plist>\s*$`)
+
+// withPlistString returns the XML plist doc with key set to value, replaced
+// in place or added to the top-level dict.
+func withPlistString(doc, key, value string) (string, error) {
+	var escaped strings.Builder
+	if err := xml.EscapeText(&escaped, []byte(value)); err != nil {
+		return "", err
+	}
+	entry := "<key>" + key + "</key>\n\t<string>" + escaped.String() + "</string>"
+	existing := regexp.MustCompile(`<key>` + regexp.QuoteMeta(key) + `</key>\s*(?:<string/>|<string>[^<]*</string>)`)
+	if existing.MatchString(doc) {
+		return existing.ReplaceAllLiteralString(doc, entry), nil
+	}
+	if !plistEnd.MatchString(doc) {
+		return "", errors.New("not an XML plist with a top-level dict")
+	}
+	return plistEnd.ReplaceAllLiteralString(doc, "\n\t"+entry+"\n</dict>\n</plist>\n"), nil
 }
 
 func manual(t config.Target, key string, s state) plan.Action {

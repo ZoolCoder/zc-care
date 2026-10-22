@@ -37,7 +37,7 @@ public struct ProcessRunner: Runner {
                 DispatchQueue.global().async { launch(executable, args, env: env, child: child) }
             }
         } onCancel: {
-            child.stop(CancellationError())
+            child.stop(CancellationError(), gracefully: true)
         }
     }
 
@@ -134,13 +134,22 @@ private final class Child: @unchecked Sendable {
         return true
     }
 
-    func stop(_ error: any Error) {
+    /// A graceful stop sends SIGINT and keeps waiting for the exit, up to
+    /// ten seconds, so the program can cancel what is left and write its
+    /// records; then it is killed. Any other stop ends the wait at once.
+    func stop(_ error: any Error, gracefully: Bool = false) {
         lock.lock()
         guard stopped == nil else { return lock.unlock() }
         stopped = error
+        let p = process
+        if gracefully, let p {
+            lock.unlock()
+            Foundation.kill(p.processIdentifier, SIGINT)
+            DispatchQueue.global().asyncAfter(deadline: .now() + 10) { Self.kill(p) }
+            return
+        }
         let waiting = continuation
         continuation = nil
-        let p = process
         process = nil
         lock.unlock()
         waiting?.resume(throwing: error)
@@ -148,8 +157,12 @@ private final class Child: @unchecked Sendable {
     }
 
     func finish(returning result: CommandResult) {
-        lock.withLock { process = nil }
-        take()?.resume(returning: result)
+        let stopped = lock.withLock { () -> (any Error)? in
+            process = nil
+            return self.stopped
+        }
+        // A graceful stop waited for this exit: report the stop, not the result.
+        if let stopped { take()?.resume(throwing: stopped) } else { take()?.resume(returning: result) }
     }
 
     func finish(throwing error: any Error) {

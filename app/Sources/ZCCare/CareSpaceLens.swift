@@ -19,7 +19,8 @@ struct SpaceLensView: View {
                 let node = focus.flatMap(root.find) ?? root
                 HStack(alignment: .top, spacing: 24) {
                     Sunburst(node: node, hover: $hover) { focus = $0.path }
-                        .frame(width: 420, height: 420)
+                        .frame(minWidth: 240, idealWidth: 420, maxWidth: 420)
+                        .aspectRatio(1, contentMode: .fit)
                         .overlay {
                             VStack(spacing: 4) {
                                 Text((hover ?? node).name).font(.headline).lineLimit(1)
@@ -54,23 +55,30 @@ struct SpaceLensView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .help("Show in Finder")
+                                    if SpaceLens.canTrash(child.path, home: NSHomeDirectory()) {
+                                        Button { trash(child) } label: {
+                                            Image(systemName: "trash").accessibilityLabel(removalVerb(care.store))
+                                        }
+                                        .buttonStyle(.plain)
+                                        .help(removalVerb(care.store))
+                                        .gatedOnBusy(care.store)
+                                    }
                                 }
                                 .padding(.vertical, 5)
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .help(child.children.isEmpty ? child.name : "Open \(child.name)")
                             .contextMenu {
                                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: child.path)]) }
                                 if SpaceLens.canTrash(child.path, home: NSHomeDirectory()) {
                                     Divider()
-                                    Button("Move to Trash…") {
-                                        Task { await care.trash(LargeFile(url: URL(fileURLWithPath: child.path), size: child.size)) }
-                                    }
-                                    .disabled(care.store.busy != nil)
+                                    Button(removalVerb(care.store) + "…") { trash(child) }
+                                        .gatedOnBusy(care.store)
                                 }
                             }
                         }
-                        Text("Control-click a folder to move it to the Trash. Your home folder's own folders, hidden ones, the Library and synced folders stay.")
+                        Text("Use a folder's trash button to \(care.store.deletesPermanently ? "delete" : "move") it\(care.store.deletesPermanently ? "" : " to the Trash"). Your home folder's own folders, hidden ones, the Library and synced folders stay.")
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 10)
@@ -118,6 +126,10 @@ struct SpaceLensView: View {
             }
             .padding(.bottom, 10)
         }
+    }
+
+    private func trash(_ node: SpaceNode) {
+        Task { await care.trash(LargeFile(url: URL(fileURLWithPath: node.path), size: node.size)) }
     }
 
     private static func module(_ destination: SpaceDestination) -> Care.Module {

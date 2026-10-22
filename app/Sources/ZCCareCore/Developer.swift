@@ -46,6 +46,7 @@ public enum ProjectDependencies {
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]
         let children = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
         for child in children {
+            if Task.isCancelled { return }
             let v = try? child.resourceValues(forKeys: Set(keys))
             guard v?.isDirectory == true, v?.isSymbolicLink != true, v?.isPackage != true else { continue }
             let name = child.lastPathComponent
@@ -60,23 +61,38 @@ public enum ProjectDependencies {
         }
     }
 
-    /// The newest change among the project's own entries and those of its
-    /// folders: editing src/app.ts changes neither src nor the project.
-    /// .git counts, as a commit or a pull is work on it.
+    /// How many entries lastTouched reads before it settles for what it has.
+    static let touchedEntryCap = 2000
+
+    /// The newest change among the project's own entries and those in its
+    /// folders three levels down: editing src/app/main.ts changes none of
+    /// the folders above it. A commit or a pull is work too, and moves
+    /// .git/index or .git/HEAD. A project too big to read in full counts as
+    /// touched now: its idleness cannot be shown.
     static func lastTouched(project: URL, skipping: String) -> Date {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isDirectoryKey]
-        func entries(_ folder: URL) -> [URL] {
-            ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: Array(keys))) ?? [])
-                .filter { $0.lastPathComponent != ".DS_Store" }
-        }
         var newest = Date.distantPast
-        for entry in entries(project) where entry.lastPathComponent != skipping {
-            let v = try? entry.resourceValues(forKeys: keys)
-            newest = max(newest, v?.contentModificationDate ?? .distantPast)
-            guard v?.isDirectory == true, !entry.lastPathComponent.hasPrefix("."), kinds[entry.lastPathComponent] == nil else { continue }
-            for inner in entries(entry) {
-                newest = max(newest, (try? inner.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast)
+        var seen = 0
+        var capped = false
+        func visit(_ folder: URL, depth: Int) {
+            let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: Array(keys))) ?? []
+            for entry in entries where entry.lastPathComponent != ".DS_Store" {
+                guard seen < touchedEntryCap, !Task.isCancelled else { capped = true; return }
+                seen += 1
+                let name = entry.lastPathComponent
+                if folder == project, name == skipping { continue }
+                let v = try? entry.resourceValues(forKeys: keys)
+                newest = max(newest, v?.contentModificationDate ?? .distantPast)
+                if v?.isDirectory == true, depth > 1, !name.hasPrefix("."), kinds[name] == nil {
+                    visit(entry, depth: depth - 1)
+                }
             }
+        }
+        visit(project, depth: 3)
+        if capped { return .now }
+        for name in ["index", "HEAD"] {
+            let url = project.appendingPathComponent(".git/" + name)
+            newest = max(newest, (try? url.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast)
         }
         return newest
     }
@@ -112,18 +128,27 @@ public enum AIModels {
         var all: [Layer] { (config.map { [$0] } ?? []) + layers }
     }
 
+    /// A manifest comes from a registry: only a plain sha256 digest may name a blob file.
+    static func isBlobDigest(_ digest: String) -> Bool {
+        digest.range(of: "^sha256:[0-9a-f]{64}$", options: .regularExpression) != nil
+    }
+
     /// manifests/<registry>/<namespace>/<model>/<tag>, each naming its
     /// blobs by digest; blobs/sha256-<hex> holds them. A blob two models
     /// share stays until the last one goes.
     static func ollama(root: URL) -> [AIModel] {
         guard let files = FileManager.default.enumerator(at: root.appendingPathComponent("manifests"), includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
         var read: [(url: URL, manifest: Manifest)] = []
-        for case let url as URL in files where (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
-            guard let data = try? Data(contentsOf: url), let m = try? JSONDecoder().decode(Manifest.self, from: data) else { continue }
-            read.append((url, m))
-        }
         var users: [String: Int] = [:]
-        for (_, m) in read { for d in Set(m.all.map(\.digest)) { users[d, default: 0] += 1 } }
+        let base = root.appendingPathComponent("manifests").resolvingSymlinksInPath().pathComponents.count
+        for case let url as URL in files where (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+            // Only registry/namespace/model/tag files are manifests: a .DS_Store is not one.
+            guard !url.lastPathComponent.hasPrefix("."), url.resolvingSymlinksInPath().pathComponents.count == base + 4 else { continue }
+            // A manifest that does not decode may share any blob, so no blob is safe to remove.
+            guard let data = try? Data(contentsOf: url), let m = try? JSONDecoder().decode(Manifest.self, from: data) else { return [] }
+            for d in Set(m.all.map(\.digest)) { users[d, default: 0] += 1 }
+            if m.all.allSatisfy({ isBlobDigest($0.digest) }) { read.append((url, m)) }
+        }
         return read.map { url, m in
             // The enumerator may answer with /private/var for /var: count from the end.
             let parts = url.pathComponents.suffix(3)

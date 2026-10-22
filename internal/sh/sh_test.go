@@ -2,10 +2,12 @@ package sh
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecOutputCarriesStderr(t *testing.T) {
@@ -56,5 +58,69 @@ func TestAskpassOnlyWithoutTerminal(t *testing.T) {
 	t.Setenv("SUDO_ASKPASS", "/bin/mine")
 	if env := askpassEnv(); env != nil {
 		t.Fatal("overrode the caller's SUDO_ASKPASS")
+	}
+}
+
+func TestAskpassReplacesAPlantedSymlink(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	path, err := writeAskpass()
+	if err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeAskpass(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "keep" {
+		t.Fatalf("wrote through the link: %q", b)
+	}
+	fi, err := os.Lstat(path)
+	if err != nil || fi.Mode()&os.ModeSymlink != 0 || fi.Mode().Perm() != 0o700 {
+		t.Fatalf("askpass is %v, %v", fi, err)
+	}
+}
+
+func TestOutputReturnsPromptlyAfterCancel(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	// The background sleep inherits the output pipe and outlives the shell.
+	_, err := (Exec{}).Output(ctx, "sh", "-c", "sleep 30 & sleep 30")
+	if err == nil {
+		t.Fatal("cancelled command succeeded")
+	}
+	if took := time.Since(start); took > 15*time.Second {
+		t.Fatalf("Output took %v after cancel", took)
+	}
+}
+
+func TestAGrandchildHoldingTheOutputOpenIsNotAFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the 5s kill grace")
+	}
+	if !(Exec{}).Has("sh") {
+		t.Skip("sh is not on PATH")
+	}
+	var buf strings.Builder
+	e := Exec{Stdout: &buf, Stderr: &buf}
+	if err := e.Run(context.Background(), "sh", "-c", "sleep 20 & echo hi"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(buf.String(), "hi") {
+		t.Fatalf("output %q", buf.String())
+	}
+	out, err := Exec{}.Output(context.Background(), "sh", "-c", "sleep 20 & echo hi")
+	if err != nil || strings.TrimSpace(string(out)) != "hi" {
+		t.Fatalf("Output %q, %v", out, err)
 	}
 }

@@ -8,6 +8,7 @@ public enum DiskUsage {
         guard let files = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [key],
                                                          errorHandler: { _, _ in true }) else { return total }
         for case let file as URL in files {
+            if Task.isCancelled { break }
             total += Int64((try? file.resourceValues(forKeys: [key]))?.totalFileAllocatedSize ?? 0)
         }
         return total
@@ -208,14 +209,18 @@ public enum AppCatalog {
 public enum Leftovers {
     /// The app and every leftover uninstalling trashes, each with its size
     /// on disk; what the ignore list names stays, so it is not listed.
-    public static func files(of app: InstalledApp, home: String, ignoring ignore: IgnoreList = IgnoreList()) -> [LargeFile] {
-        let leftovers = paths(bundleID: app.bundleID, name: app.name, home: home)
-            .filter { !ignore.covers($0) }
+    public static func files(of app: InstalledApp, home: String, ignoring ignore: IgnoreList = IgnoreList(),
+                             installed: Set<String> = []) -> [LargeFile] {
+        let leftovers = paths(bundleID: app.bundleID, name: app.name, home: home, installed: installed)
+            .filter { !ignore.touches($0) }
             .map { URL(fileURLWithPath: $0) }
         return ([app.url] + leftovers).map { LargeFile(url: $0, size: DiskUsage.allocated($0)) }
     }
 
-    public static func paths(bundleID: String?, name: String, home: String) -> [String] {
+    /// `installed` holds the bundle ids of the installed apps: an agent or
+    /// setting that belongs to another app whose id extends this one's, as
+    /// com.google.Chrome.canary does com.google.Chrome, stays.
+    public static func paths(bundleID: String?, name: String, home: String, installed: Set<String> = []) -> [String] {
         let lib = home + "/Library/"
         var candidates = [lib + "Application Support/" + name, lib + "Logs/" + name]
         if let id = bundleID {
@@ -235,11 +240,20 @@ public enum Leftovers {
             // com.x.app.helper.plist or com.x.app.<host id>.plist.
             for folder in ["LaunchAgents", "Preferences/ByHost"] {
                 candidates += ((try? FileManager.default.contentsOfDirectory(atPath: lib + folder)) ?? [])
-                    .filter { $0.hasPrefix(id + ".") && $0.hasSuffix(".plist") }
+                    .filter { $0.hasPrefix(id + ".") && $0.hasSuffix(".plist") && !belongsToOther($0, id: id, installed) }
                     .map { lib + folder + "/" + $0 }
             }
         }
         return candidates.filter { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    private static func belongsToOther(_ file: String, id: String, _ installed: Set<String>) -> Bool {
+        let own = id.lowercased() + "."
+        let file = file.lowercased()
+        return installed.contains { other in
+            let other = other.lowercased()
+            return other.hasPrefix(own) && file.hasPrefix(other + ".")
+        }
     }
 
     /// The launch agents among the paths: launchd keeps running them until

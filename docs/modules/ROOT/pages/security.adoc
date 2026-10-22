@@ -5,10 +5,18 @@
 
 * *Nothing is applied that was not shown.* A saved plan refuses to apply when
   the machine changed since. ZC Care plans again before applying. The
-  dotfiles provider applies only the planned paths.
+  dotfiles provider applies only the planned paths. A plan also records a
+  digest of the content it will write, so a source file edited after the
+  review is refused as a moved live state. A keychain secret is never hashed
+  into a saved plan, so the digest covers the manifest entry (the reference),
+  not the resolved value: a secret rotated between `plan -o` and `apply FILE`
+  is written without the plan noticing. The dotfiles digest covers the chezmoi
+  source file, not the rendered result, so a change in template data alone is
+  not noticed either.
 * *Deletions need a person.* The CLI and ZC Care ask, and the MCP server
   cancels.
-* *Nothing is uninstalled.* The packages provider only installs.
+* *Nothing is uninstalled unasked.* Apply only installs. `remove` and `undo`
+  uninstall, as a DELETE you confirm at a terminal; agents get only the plan.
 * *Nothing is upgraded unless a target asks.* `upgrade: true` is per target,
   and each upgrade is a planned `UPDATE` you review first.
 * *Capture never replaces a file.* It writes standard output, or a new file;
@@ -20,26 +28,44 @@
 * *The protocol stream stays clean.* Under `mcp`, installers get empty input
   and their output is captured, never written to the protocol stream.
 * *An agent's plan goes stale.* The MCP server refuses a saved plan older
-  than an hour, and writes every tool call to `mcp-audit.jsonl` in its state
+  than 10 minutes, or one already applied, and writes every tool call to `mcp-audit.jsonl` in its state
   folder. Every apply, from the terminal, ZC Care or an agent, lands in
   `zc-care history`.
 
 == What doctor checks
 
-`zc-care doctor` reads, and changes nothing. A weak setting is a
-warning, not a failure: the choice is yours.
+`zc-care doctor` reads, and by default changes nothing. A weak setting is a
+warning, not a failure: the choice is yours. `doctor -fix` acts: it lists the root commands for the failing checks that
+have one, asks for a yes, runs them and checks again. Checks that need a
+choice or System Settings, such as AirDrop and the automatic update settings
+(macOS then installs updates and restarts on its own), stay advice. `doctor` runs
+unprivileged, so a daemon that runs as root and listens on every interface is
+not listed.
 
 * *macOS:* FileVault, the firewall and stealth mode, a password after sleep,
-  Gatekeeper, System Integrity Protection, automatic updates, File Sharing,
-  Remote Login, Screen Sharing, automatic login, AirDrop open to everyone,
-  Touch ID for `sudo`, and servers listening on every interface.
-* *Every system:* SSH private keys without a passphrase, git commits left
-  unsigned, and secrets in the shell history. `gitleaks` scans
+  a screen saver idle time, Gatekeeper, System Integrity Protection,
+  automatic update checks, downloads and macOS installs, security responses
+  and system files installing on their own (`CriticalUpdateInstall` and
+  `ConfigDataInstall`), Time Machine backups (a backup disk is set), File
+  Sharing, Remote Login, Screen Sharing, automatic login, the Guest account,
+  AirDrop open to everyone, Touch ID for `sudo`, and servers listening on
+  every interface or a LAN address (loopback-only listeners are ignored). The AirPlay Receiver listener shows under that name, with the fix in System Settings > General > AirDrop & Handoff.
+  A Gatekeeper that is switched off fails even though `spctl` exits non-zero.
+* *Tools targets:* when the shell has activated mise, whether every mise
+  command runs from mise. A copy earlier on `PATH`, such as Homebrew's, is a
+  warning that names the first few shadowed commands.
+* A check that could not read its answer, because a tool timed out or
+  failed, is reported as `unknown` with the tool's message, never as a pass
+  or a fail. `doctor -fix` does not count such a check as still failing.
+* *Every system:* SSH private keys without a passphrase (the check skips `config`, `known_hosts*`, `authorized_keys*`, `allowed_signers` and similar files that hold no key; FIDO `sk-` keys
+  are skipped, since the token is the second factor), git commits not
+  signed with an existing SSH key (`gpg.format ssh`, `user.signingkey` and
+  `commit.gpgsign`), an SSH key file that cannot be parsed (unknown), and secrets in the shell history. `gitleaks` scans
   `~/.zsh_history`, `~/.bash_history`, the fish history and Atuin's, with
   `--redact`: the report names the rule and the count, never the secret.
 * *AI agents:* API keys written in plain text in the MCP configs of Claude
   Code, Claude Desktop, Cursor, Gemini, Windsurf and Codex; MCP servers that
-  `npx`, `bunx` or `uvx` start without a version; Claude Code rules that allow
+  `npx`, `bunx`, `uvx`, `pnpx`, `npm exec`, `pnpm dlx`, `yarn dlx` or `bun x` start without a version; Claude Code rules that allow
   any shell command, and `bypassPermissions`.
 
 == What it does not

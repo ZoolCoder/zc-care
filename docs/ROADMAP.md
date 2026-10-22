@@ -26,6 +26,13 @@ concrete next tasks are in [TODO.md](../TODO.md).
   removed, the CLI shipped inside ZC Care.
 - ZCBar renamed ZC Care, with Cloud Cleanup, Settings, an ignore list, Put
   Back, vitals alerts and a review of every item before it is deleted.
+- The release `v0.2.0`:
+  - `undo` and `doctor -fix`
+  - `export` and `diff` to compare two Macs
+  - `init`, `profile` and `skip`, and Set Up This Mac in the app
+  - `${keychain:...}` references in agents manifests
+  - cleanups that go to the Trash by default
+  - Space Lens growth tracking, and Docker and Xcode in Developer
 
 ## Now
 

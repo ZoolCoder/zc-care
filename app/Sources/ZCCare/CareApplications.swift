@@ -14,7 +14,7 @@ struct ApplicationsView: View {
     var body: some View {
         VStack(spacing: 0) {
             CareHeader(title: "Applications", subtitle: "\(Store.counted(care.apps.count, "app")), \(Store.bytes(total)) in all",
-                   busy: care.loadingApps, action: ("Rescan", { Task { await care.loadApps() } }))
+                   busy: care.loadingApps, action: ("Rescan", { care.orphans = nil; Task { await care.loadApps() } }))
             HStack {
                 Picker("", selection: $filter) {
                     ForEach(Filter.allCases, id: \.self) { Text($0.rawValue) }
@@ -51,11 +51,12 @@ struct ApplicationsView: View {
                                 Button("Adopt") { Task { await care.adopt(app) } }
                                     .controlSize(.small)
                                     .help("Install as cask \(token) over this copy, and add it to the Brewfile")
-                                    .disabled(care.store.busy != nil)
+                                    .gatedOnBusy(care.store)
                             }
-                            Button("Uninstall") { Task { await care.uninstall(app) } }
+                            Button("Uninstall") { Task { await care.uninstall(app); care.orphans = nil } }
                                 .controlSize(.small)
-                                .disabled(care.store.busy != nil)
+                                .help("Uninstall (\(removalVerb(care.store)))")
+                                .gatedOnBusy(care.store)
                             Menu {
                                 Button("Reset \(app.name)…") { Task { await care.reset(app) } }
                                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
@@ -65,8 +66,8 @@ struct ApplicationsView: View {
                             .menuStyle(.borderlessButton)
                             .menuIndicator(.hidden)
                             .fixedSize()
-                            .help("Reset: trash its settings, caches and data, and keep the app")
-                            .disabled(care.store.busy != nil)
+                            .help("Reset \(app.name) (\(care.store.deletesPermanently ? "deletes" : "trashes") its settings, caches and data, and keeps the app) or Show in Finder")
+                            .gatedOnBusy(care.store)
                         }
                         if expanded == app.id { AppFiles(care: care, app: app) }
                         }
@@ -131,6 +132,7 @@ private struct AppFiles: View {
                             Button { NSWorkspace.shared.activateFileViewerSelecting([file.url]) } label: { Image(systemName: "magnifyingglass") }
                                 .buttonStyle(.borderless)
                                 .help("Show in Finder")
+                                .accessibilityLabel("Show in Finder")
                         }
                         .contextMenu { if file.url != app.url { IgnoreMenu(store: care.store, url: file.url) } }
                     }
@@ -144,10 +146,13 @@ private struct AppFiles: View {
         .padding(.trailing, 14)
         .padding(.bottom, 8)
         .task(id: [app.id] + care.store.ignoreList.paths) {
-            let app = app, home = NSHomeDirectory(), ignore = care.store.ignoreList
-            files = await Task.detached(priority: .userInitiated) {
-                Leftovers.files(of: app, home: home, ignoring: ignore)
+            let app = app, home = NSHomeDirectory(), ignore = care.store.ignoreList, installed = care.installedIDs
+            let found = await Task.detached(priority: .userInitiated) {
+                Leftovers.files(of: app, home: home, ignoring: ignore, installed: installed)
             }.value
+            // A newer task owns `files` once this one is cancelled.
+            guard !Task.isCancelled else { return }
+            files = found
         }
     }
 }
@@ -184,10 +189,10 @@ private struct LeftoverList: View {
                         .padding(.leading, 8)
                     }
                     HStack {
-                        Text("Named for apps macOS no longer knows. Check before trashing: a command-line tool may still use its settings.")
+                        Text("Named for apps macOS no longer knows. Check before removing: a command-line tool may still use its settings.")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
-                        Button("Move \(picked.count) to Trash") {
+                        Button(care.store.deletesPermanently ? "Delete \(picked.count)" : "Move \(picked.count) to Trash") {
                             Task {
                                 await care.trashOrphans(orphans.filter { picked.contains($0.id) })
                                 picked.formIntersection(care.orphans?.map(\.id) ?? [])
@@ -208,6 +213,6 @@ private struct LeftoverList: View {
             .padding(.horizontal, 28)
             .padding(.bottom, 70)
         }
-        .task { if care.orphans == nil { await care.loadOrphans() } }
+        .task(id: care.orphans == nil) { if care.orphans == nil { await care.loadOrphans() } }
     }
 }

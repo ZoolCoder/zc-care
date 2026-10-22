@@ -22,6 +22,10 @@ antora:
     - zc-supplemental-ui/extensions/llms
     - zc-supplemental-ui/extensions/og-image
 
+runtime:
+  log:
+    format: json
+
 site:
   title: ZC Care
   # Required for canonical URLs, og:url and sitemap generation.

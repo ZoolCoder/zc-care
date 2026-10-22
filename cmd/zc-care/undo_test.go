@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +22,18 @@ const oldContent = "zshrc-7f3a\n"
 // the file.
 func journaled(t *testing.T) (data, file string) {
 	t.Helper()
+	return journaledWith(t, true)
+}
+
+// journaledRevertible is journaled without the change that keeps no record,
+// so undo can put back everything in the entry.
+func journaledRevertible(t *testing.T) (data, file string) {
+	t.Helper()
+	return journaledWith(t, false)
+}
+
+func journaledWith(t *testing.T, unrecorded bool) (data, file string) {
+	t.Helper()
 	data = t.TempDir()
 	file = filepath.Join(t.TempDir(), ".zshrc")
 	if err := os.WriteFile(file, []byte("new\n"), 0o644); err != nil {
@@ -30,8 +43,10 @@ func journaled(t *testing.T) (data, file string) {
 		Data: map[string]string{"path": file, "mode": "600"}, Blob: []byte(oldContent)}
 	outcomes := []engine.Outcome{
 		{Target: "dots", Resource: ".zshrc", Undo: &undo},
-		{Target: "notes", Resource: "a.txt"},
 		{Target: "dots", Resource: "failed", Err: errors.New("boom")},
+	}
+	if unrecorded {
+		outcomes = append(outcomes, engine.Outcome{Target: "notes", Resource: "a.txt"})
 	}
 	if err := saveJournal(data, outcomes, "apply"); err != nil {
 		t.Fatal(err)
@@ -41,7 +56,7 @@ func journaled(t *testing.T) (data, file string) {
 
 func TestJournalKeepsBlobsPrivateAndOutOfTheEntry(t *testing.T) {
 	data, _ := journaled(t)
-	entries, err := loadJournal(data)
+	entries, err := loadJournal(data, io.Discard)
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("entries %+v, %v", entries, err)
 	}
@@ -93,7 +108,7 @@ func TestUndoJSONPrintsThePlan(t *testing.T) {
 }
 
 func TestUndoNeedsAYesThenRestoresAndIsNotRepeated(t *testing.T) {
-	data, file := journaled(t)
+	data, file := journaledRevertible(t)
 	if _, err := run(t, "", "undo", "-data", data); !errors.Is(err, errCancelled) {
 		t.Fatalf("no answer: %v", err)
 	}
@@ -117,11 +132,11 @@ func TestUndoNeedsAYesThenRestoresAndIsNotRepeated(t *testing.T) {
 }
 
 func TestUndoRefusesAnUnknownOrFinishedEntry(t *testing.T) {
-	data, _ := journaled(t)
+	data, _ := journaledRevertible(t)
 	if _, err := run(t, "", "undo", "-data", data, "-id", "nope"); err == nil {
 		t.Fatal("unknown id accepted")
 	}
-	entries, _ := loadJournal(data)
+	entries, _ := loadJournal(data, io.Discard)
 	if _, err := run(t, "yes\n", "undo", "-data", data, "-id", entries[0].ID); err != nil {
 		t.Fatal(err)
 	}
@@ -137,16 +152,16 @@ func TestUndoWithNothingRecorded(t *testing.T) {
 }
 
 func TestAnUndoIsRecordedInHistoryButNotJournaled(t *testing.T) {
-	data, _ := journaled(t)
+	data, _ := journaledRevertible(t)
 	if _, err := run(t, "yes\n", "undo", "-data", data); err != nil {
 		t.Fatal(err)
 	}
-	// History writes to the default data folder (the test's own), the journal
-	// of this test lives in data and must not have grown.
-	if entries, _ := loadJournal(data); len(entries) != 1 {
+	// The undo logs to the -data folder, and the journal there must not have
+	// grown.
+	if entries, _ := loadJournal(data, io.Discard); len(entries) != 1 {
 		t.Fatalf("undo journaled itself: %+v", entries)
 	}
-	out, err := run(t, "", "history", "-n", "5")
+	out, err := run(t, "", "history", "-data", data, "-n", "5")
 	if err != nil || !strings.Contains(out, "from undo") {
 		t.Fatalf("history %v:\n%s", err, out)
 	}

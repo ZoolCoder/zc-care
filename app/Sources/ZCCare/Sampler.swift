@@ -114,7 +114,7 @@ struct Sampler {
             var offset = 0
             while offset + MemoryLayout<if_msghdr>.size <= length {
                 let header = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr.self)
-                if Int32(header.ifm_type) == RTM_IFINFO2 {
+                if Int32(header.ifm_type) == RTM_IFINFO2, offset + MemoryLayout<if_msghdr2>.size <= length {
                     let info = raw.loadUnaligned(fromByteOffset: offset, as: if_msghdr2.self)
                     if UInt32(info.ifm_index) == index { return (info.ifm_data.ifi_ibytes, info.ifm_data.ifi_obytes) }
                 }

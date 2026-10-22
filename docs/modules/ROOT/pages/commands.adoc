@@ -6,7 +6,7 @@
 | Command | What it does
 
 | `plan` | Read live state and list what would change. The default.
-| `apply [FILE]` | Make the changes, then plan again to verify. With a saved plan, exactly those.
+| `apply [FILE]` | Make the changes, then plan again to verify. With a saved plan, exactly those. Targets that were `MANUAL` only because the apply had not installed their tool yet (dotfiles before chezmoi) run in one second pass, unless they delete or need a confirmation, and never from a saved plan; otherwise the apply exits `1` and says how many changes became possible, so you run `apply` again.
 | `status` | What is in place per target, without diffing.
 | `list` | Every package, app, dotfile and runtime the config declares, one line each: its state, installed version, the app it configures, and why it is there. Then what is installed but declared nowhere.
 | `add ITEM` | Declare a package or runtime in one target's manifest, with why it is there. Installs nothing; `plan` and `apply` do.
@@ -16,10 +16,13 @@
 | `diff A.json [B.json]` | What differs between two snapshots, or between one and this Mac. See <<Compare two Macs>>.
 | `doctor` | Machine health: binary, system, config, the programs targets need, and each target. It also warns about weak security settings, keys without a passphrase, unsigned commits, secrets in the shell history and risky AI agent configs, each with its fix. xref:security.adoc#_what_doctor_checks[Every check].
 | `upgrade` | Save what is outdated to the state folder, then `apply -upgrade`. The review skill reads the snapshot to say what moved from what to what.
-| `doctor -fix` | Run `doctor`, then plan a fix for each failing security check that has one, as `sudo` commands where they need root. It lists the exact commands, asks for a yes, runs them and checks again. A finding with no command, such as FileVault, stays advice.
+| `doctor -fix` | Run `doctor`, then plan a fix for each failing security check that has one, as `sudo` commands where they need root. It lists the exact commands, asks for a yes, runs them and checks again. A finding with no command, such as FileVault, stays advice. After the fixes it reads the fixed checks again and prints `fixed and verified`, `still failing after the fix: NAME` (exit 1), or `could not verify NAME` when a check can no longer be read.
 | `undo` | Put back what the last `apply` replaced, or the last `-n N`, or one entry (`-id`, from `-list`). It plans the reverse, shows it and asks first when it uninstalls or overwrites. `-plan` shows it and changes nothing; `-json` prints it. See xref:#_undo[Undo].
 | `history` | What was applied, newest first: when, which target, from the terminal, ZC Care or an agent, and whether it worked. Drift changes show here too.
-| `drift` | Plan, and save how many changes are outstanding to `~/.local/state/zc-care/drift.json`, which ZC Care shows. `-last` prints the saved one; `-plist` prints a launchd agent that runs it every morning.
+| `drift` | Plan, and save how many changes are outstanding to `~/.local/state/zc-care/drift.json`, which ZC Care shows, with a `manual` count for `MANUAL` items. It exits 1 when it cannot plan. `-last` prints the saved one; `-plist` prints a launchd agent that runs it every morning.
+| `init` | Write a starter config for this Mac and save its profiles. Installs nothing. See xref:getting-started.adoc[Getting started] and <<_init_profile_and_skip,Init, profile and skip>>.
+| `profile [NAME...]` | Show or set who this Mac is for. A target with `profiles` applies only on a Mac with one of them. See xref:configuration.adoc[Writing a config].
+| `skip [KIND:NAME...]` | List or change the packages this Mac does not install. See xref:new-machine.adoc[A new Mac in one command].
 | `mcp` | The MCP server on standard input and output.
 | `version` | The version.
 |===
@@ -28,23 +31,71 @@
 
 [cols="1,3"]
 |===
-| `-config FILE` | Config file, or `-` for standard input.
+| `-config FILE` | Config file, or `-` for standard input. Every command that reads the config takes it, `diff` and `export` too.
 | `-target NAME` | Limit to this target; repeat for several.
 | `-out FILE` | `plan`: save the plan for `apply FILE`. `capture`: write the manifest to `FILE` instead of standard output.
-| `-force` | `capture -out`: overwrite `FILE` if it exists.
+| `-force` | `capture -out`, `export -o`: overwrite `FILE` if it exists.
 | `-state LIST` | `list`: only these states, comma-separated, such as `outdated,not declared`.
 | `-kind LIST` | `list`: only these kinds, comma-separated, such as `cask,mas`.
 | `-adoc` | `list`: the declared packages and runtimes as an AsciiDoc page, one table per section.
 | `-why TEXT` | `add`: one line on why the item is there.
 | `-section NAME` | `add`: the manifest section to add it under; a new name starts a new section.
-| `-json` | `plan`, `status`, `list`, `doctor` and `diff`: machine-readable.
-| `-exit-code` | `plan`: exit 2 for changes, 3 for manual-only.
+| `-item ITEM` | `add`, `remove`: the item as `kind:name`, instead of the first argument.
+| `-json` | `plan`, `status`, `list`, `apply`, `validate`, `doctor`, `diff`, `undo`, `history`, `drift`, `init`, `profile` and `skip`: machine-readable. `undo -json` prints the reverse plan and changes nothing; `capture` has no JSON form.
+| `-exit-code` | `plan`: exit 2 for changes, 3 for manual-only. `diff`: exit 2 when the two snapshots differ.
 | `-upgrade` | `plan`, `apply`: also upgrade outdated packages and runtimes, as if every `packages` and `tools` target said `upgrade: true`.
 | `-only RESOURCE` | `plan`, `apply`: only the change to this resource, such as `brew:tmux`; repeat for several. A saved plan remembers `-upgrade` and `-only`.
 | `-fix` | `doctor`: plan and apply the fixes, after a yes. Cannot be combined with `-json`.
-| `-n N`, `-id ID`, `-list` | `undo`: how many applies to revert, which one, or list them.
-| `-yes` | `apply`, `undo`, `doctor -fix`: skip the confirmation prompt.
+| `-n N` | `history`: how many entries to show, 20 by default. `undo`: how many applies to revert.
+| `-id ID`, `-list`, `-plan` | `undo`: which entry to revert, list them, or show the reverse and change nothing.
+| `-yes` | `apply`, `remove`, `undo`, `upgrade`, `doctor -fix`: skip the confirmation prompt.
+| `-remove ITEM` | `plan`, `apply`: only uninstall this item, as `kind:name`. `remove` uses it.
+| `-via WHO` | `apply`: who asked, for the history; `the terminal` by default. Agents and ZC Care set it; you do not need to.
+| `-data DIR` | `undo`, `history`: the folder of the activity log, instead of the default data folder (`undo` also keeps its `undo/` journal there).
+| `-last`, `-plist`, `-hour N` | `drift`: print the saved count, print the launchd agent, and the hour it runs at (9 by default, 0 to 23).
+| `-o FILE` | `export`: write the snapshot to `FILE`, mode 0600, instead of standard output. Refuses an existing file without `-force`.
 |===
+
+`-h` after any subcommand prints that subcommand's flags.
+
+== Init, profile and skip
+
+These three set up a Mac that has no config yet, or a config shared by several
+Macs. The walk-through is in xref:getting-started.adoc[Getting started]; the
+keys they feed are in xref:configuration.adoc[Writing a config].
+
+`init` writes a starter config and installs nothing; `plan` and `apply` come
+next. It puts the packages of other profiles' sections on this Mac's skip
+list and saves the Mac's profiles.
+
+[source,console]
+----
+$ zc-care init -list
+$ zc-care init -profile developer -role work
+$ zc-care init -profile developer,creative -from-mac -dir ~/dotfiles/zc-care
+----
+
+* `-profile p[,p]`: who the Mac is for, comma-separated.
+* `-role ROLE`: what it is for, such as `work` or `personal`.
+* `-from-mac`: also keep the apps this Mac has installed.
+* `-dir DIR`: where to write the config; `~/.config/zc-care` by default.
+* `-force`: replace files that are there.
+* `-list`: show the profiles and roles, and write nothing.
+* `-json`: machine-readable output.
+
+`profile` shows this Mac's profiles; with names it replaces them, and `-clear`
+drops them all, so every target applies again. A name is kebab case, such as
+`developer`. `-json` prints the list.
+
+`skip` lists the packages this Mac does not install. Pass items as `kind:name`
+to add them, and `-undo` to take them off. A skipped package that is missing
+stays out of `plan`, `apply` and `drift`; one already installed is untouched.
+
+[source,console]
+----
+$ zc-care skip cask:ghostty brew:colima
+$ zc-care skip -undo cask:ghostty
+----
 
 == Compare two Macs
 
@@ -179,7 +230,7 @@ history. Pass `-yes` to skip the prompt.
 ----
 $ zc-care remove -target packages brew:htop
 DELETE  packages  brew:htop  uninstall with brew and drop it from /Users/me/config/Brewfile
-this plan deletes things, overwrites edits made outside the tool or runs scripts. type yes to continue: yes
+this plan deletes things, overwrites edits made outside the tool or values undo cannot restore, or runs scripts. type yes to continue: yes
 $ zc-care remove -target packages mas:409201541
 ----
 
@@ -199,18 +250,38 @@ it and runs it through the same engine.
 
 * A setting goes back to its old value and type, or is deleted if it was not
   set before.
-* A dotfile is restored from a private copy (mode `0600`, never in the
-  history), or removed if the apply created it.
+* A dotfile, a local-directory file, an agent client's config or rules file
+  is restored from a private copy (mode `0600`, never in the history), or
+  removed if the apply created it.
 * A package the apply installed is uninstalled; one it removed is reinstalled.
   Undo does not edit the manifest: after an uninstall the next `plan` installs
   the package again, and a reinstalled one needs its line added back.
 
 Some changes are listed as `MANUAL` with the reason, because there is no safe
 way back: upgrades and runtime installs (no downgrades), dotfile scripts, and
-settings that hold an array or a dictionary. Uninstalling and overwriting a
-file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
+settings that hold an array or a dictionary, which is why `apply` asks before
+overwriting one (the plan line says so). Uninstalling and overwriting a file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
 `history` as from `undo`, but it cannot be undone, and neither can
 `doctor -fix`. The MCP server does not offer `undo`.
+
+An undo that fails half way remembers what it already put back: the next
+`undo` of the same entry skips those and retries the rest. Changes that
+cannot be undone exit 3, in two cases. An entry with changes that need a
+person stays open and prints `N change(s) must be put back by hand; the entry
+stays open`. An entry with only changes that cannot be undone lists them once
+and closes, so the next `undo` moves on. An apply that failed while writing a
+dotfile keeps a partial record, labelled `partial`, so the file's previous
+content can still be restored. Undo refuses to uninstall a cask that adopted
+an app already in `/Applications` or `~/Applications`, since removing it
+would take the app too.
+
+== State and data folders
+
+The state folder, which holds saved plans, `mcp-audit.jsonl`, `drift.json`
+and `upgrades/`, is `$XDG_STATE_HOME/zc-care`, else `~/.local/state/zc-care`.
+The activity log and the `undo/` journal live in `$XDG_DATA_HOME/zc-care`,
+else `~/.local/share/zc-care`. `history -data` and `undo -data` override the
+activity-log location.
 
 == Capture
 
@@ -269,8 +340,8 @@ number, on the menu bar and in SketchyBar's `zccare` item.
 |===
 | `0` | Nothing to do, or the apply converged and was verified.
 | `1` | Something failed.
-| `2` | With `-exit-code`: changes are outstanding.
-| `3` | With `-exit-code`: nothing left but `MANUAL` items.
+| `2` | With `-exit-code`: changes are outstanding, or `diff` found a difference.
+| `3` | With `-exit-code`: nothing left but `MANUAL` items. `undo`: the entry had changes that cannot be undone, listed for you. Changes that need a person leave the entry open; an entry with only un-undoable changes closes.
 |===
 
 == JSON

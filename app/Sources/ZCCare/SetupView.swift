@@ -43,6 +43,7 @@ struct SetupView: View {
         .themed()
         .ignoresSafeArea()
         .task { await load() }
+        .onChange(of: step) { error = nil }
     }
 
     private var title: (String, String) {
@@ -116,10 +117,17 @@ struct SetupView: View {
                 Text(busy).font(.callout).foregroundStyle(.secondary)
             } else if step == .who {
                 Button("Later", action: close).keyboardShortcut(.cancelAction)
+            } else {
+                Button("Back") { step = previous }
             }
             Spacer()
             switch step {
             case .who:
+                if error != nil {
+                    Button("Try Again") { Task { error = nil; await load() } }
+                } else if picked.isEmpty, catalog != nil {
+                    Text("Pick at least one profile to write a config.").font(.caption).foregroundStyle(.secondary)
+                }
                 Button(store.needsConfig ? "Create My Config" : "Save") { Task { await save() } }
                     .keyboardShortcut(.defaultAction)
                     .disabled(picked.isEmpty || store.busy != nil)
@@ -136,6 +144,14 @@ struct SetupView: View {
         .padding(.vertical, 20)
     }
 
+    private var previous: Step {
+        switch step {
+        case .who, .secure: .who
+        case .identity: .secure
+        case .done: picked.contains("developer") ? .identity : .secure
+        }
+    }
+
     private func toggle(_ name: String) {
         if picked.remove(name) == nil { picked.insert(name) }
     }
@@ -148,6 +164,7 @@ struct SetupView: View {
 
     /// Reads the profiles on offer, and who the Mac is for already.
     private func load() async {
+        error = nil
         await store.connected()
         guard let cli = store.setupCLI else {
             error = store.setupProblem
@@ -201,6 +218,9 @@ private struct ProfileCard: View {
         .padding(12)
         .contentShape(Rectangle())
         .modifier(Card())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(profile.title), \(profile.about)")
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var symbol: String {
@@ -284,7 +304,8 @@ private struct SecureStep: View {
             loaded = true
         }
         .sheet(isPresented: $previewing) {
-            RootPreview(steps: Fix.rootSteps(for: failing)) { Task { await store.secureAll() } }
+            let steps = Fix.rootSteps(for: failing)
+            RootPreview(steps: steps) { Task { await store.secureAll(steps) } }
         }
     }
 

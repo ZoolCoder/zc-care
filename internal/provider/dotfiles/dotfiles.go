@@ -80,16 +80,19 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 }
 
 // errMissing is a dotfiles target this machine cannot read yet.
-type errMissing struct{ msg string }
+type errMissing struct {
+	msg     string
+	waiting bool // chezmoi itself is missing
+}
 
 func (e errMissing) Error() string { return e.msg }
 
 func (p Provider) ready(t config.Target) error {
 	if !p.r.Has("chezmoi") {
-		return errMissing{"chezmoi is not on PATH; install chezmoi first"}
+		return errMissing{"chezmoi is not on PATH; install chezmoi first", true}
 	}
 	if _, err := os.Stat(t.Source); err != nil {
-		return errMissing{"source " + t.Source + " is missing; clone the dotfiles repo there"}
+		return errMissing{"source " + t.Source + " is missing; clone the dotfiles repo there", false}
 	}
 	return nil
 }
@@ -98,7 +101,7 @@ func (p Provider) ready(t config.Target) error {
 func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, error) {
 	cs, err := p.changes(ctx, t)
 	if missing := (errMissing{}); errors.As(err, &missing) {
-		return []plan.Action{{Op: plan.OpManual, Target: t.Name, Resource: "chezmoi", Detail: missing.Error()}}, nil
+		return []plan.Action{{Op: plan.OpManual, Target: t.Name, Resource: "chezmoi", Detail: missing.Error(), Waiting: missing.waiting}}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -117,6 +120,7 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		actions = append(actions, plan.Action{
 			Op: c.op, Target: t.Name, Resource: c.path, Detail: detail,
 			Destructive: c.outside || c.script,
+			Digest:      p.digest(ctx, t, filepath.Join(dest, c.path)),
 			Before: func(context.Context) (plan.Undo, error) {
 				return before(filepath.Join(dest, c.path), c.script)
 			},
@@ -128,6 +132,20 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		})
 	}
 	return actions, nil
+}
+
+// digest fingerprints the source file behind file, template text included and
+// never its rendered output, so no secret is hashed. Empty when unreadable.
+func (p Provider) digest(ctx context.Context, t config.Target, file string) string {
+	src, err := p.r.Output(ctx, "chezmoi", args(t, "source-path", file)...)
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(strings.TrimSpace(string(src)))
+	if err != nil {
+		return ""
+	}
+	return provider.Digest(b)
 }
 
 // managed lists the files and symlinks the source manages, as relative paths.

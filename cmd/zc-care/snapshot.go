@@ -18,11 +18,15 @@ const snapshotVersion = 1
 // snapshot is what zc-care sees of one Mac: every target's items with their
 // live state. It holds paths and hashes, never the content of a file.
 type snapshot struct {
-	Version int          `json:"version"`
-	Host    string       `json:"host"`
-	MacOS   string       `json:"macos"`
-	Date    string       `json:"date"`
-	Targets []snapTarget `json:"targets"`
+	Version int    `json:"version"`
+	Host    string `json:"host"`
+	MacOS   string `json:"macos"`
+	Date    string `json:"date"`
+	// Config is the absolute path of the config the snapshot was read
+	// through, and Selection the -target list; both empty in older snapshots.
+	Config    string       `json:"config,omitempty"`
+	Selection []string     `json:"selection,omitempty"`
+	Targets   []snapTarget `json:"targets"`
 }
 
 type snapTarget struct {
@@ -58,7 +62,7 @@ func (i snapItem) value() string {
 		parts = append(parts, i.Version)
 	}
 	if i.Hash != "" {
-		parts = append(parts, "sha256:"+i.Hash[:8])
+		parts = append(parts, "sha256:"+i.Hash[:min(len(i.Hash), 8)])
 	}
 	if len(parts) == 0 {
 		return i.State

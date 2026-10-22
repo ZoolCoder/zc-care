@@ -1,9 +1,12 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
@@ -13,7 +16,9 @@ import (
 	"time"
 
 	"github.com/zoolcoder/zc-care/internal/engine"
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
+	"github.com/zoolcoder/zc-care/internal/provider"
 )
 
 const viaUndo = "undo"
@@ -28,17 +33,20 @@ type journalEntry struct {
 	Via    string      `json:"via"`
 	Undone bool        `json:"undone,omitempty"`
 	Undos  []plan.Undo `json:"undos"`
+	// Reverted holds the indexes of the undos already put back, so an undo
+	// that failed half way is not repeated. Older entries lack it.
+	Reverted []int `json:"reverted,omitempty"`
 }
 
 func journalDir(dataDir string) string { return filepath.Join(dataFolder(dataDir), "undo") }
 
-// saveJournal records the successful outcomes of one apply. A change that
-// kept no record of what it replaced is still listed, so undo can say it
-// cannot reverse it.
+// saveJournal records the successful outcomes of one apply, and the failed
+// ones that kept a partial record. A change that kept no record of what it
+// replaced is still listed, so undo can say it cannot reverse it.
 func saveJournal(dataDir string, outcomes []engine.Outcome, via string) error {
 	var undos []plan.Undo
 	for _, o := range outcomes {
-		if o.Err != nil {
+		if o.Err != nil && (o.Undo == nil || !o.Undo.Partial) {
 			continue
 		}
 		u := plan.Undo{Target: o.Target, Resource: o.Resource,
@@ -54,23 +62,59 @@ func saveJournal(dataDir string, outcomes []engine.Outcome, via string) error {
 		return nil
 	}
 	now := time.Now()
-	e := journalEntry{ID: now.UTC().Format("20060102T150405.000"), At: now, Via: via}
+	e := journalEntry{ID: newJournalID(now), At: now, Via: via}
 	dir := journalDir(dataDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
+	newest := newestPerPath(undos)
 	for n, u := range undos {
 		if len(u.Blob) > 0 {
 			path := filepath.Join(dir, fmt.Sprintf("%s.%d.blob", e.ID, n))
-			if err := os.WriteFile(path, u.Blob, 0o600); err != nil {
+			if err := manifest.WriteFile(path, u.Blob, 0o600); err != nil {
 				return err
 			}
 			u.Data = maps.Clone(u.Data)
+			if u.Data == nil {
+				u.Data = map[string]string{}
+			}
 			u.Data["blob"] = path
+		}
+		// The apply is over, so the file holds what it wrote. Only the
+		// newest record of a path is stamped: undo reverts it first, and
+		// the older record would then find the file in the middle state.
+		if newest[n] {
+			u = provider.StampFileUndo(u)
 		}
 		e.Undos = append(e.Undos, u)
 	}
 	return e.write(dir)
+}
+
+// newestPerPath marks the index of the last undo for each file path; undos
+// without a path are all marked.
+func newestPerPath(undos []plan.Undo) map[int]bool {
+	last := map[string]int{}
+	for n, u := range undos {
+		if p := u.Data["path"]; p != "" {
+			last[p] = n
+		}
+	}
+	newest := map[int]bool{}
+	for n, u := range undos {
+		if p := u.Data["path"]; p == "" || last[p] == n {
+			newest[n] = true
+		}
+	}
+	return newest
+}
+
+// newJournalID sorts by time; the random tail keeps two saves in the same
+// clock tick apart.
+func newJournalID(now time.Time) string {
+	var tail [3]byte
+	_, _ = rand.Read(tail[:])
+	return now.UTC().Format("20060102T150405.000000000") + "-" + hex.EncodeToString(tail[:])
 }
 
 func (e journalEntry) write(dir string) error {
@@ -78,12 +122,12 @@ func (e journalEntry) write(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, e.ID+".json"), raw, 0o600)
+	return manifest.WriteFile(filepath.Join(dir, e.ID+".json"), raw, 0o600)
 }
 
 // loadJournal reads every entry, newest first. A file that does not parse is
-// skipped: it is not worth blocking the others.
-func loadJournal(dataDir string) ([]journalEntry, error) {
+// skipped with a warning to warn: it is not worth blocking the others.
+func loadJournal(dataDir string, warn io.Writer) ([]journalEntry, error) {
 	dir := journalDir(dataDir)
 	files, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -99,20 +143,46 @@ func loadJournal(dataDir string) ([]journalEntry, error) {
 		}
 		raw, err := os.ReadFile(filepath.Join(dir, f.Name()))
 		var e journalEntry
-		if err == nil && json.Unmarshal(raw, &e) == nil && e.ID != "" {
-			entries = append(entries, e)
+		if err == nil {
+			err = json.Unmarshal(raw, &e)
 		}
+		if err == nil && e.ID == "" {
+			err = errors.New("no id")
+		}
+		if err != nil {
+			fmt.Fprintf(warn, "warning: skipping undo journal file %s: %v\n", f.Name(), err)
+			continue
+		}
+		entries = append(entries, e)
 	}
 	slices.SortFunc(entries, func(a, b journalEntry) int { return strings.Compare(b.ID, a.ID) })
 	return entries, nil
 }
 
-// markUndone keeps an entry from being picked again.
-func markUndone(dataDir string, entries []journalEntry) error {
+// markProgress records which of the entries' undos reverted says were put
+// back, marks an entry undone when none is left to do, and returns how many
+// changes are still to do. An undo that can never be reversed is shown to the
+// person once, in the run that reports it, and counts as acknowledged: it is
+// recorded as handled so the entry can close, and acked says how many.
+func markProgress(dataDir string, entries []journalEntry, reverted func(id string, i int) bool) (left, acked int, err error) {
 	var errs []error
 	for _, e := range entries {
-		e.Undone = true
+		remaining := 0
+		for i, u := range e.Undos {
+			switch {
+			case u.Nothing() || slices.Contains(e.Reverted, i):
+			case u.Reason != "":
+				e.Reverted = append(e.Reverted, i)
+				acked++
+			case reverted(e.ID, i):
+				e.Reverted = append(e.Reverted, i)
+			default:
+				remaining++
+			}
+		}
+		e.Undone = remaining == 0
+		left += remaining
 		errs = append(errs, e.write(journalDir(dataDir)))
 	}
-	return errors.Join(errs...)
+	return left, acked, errors.Join(errs...)
 }

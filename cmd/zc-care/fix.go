@@ -50,7 +50,7 @@ func fixPlan(results []security.Result, r sh.Runner) plan.Plan {
 // fixFindings plans the repairs for the failed checks, shows them, applies
 // them after a yes, and re-runs the checks it repaired. A finding with no
 // command stays advice in the report.
-func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, yes bool, stdin io.Reader, stdout io.Writer) error {
+func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, yes bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	p := fixPlan(results, r)
 	if p.Empty() {
 		_, err := fmt.Fprintln(stdout, "\nnothing doctor can fix on its own; the rest is advice above")
@@ -65,8 +65,13 @@ func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, ye
 	}
 	fmt.Fprintln(stdout)
 	outcomes, err := engine.Run(ctx, p, stdout)
-	recordApply(outcomes, viaDoctor)
-	if err = errors.Join(err, stillFailing(ctx, p, r)); err == nil {
+	recordApply("", outcomes, viaDoctor, stderr)
+	unverified, failing := stillFailing(ctx, p, r)
+	err = errors.Join(err, failing)
+	for _, name := range unverified {
+		fmt.Fprintf(stdout, "could not verify %s\n", name)
+	}
+	if err == nil && len(unverified) == 0 {
 		_, err = fmt.Fprintln(stdout, "fixed and verified")
 	}
 	return err
@@ -74,19 +79,25 @@ func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, ye
 
 // stillFailing re-runs the security checks and names any the fixes did not
 // repair, since a command that exits 0 can still leave the setting as it was.
-func stillFailing(ctx context.Context, fixed plan.Plan, r sh.Runner) error {
+// A repaired check that now cannot be read is neither: it is returned apart,
+// as unverified.
+func stillFailing(ctx context.Context, fixed plan.Plan, r sh.Runner) (unverified []string, failing error) {
 	repaired := map[string]bool{}
 	for _, a := range fixed.Actions {
 		repaired[a.Resource] = true
 	}
 	var left []string
 	for _, res := range security.New(r).Run(ctx) {
-		if repaired[res.Name] && !res.OK {
+		switch {
+		case !repaired[res.Name] || res.OK:
+		case res.Unknown:
+			unverified = append(unverified, res.Name)
+		default:
 			left = append(left, res.Name)
 		}
 	}
 	if len(left) > 0 {
-		return fmt.Errorf("still failing after the fix: %s", strings.Join(left, ", "))
+		failing = fmt.Errorf("still failing after the fix: %s", strings.Join(left, ", "))
 	}
-	return nil
+	return unverified, failing
 }

@@ -21,8 +21,21 @@ public enum Docker {
     /// time, such as Docker Desktop not running: then there is nothing to show.
     public static func usage(docker: String, env: [String: String], runner: (any Runner)? = nil) async -> [DockerUsage]? {
         let runner = runner ?? ProcessRunner(timeout: timeout)
-        guard let r = try? await runner.run(docker, ["system", "df", "--format", "json"], env: env), r.status == 0 else { return nil }
+        guard let r = try? await run(docker, ["system", "df", "--format", "json"], env: env, runner: runner), r.status == 0 else { return nil }
         return parse(df: r.output)
+    }
+
+    /// Runs Docker against this Mac's own daemon only: DOCKER_HOST and
+    /// DOCKER_CONTEXT in the login environment could point a prune at a
+    /// remote machine, so both go and the context is named.
+    public static func run(_ docker: String, _ arguments: [String], env: [String: String], runner: any Runner) async throws -> CommandResult {
+        var env = env
+        env["DOCKER_HOST"] = nil
+        env["DOCKER_CONTEXT"] = nil
+        let contexts = try? await runner.run(docker, ["context", "ls", "--format", "{{.Name}}"], env: env)
+        let names = contexts?.status == 0 ? (contexts?.output ?? "").split(whereSeparator: \.isNewline).map(String.init) : []
+        let local = names.contains("desktop-linux") ? "desktop-linux" : "default"
+        return try await runner.run(docker, arguments + ["--context", local], env: env)
     }
 
     /// One JSON object a line, sizes as "1.2GB" and reclaimable as "1.2GB (50%)".

@@ -45,20 +45,23 @@ drop_lines() {
 remove() {
   case "$1" in
     mcp)
-      rm -rf "$CMD/mcp.go" "$CMD/mcp_test.go" skills .claude-plugin hooks commands adapters evals .mcp.json \
+      rm -rf "$CMD/mcp.go" "$CMD/mcp_test.go" plugin .claude-plugin .mcp.json \
         docs/modules/ROOT/pages/agents.adoc
       drop_target Makefile evals
+      drop_target Makefile hook-test
+      sed -i '' 's/^lint: hook-test$/lint:/' Makefile 2>/dev/null || sed -i 's/^lint: hook-test$/lint:/' Makefile
       drop_lines docs/modules/ROOT/nav.adoc 'xref:agents.adoc'
       drop_lines docs/modules/ROOT/pages/commands.adoc '^| `mcp`'
       drop_lines .webscan.json '/agents.html'
-      drop_lines .github/CODEOWNERS '^/skills/'
-      drop_lines .github/CODEOWNERS '^/hooks/'
+      drop_lines .github/CODEOWNERS '^/plugin/'
       ;;
     docs)
       rm -rf docs/antora.yml docs/modules antora-playbook.yml antora-assembler.yml \
-        Gemfile Gemfile.lock package.json package-lock.json .github/workflows/docs.yml .webscan.json
+        Gemfile Gemfile.lock package.json package-lock.json .github/workflows/docs.yml .webscan.json \
+        "$CMD/reference_test.go"
       drop_target Makefile docs-serve
       drop_target Makefile docs
+      drop_target Makefile docs-gen
       drop_section CONTRIBUTING.md '## Docs'
       ;;
     release)

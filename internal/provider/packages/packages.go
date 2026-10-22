@@ -93,7 +93,7 @@ func (p Provider) read(ctx context.Context, t config.Target) (state, error) {
 	}
 	for _, i := range items {
 		if reason, ok := unreadable[i.Kind]; ok {
-			s.manual = append(s.manual, manual(t, i.resource(), reason))
+			s.manual = append(s.manual, plan.MissingProgram(t.Name, i.resource(), reason))
 			continue
 		}
 		switch {
@@ -121,7 +121,7 @@ func (e errMissing) Error() string {
 func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, error) {
 	s, err := p.read(ctx, t)
 	if missing := (errMissing{}); errors.As(err, &missing) {
-		return []plan.Action{manual(t, missing.name, missing.Error())}, nil
+		return []plan.Action{plan.MissingProgram(t.Name, missing.name, missing.Error())}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -130,7 +130,7 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 	for _, i := range s.missing {
 		actions = append(actions, plan.Action{
 			Op: plan.OpCreate, Target: t.Name, Resource: i.resource(),
-			Detail: "install with " + installer(i), Before: beforeInstall(i), Do: brew.install(p.r, i),
+			Detail: "install with " + installer(i), Before: beforeInstall(p.r, i), Do: brew.install(p.r, i),
 		})
 	}
 	if t.Upgrade {

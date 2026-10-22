@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settings = HostWindow(title: "ZC Care Settings", size: NSSize(width: 480, height: 600)) { [unowned self] in
         SettingsView(store: store) { [weak self] in self?.showWelcome() }
     }
+    private var toldHotkeyTaken = false
     private var welcome: HostWindow<WelcomeView>?
     private var apps: HostWindow<AppPickerView>?
     private var setup: HostWindow<SetupView>?
@@ -48,8 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.openSettings = { [weak self] in self?.settings.show() }
         store.openApps = { [weak self] in self?.showApps() }
         store.openSetup = { [weak self] in self?.showSetup() }
-        store.hotkeyChanged = { [weak self] on in on ? self?.hotkey.register() : self?.hotkey.unregister() }
-        if store.hotkey { hotkey.register() }
+        store.hotkeyChanged = { [weak self] on in on ? self?.registerHotkey() : self?.hotkey.unregister() }
+        if store.hotkey { registerHotkey() }
         Task { await store.start() }
         care.care.startSchedule()
         // A Mac without a config starts in the Setup Assistant; the welcome
@@ -62,6 +63,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showWelcome()
             }
         }
+    }
+
+    /// Registers ⌃⌥Z; when another app holds it, the owner is told once.
+    private func registerHotkey() {
+        let status = hotkey.register()
+        guard status != noErr else { return }
+        NSLog("ZC Care: the ⌃⌥Z shortcut could not be registered (OSStatus \(status))")
+        guard !toldHotkeyTaken else { return }
+        toldHotkeyTaken = true
+        store.message = Store.Message(text: "The ⌃⌥Z shortcut is taken by another app (error \(status)).", failed: true)
     }
 
     /// A clicked alert opens where its fix is: a full disk Cleanup, the
@@ -98,8 +109,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// A new picker each time, so it reads what the Mac has now.
     private func showApps() {
+        // An install in flight keeps its window; the picker comes forward.
+        if store.busy != nil, let apps { apps.show(); return }
         apps?.close()
-        let window = HostWindow(title: "Choose Apps", size: NSSize(width: 620, height: 700), themed: true) { [unowned self] in
+        let window = HostWindow(title: "Choose Apps", size: NSSize(width: 620, height: 700), themed: true,
+                                allowsClose: { [unowned self] in store.busy == nil }) { [unowned self] in
             AppPickerView(store: store) { [weak self] in self?.apps?.close() }
         }
         apps = window
@@ -107,8 +121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSetup() {
+        if store.busy != nil, let setup { setup.show(); return }
         setup?.close()
-        let window = HostWindow(title: "Set Up This Mac", size: NSSize(width: 580, height: 680), themed: true) { [unowned self] in
+        let window = HostWindow(title: "Set Up This Mac", size: NSSize(width: 580, height: 680), themed: true,
+                                allowsClose: { [unowned self] in store.busy == nil }) { [unowned self] in
             SetupView(store: store) { [weak self] in self?.setup?.close() }
         }
         setup = window
@@ -117,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func open(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue.flatMap(URL.init(string:)),
-              let host = url.host() else { return }
+              let host = url.host()?.lowercased() else { return }
         let parts = url.pathComponents.filter { $0 != "/" }
         // zccare://care opens the Care window, zccare://care/applications a module.
         if host == "care" {
@@ -148,7 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if parts.count > 1 {
             if tab == .mac {
                 store.macDetail = Store.MacDetail(rawValue: parts[1])
-            } else if store.expanded != parts[1] {
+            } else if tab == .overview, store.expanded != parts[1] {
                 store.toggle(parts[1])
             }
         }

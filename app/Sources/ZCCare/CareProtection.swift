@@ -39,7 +39,7 @@ struct ProtectionView: View {
                                 detail: [item.developer ?? "Unidentified developer", item.kind, item.executable]
                                     .compactMap { $0 }.joined(separator: " · "),
                                 value: item.enabled ? "Allowed" : "Off",
-                                flag: care.isNew(background: item) ? "New" : item.developer == nil && item.enabled ? "Unidentified" : nil,
+                                flag: care.isNew(background: item) ? appearedFlag : item.developer == nil && item.enabled ? "Unidentified" : nil,
                                 flagColor: care.isNew(background: item) ? Theme.accent : Theme.warning) { EmptyView() }
                         }
                         HStack {
@@ -72,7 +72,8 @@ struct ProtectionView: View {
                                     value: Store.bytes(trace.size)) {
                                     Button("Clear") { Task { await care.clearBrowser(trace) } }
                                         .controlSize(.small)
-                                        .disabled(open)
+                                        .help(open ? "Quit \(trace.browser) first" : "Clear \(trace.browser) \(trace.kind) (\(removalVerb(care.store)))")
+                                        .disabled(open || care.store.busy != nil)
                                 }
                             }
                         } else {

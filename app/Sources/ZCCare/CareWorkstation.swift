@@ -16,8 +16,12 @@ struct MyWorkstation: View {
         let targets = store.snapshot?.targets ?? []
         VStack(spacing: 0) {
             CareHeader(title: "My Workstation", subtitle: "What your config declares, and what is in place right now",
-                   busy: store.inventory == nil,
-                   action: ("Refresh", { Task { await store.refresh() } }))
+                   busy: store.loadingWorkstation,
+                   action: ("Refresh", { Task { await refresh(store) } }))
+            if let error = store.workstationError {
+                Text("Could not read your workstation. \(error)").font(.callout).foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 28).padding(.top, 8)
+            }
             ScrollView {
                 VStack(spacing: 14) {
                     HStack(alignment: .top, spacing: 14) {
@@ -40,6 +44,12 @@ struct MyWorkstation: View {
             }
         }
         .task(id: store.snapshot) { await store.loadWorkstation() }
+    }
+
+    /// A failed load is not retried by a new snapshot, so Refresh retries it.
+    private func refresh(_ store: Store) async {
+        await store.refresh()
+        if store.workstationError != nil { await store.loadWorkstation() }
     }
 
     private func items(of target: String) -> [Item] {

@@ -189,3 +189,45 @@ func write(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestDigestHashesTheSourceFileOnly(t *testing.T) {
+	tg := target(t)
+	base := "chezmoi --source " + tg.Source + " --no-tty --destination /home/me "
+	file := "/home/me/.zshrc"
+	src := filepath.Join(tg.Source, "dot_zshrc")
+	if err := os.WriteFile(src, []byte("export A=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := &sh.Fake{Out: map[string]string{}, Err: map[string]error{}}
+	p := New(r)
+	ctx := context.Background()
+	if got := p.digest(ctx, tg, file); got != "" {
+		t.Fatalf("digest %q with nothing to read", got)
+	}
+	r.Out[base+"source-path "+file] = src + "\n"
+	want := p.digest(ctx, tg, file)
+	r.Out[base+"diff --recursive=false "+file] = "+export A=1\n"
+	if want == "" || p.digest(ctx, tg, file) != want {
+		t.Fatalf("digest %q changed when chezmoi diff did", want)
+	}
+}
+
+func TestRestoreLinkReplacesAFileInOneRename(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "sub", ".zshrc")
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("applied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreLink(file, "/elsewhere/zshrc"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(file); err != nil || got != "/elsewhere/zshrc" {
+		t.Fatalf("link %q, %v", got, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(file)); len(entries) != 1 {
+		t.Fatalf("temp link left behind: %v", entries)
+	}
+}

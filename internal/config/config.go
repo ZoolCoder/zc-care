@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -176,9 +177,11 @@ func Load(path string, stdin io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("%s: %w", path, err)
 	}
 	cfg.Dir = dir
-	if cfg.Skip, err = ReadSkip(SkipPath()); err != nil {
+	var ignored []string
+	if cfg.Skip, ignored, err = ReadSkip(SkipPath()); err != nil {
 		return Config{}, err
 	}
+	WarnIgnoredSkips(os.Stderr, ignored)
 	if cfg.Profiles, err = ReadProfiles(ProfilesPath()); err != nil {
 		return Config{}, err
 	}
@@ -194,7 +197,46 @@ func Parse(data []byte) (Config, error) {
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return Config{}, err
 	}
+	if hasSecondDocument(dec) {
+		return Config{}, errors.New("config has more than one YAML document")
+	}
+	cfg.cleanFileNames()
 	return cfg, cfg.Validate()
+}
+
+// hasSecondDocument reports whether dec holds another document with content.
+// A trailing bare --- decodes as an empty document, which is not one.
+func hasSecondDocument(dec *yaml.Decoder) bool {
+	var next yaml.Node
+	if err := dec.Decode(&next); err != nil {
+		return !errors.Is(err, io.EOF)
+	}
+	if next.Kind == 0 {
+		return false
+	}
+	doc := &next
+	if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+		doc = doc.Content[0]
+	}
+	return doc.Kind != yaml.ScalarNode || doc.Tag != "!!null"
+}
+
+// cleanFileNames rewrites each localdir file name to its clean form, so
+// ./a.txt and a.txt are one file. A name that clashes with another after
+// cleaning is left for Validate to report.
+func (c *Config) cleanFileNames() {
+	for i, t := range c.Targets {
+		if t.Provider != "localdir" || len(t.Files) == 0 {
+			continue
+		}
+		cleaned := make(map[string]string, len(t.Files))
+		for name, content := range t.Files {
+			cleaned[filepath.Clean(name)] = content
+		}
+		if len(cleaned) == len(t.Files) {
+			c.Targets[i].Files = cleaned
+		}
+	}
 }
 
 var kebab = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
@@ -223,6 +265,7 @@ func (c Config) Validate() error {
 				errs = append(errs, fmt.Errorf("%s: profile %q must be kebab-case", where, p))
 			}
 		}
+		errs = append(errs, t.checkPaths(where)...)
 		if !slices.Contains(Providers, t.Provider) {
 			errs = append(errs, fmt.Errorf("%s: provider %q is not one of %s", where, t.Provider, strings.Join(Providers, ", ")))
 		} else {
@@ -230,6 +273,20 @@ func (c Config) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// checkPaths refuses the path spellings resolve does not expand: it knows ~
+// and ~/ only, so $HOME/x or ~user/x would silently become a path under the
+// config's directory.
+func (t Target) checkPaths(where string) []error {
+	var errs []error
+	paths := append([]string{t.Path, t.File, t.Source, t.Destination, t.Wallpaper, t.Screensaver}, t.Agents...)
+	for _, p := range paths {
+		if strings.Contains(p, "$") || (strings.HasPrefix(p, "~") && p != "~" && !strings.HasPrefix(p, "~/")) {
+			errs = append(errs, fmt.Errorf("%s: path %q is not supported: write ~/... or an absolute or relative path; environment variables and ~user are not expanded", where, p))
+		}
+	}
+	return errs
 }
 
 // fieldCheck collects the problems with one target's fields.
@@ -280,9 +337,18 @@ func (t Target) validateFields(where string) []error {
 
 func (t Target) checkLocaldir(c *fieldCheck) {
 	c.need("path", t.Path)
-	for name := range t.Files {
-		if !filepath.IsLocal(name) {
+	// Names differ in case on a case-sensitive disk only; APFS is usually
+	// case-insensitive, and a.txt with A.txt there is one file. Not checked.
+	cleaned := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(t.Files)) {
+		clean := filepath.Clean(name)
+		switch {
+		case !filepath.IsLocal(name) || clean == ".":
 			c.add("file %q must stay inside the target path", name)
+		case cleaned[clean] != "":
+			c.add("files %q and %q are the same file", cleaned[clean], name)
+		default:
+			cleaned[clean] = name
 		}
 	}
 }

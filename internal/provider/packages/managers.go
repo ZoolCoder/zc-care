@@ -25,11 +25,8 @@ var brew = manager{
 	outdated:  brewOutdated,
 	upgrade:   brewUpgrade,
 	key: func(l string) (string, bool) {
-		m := brewLine.FindStringSubmatch(l)
-		if m == nil {
-			return "", false
-		}
-		return m[1] + ":" + m[2], true
+		kind, name, _, ok := brewEntry(l)
+		return kind + ":" + name, ok
 	},
 	entry: func(kind, name string) (string, string, error) {
 		switch kind {
@@ -85,38 +82,73 @@ func readFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-// brewLine is one Brewfile entry: a kind, a quoted name, and options. Only
-// the mas id option matters here.
+// brewLine is one Brewfile entry: a kind, a name in single or double quotes,
+// and options. Only the mas id option matters here.
 var (
-	brewLine = regexp.MustCompile(`^(\w+)\s+"([^"]+)"(.*)$`)
+	brewLine = regexp.MustCompile(`^(\w+)\s+(?:"([^"]+)"|'([^']+)')(.*)$`)
 	masID    = regexp.MustCompile(`id:\s*(\d+)`)
 )
 
+// brewEntry cuts a Brewfile line into its kind, name and the options after
+// the name.
+func brewEntry(line string) (kind, name, opts string, ok bool) {
+	m := brewLine.FindStringSubmatch(line)
+	if m == nil {
+		return "", "", "", false
+	}
+	return m[1], m[2] + m[3], m[4], true
+}
+
 // parseBrewfile reads the tap, brew, cask and mas entries of a Brewfile. Any
-// other entry (vscode, go, cargo, whalebrew) is returned as unsupported.
+// other line (vscode, go, cargo, whalebrew, cask_args, if/end) is returned as
+// unsupported rather than failing the whole file. An entry whose line ends in
+// a comma goes on in the next line, so the two are read as one. Whether an
+// if or unless block holds on this machine is not known here, so every line
+// inside one is left to a person rather than installed unconditionally.
 func parseBrewfile(data []byte) ([]item, []string, error) {
 	var taps, rest []item
 	var unsupported []string
 	sc := bufio.NewScanner(bytes.NewReader(data))
-	for n := 1; sc.Scan(); n++ {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+	depth := 0
+	for sc.Scan() {
+		line := withoutComment(sc.Text())
+		if line == "" {
 			continue
 		}
-		m := brewLine.FindStringSubmatch(line)
-		if m == nil {
-			return nil, nil, fmt.Errorf("line %d: cannot read %q", n, line)
+		for strings.HasSuffix(line, ",") && sc.Scan() {
+			if next := withoutComment(sc.Text()); next != "" {
+				line += " " + next
+			}
 		}
-		i := item{Kind: m[1], Name: m[2]}
+		switch {
+		case opensBlock(line):
+			depth++
+			unsupported = append(unsupported, line)
+			continue
+		case line == "end" && depth > 0:
+			depth--
+			unsupported = append(unsupported, line)
+			continue
+		case depth > 0:
+			unsupported = append(unsupported, line+" (inside a conditional block, which is not evaluated)")
+			continue
+		}
+		kind, name, opts, ok := brewEntry(line)
+		if !ok {
+			unsupported = append(unsupported, line)
+			continue
+		}
+		i := item{Kind: kind, Name: name}
 		switch i.Kind {
 		case "tap":
 			taps = append(taps, i)
 		case "brew", "cask":
 			rest = append(rest, i)
 		case "mas":
-			id := masID.FindStringSubmatch(m[3])
+			id := masID.FindStringSubmatch(opts)
 			if id == nil {
-				return nil, nil, fmt.Errorf("line %d: mas %q has no id", n, i.Name)
+				unsupported = append(unsupported, i.resource())
+				continue
 			}
 			i.ID = id[1]
 			rest = append(rest, i)
@@ -126,6 +158,28 @@ func parseBrewfile(data []byte) ([]item, []string, error) {
 	}
 	// Taps first, so apply adds a tap before installing from it.
 	return append(taps, rest...), unsupported, sc.Err()
+}
+
+// withoutComment trims line and cuts a # comment, unless the # is inside quotes.
+func withoutComment(line string) string {
+	var quote rune
+	for i, r := range line {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '"' || r == '\'':
+			quote = r
+		case r == '#':
+			return strings.TrimSpace(line[:i])
+		}
+	}
+	return strings.TrimSpace(line)
+}
+
+func opensBlock(line string) bool {
+	return strings.HasPrefix(line, "if ") || strings.HasPrefix(line, "unless ")
 }
 
 func brewInstalled(ctx context.Context, r sh.Runner, items []item) (map[string]set, map[string]string, error) {

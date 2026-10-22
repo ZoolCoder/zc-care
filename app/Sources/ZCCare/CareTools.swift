@@ -62,8 +62,9 @@ struct MyTools: View {
             Tool(title: "Mail Attachments", detail: "Remove attachment copies Mail saved on opening; the mail keeps them.",
                  symbol: "paperclip", colors: Tint.blue, button: "Clean", isNew: true) {
                 if let mail { Task { await care.store.clean(mail) } }
+                else { care.store.message = Store.Message(text: "Mail has no attachments here", failed: false) }
             },
-            Tool(title: "Trash Bins", detail: "Empty the Trash for good.", symbol: "xmark.bin.fill", colors: Tint.gray,
+            Tool(title: "Trash Bins", detail: "Empty the Trash; what is in it is deleted for good.", symbol: "xmark.bin.fill", colors: Tint.gray,
                  button: "Empty") { Task { await care.store.emptyTrash() } },
             Tool(title: "Large and Old Files", detail: "Find big files and downloads you have not opened in months.",
                  symbol: "folder.fill", colors: Tint.cyan, button: "Review") { care.open(.clutter) },
@@ -97,6 +98,10 @@ struct MyTools: View {
                  symbol: "lock.fill", colors: Tint.pink) { care.open(.protection) },
             Tool(title: "Project Dependencies", detail: "Clear node_modules and virtualenvs of projects left alone.",
                  symbol: "shippingbox.fill", colors: Tint.cyan, button: "Review") { care.open(.developer) },
+            Tool(title: "Docker", detail: "Prune the build cache and dangling images Docker keeps.",
+                 symbol: "shippingbox.and.arrow.backward.fill", colors: Tint.blue, button: "Review") { care.open(.developer) },
+            Tool(title: "Xcode", detail: "Clear derived data, device support and simulators.",
+                 symbol: "hammer.fill", colors: Tint.blue, button: "Review") { care.open(.developer) },
             Tool(title: "Local AI Models", detail: "Remove Ollama, LM Studio and Hugging Face models you no longer run.",
                  symbol: "brain.fill", colors: Tint.cyan, button: "Review") { care.open(.developer) },
         ]

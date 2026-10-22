@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -21,9 +24,9 @@ func init() {
 	optional["export"] = runExport
 	optional["diff"] = runDiff
 	optionalUsage = append(optionalUsage,
-		"  "+name+" export   [-o file] [-config f] [-target t]\n"+
+		"  "+name+" export   [-o file [-force]] [-config f] [-target t]\n"+
 			"                                save what this Mac has, per target, as JSON\n"+
-			"  "+name+" diff     [-json] a.json [b.json]\n"+
+			"  "+name+" diff     [-json] [-exit-code] [-config f] a.json [b.json]\n"+
 			"                                what differs between two exports, or one and this Mac\n")
 }
 
@@ -43,8 +46,36 @@ func liveSnapshot(ctx context.Context, configPath string, targets []string, stdi
 	}
 	host, _ := os.Hostname()
 	macOS, _ := sh.System().Output(ctx, "sw_vers", "-productVersion")
-	return newSnapshot(eng.Items(ctx), resolved, host, strings.TrimSpace(string(macOS)),
-		time.Now().UTC().Format(time.RFC3339)), nil
+	s := newSnapshot(eng.Items(ctx), resolved, host, strings.TrimSpace(string(macOS)),
+		time.Now().UTC().Format(time.RFC3339))
+	s.Config, s.Selection = absConfig(configPath), slices.Clone(targets)
+	return s, nil
+}
+
+// absConfig is the absolute path of the config file; "" for standard input.
+func absConfig(path string) string {
+	if path == "-" {
+		return ""
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
+}
+
+// liveSide is the config and targets the live side of a diff reads: those the
+// snapshot was taken with, unless -config was given. It warns when the config
+// is not the snapshot's own.
+func liveSide(a snapshot, configFlag string, stderr io.Writer) (string, []string) {
+	if configFlag == "" && a.Config != "" {
+		return a.Config, a.Selection
+	}
+	path := findConfig(configFlag)
+	if a.Config != "" && absConfig(path) != a.Config {
+		fmt.Fprintf(stderr, "warning: snapshot was taken from %s\n", a.Config)
+	}
+	return path, a.Selection
 }
 
 // runExport writes the snapshot of this Mac to stdout, or to the -o file.
@@ -52,6 +83,7 @@ func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := newFlags("export", stderr)
 	path := flags.String("config", "", "config file")
 	out := flags.String("o", "", "write the snapshot to this file")
+	force := flags.Bool("force", false, "overwrite the -o file")
 	var targets targetList
 	flags.Var(&targets, "target", "limit to this target")
 	if err := flags.Parse(args); err != nil {
@@ -66,12 +98,11 @@ func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if *out == "" {
 		return writeJSON(stdout, snap)
 	}
-	// 0600: a snapshot names every package and file on the Mac.
-	f, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("export: %w", err)
+	var buf bytes.Buffer
+	if err := writeJSON(&buf, snap); err != nil {
+		return err
 	}
-	if err := errors.Join(writeJSON(f, snap), f.Close()); err != nil {
+	if err := writeFile(*out, buf.Bytes(), *force); err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
 	_, err = fmt.Fprintf(stdout, "exported %d target(s) to %s\n", len(snap.Targets), *out)
@@ -83,10 +114,14 @@ func runDiff(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := newFlags("diff", stderr)
 	path := flags.String("config", "", "config file, for the live side")
 	asJSON := flags.Bool("json", false, "machine-readable output")
+	exitCode := flags.Bool("exit-code", false, "exit 2 when the snapshots differ")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	files := flags.Args()
+	if err := rejectTrailingFlags("diff", files); err != nil {
+		return err
+	}
 	if len(files) < 1 || len(files) > 2 {
 		return errors.New("diff needs one or two snapshot files, from export")
 	}
@@ -102,20 +137,30 @@ func runDiff(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	} else {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		b, err = liveSnapshot(ctx, findConfig(*path), nil, stdin, stderr)
+		livePath, liveTargets := liveSide(a, *path, stderr)
+		b, err = liveSnapshot(ctx, livePath, liveTargets, stdin, stderr)
 	}
 	if err != nil {
 		return err
 	}
 	diffs := diffSnapshots(a, b)
+	write := func() error { return writeDiff(stdout, a.label("A "+files[0]), b.label("B "+bName), diffs) }
 	if *asJSON {
-		return writeJSON(stdout, struct {
-			A       snapshot     `json:"a"`
-			B       snapshot     `json:"b"`
-			Targets []targetDiff `json:"targets"`
-		}{a, b, append([]targetDiff{}, diffs...)})
+		write = func() error {
+			return writeJSON(stdout, struct {
+				A       snapshot     `json:"a"`
+				B       snapshot     `json:"b"`
+				Targets []targetDiff `json:"targets"`
+			}{a, b, append([]targetDiff{}, diffs...)})
+		}
 	}
-	return writeDiff(stdout, a.label("A "+files[0]), b.label("B "+bName), diffs)
+	if err := write(); err != nil {
+		return err
+	}
+	if *exitCode && len(diffs) > 0 {
+		return errDrift
+	}
+	return nil
 }
 
 func readSnapshot(path string) (snapshot, error) {

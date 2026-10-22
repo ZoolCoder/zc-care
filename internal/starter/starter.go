@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/zoolcoder/zc-care/internal/manifest"
@@ -113,12 +112,98 @@ func Write(o Options) (Result, error) {
 	if err := os.MkdirAll(o.Dir, 0o755); err != nil {
 		return Result{}, err
 	}
-	for _, name := range names {
-		if err := os.WriteFile(filepath.Join(o.Dir, name), out[name], 0o644); err != nil {
-			return Result{}, err
-		}
+	if err := writeAll(o.Dir, names, out); err != nil {
+		return Result{}, err
 	}
 	return res, nil
+}
+
+// writeAll stages every file in a temp file beside its place first, moves
+// the files it replaces aside, then renames the new ones in. A failure puts
+// the old files back whole and removes the new ones. A rename replaces a
+// symlink itself, so -force never writes through a link to somewhere else.
+func writeAll(dir string, names []string, content map[string][]byte) error {
+	staged := map[string]string{}
+	defer func() {
+		for _, tmp := range staged {
+			_ = os.Remove(tmp)
+		}
+	}()
+	for _, name := range names {
+		tmp, err := os.CreateTemp(dir, "."+name+"-*")
+		if err != nil {
+			return err
+		}
+		staged[name] = tmp.Name()
+		_, werr := tmp.Write(content[name])
+		cerr := tmp.Close()
+		if err := errors.Join(werr, cerr, os.Chmod(tmp.Name(), 0o644)); err != nil {
+			return err
+		}
+	}
+	backups := map[string]string{}
+	if err := swapIn(dir, names, staged, backups); err != nil {
+		restore(dir, names, staged, backups)
+		return err
+	}
+	for _, bak := range backups {
+		_ = os.Remove(bak)
+	}
+	return nil
+}
+
+// swapIn moves each existing file to a backup beside it, then renames its
+// staged replacement into place.
+func swapIn(dir string, names []string, staged, backups map[string]string) error {
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if _, err := os.Lstat(path); err != nil {
+			continue
+		}
+		bak, err := backupName(dir, name)
+		if err != nil {
+			return err
+		}
+		if err := os.Rename(path, bak); err != nil {
+			return err
+		}
+		backups[name] = bak
+	}
+	for _, name := range names {
+		if err := os.Rename(staged[name], filepath.Join(dir, name)); err != nil {
+			return err
+		}
+		delete(staged, name)
+	}
+	return nil
+}
+
+// backupName reserves a name beside the file that nothing else uses, so a
+// .bak the user keeps there is never touched.
+func backupName(dir, name string) (string, error) {
+	tmp, err := os.CreateTemp(dir, name+".bak-*")
+	if err != nil {
+		return "", err
+	}
+	_ = tmp.Close()
+	if err := os.Remove(tmp.Name()); err != nil {
+		return "", err
+	}
+	return tmp.Name(), nil
+}
+
+// restore removes the new files swapIn already placed, those no longer
+// staged, and moves the backups back.
+func restore(dir string, names []string, staged, backups map[string]string) {
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if _, pending := staged[name]; !pending {
+			_ = os.Remove(path)
+		}
+		if bak, ok := backups[name]; ok {
+			_ = os.Rename(bak, path)
+		}
+	}
 }
 
 // keep appends captured's entries that brewfile lacks under their own
@@ -168,9 +253,18 @@ func resource(line string) (string, bool) {
 		return "", false
 	}
 	quoted, _, _ := strings.Cut(rest, ",")
-	name, err := strconv.Unquote(strings.TrimSpace(quoted))
-	if err != nil || name == "" {
+	name, ok := unquote(strings.TrimSpace(quoted))
+	if !ok {
 		return "", false
 	}
 	return kind + ":" + name, true
+}
+
+// unquote strips one pair of double or single quotes, as a Brewfile allows
+// either.
+func unquote(s string) (string, bool) {
+	if len(s) < 3 || s[0] != s[len(s)-1] || (s[0] != '"' && s[0] != '\'') {
+		return "", false
+	}
+	return s[1 : len(s)-1], true
 }

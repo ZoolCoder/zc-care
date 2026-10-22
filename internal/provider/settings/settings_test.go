@@ -22,9 +22,13 @@ func target() config.Target {
 	}}
 }
 
-func read(domain, key string) string { return sh.Line("defaults", "read", domain, key) }
+func read(domain, key string) string {
+	return sh.Line("env", "LC_ALL=C", "defaults", "read", domain, key)
+}
 
-func readType(domain, key string) string { return sh.Line("defaults", "read-type", domain, key) }
+func readType(domain, key string) string {
+	return sh.Line("env", "LC_ALL=C", "defaults", "read-type", domain, key)
+}
 
 // notSet is what defaults says for a key that has no value.
 func notSet(domain, key string) error {
@@ -141,5 +145,32 @@ func TestSame(t *testing.T) {
 		if got := same(c.want, c.have, c.typ); got != c.same {
 			t.Errorf("same(%v, %q, %q) = %v", c.want, c.have, c.typ, got)
 		}
+	}
+}
+
+func TestOverwritingAnArrayNeedsConfirmation(t *testing.T) {
+	r := machine()
+	r.Out[readType("NSGlobalDomain", "KeyRepeat")] = "Type is array\n"
+	p := Provider{r: r, home: "/Users/me"}
+	actions, err := p.Plan(context.Background(), target())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range actions {
+		want := a.Resource == "NSGlobalDomain KeyRepeat"
+		if a.Destructive != want {
+			t.Errorf("%s: destructive %v, want %v", a.Resource, a.Destructive, want)
+		}
+		if want && !strings.Contains(a.Detail, "undo cannot restore (") {
+			t.Errorf("%s: detail %q does not say why", a.Resource, a.Detail)
+		}
+	}
+}
+
+func TestReadsRunInTheCLocale(t *testing.T) {
+	r := machine()
+	p := Provider{r: r, home: "/Users/me"}
+	if _, err := p.Plan(context.Background(), target()); err != nil {
+		t.Fatal(err) // the fake answers only the env LC_ALL=C command lines
 	}
 }
