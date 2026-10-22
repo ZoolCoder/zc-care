@@ -295,6 +295,7 @@ func runConfigured(cmd string, args []string, stdin io.Reader, stdout, stderr io
 	}
 	p = p.Only(f.only)
 	if cmd == "plan" {
+		warnNoProfile(cfg, f.targets, stderr)
 		s := p.Snapshot(f.targets)
 		s.Upgrade, s.Only, s.Remove = f.upgrade, f.only, f.remove
 		return runPlan(p, s, f.out, f.asJSON, f.exitCode, stdout, stderr)
@@ -358,7 +359,11 @@ func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.
 		}
 	}
 	fmt.Fprintln(log)
-	outcomes, err := eng.Apply(ctx, p, log)
+	apply := eng.Apply
+	if saved == nil {
+		apply = eng.ApplyFollowing
+	}
+	outcomes, err := apply(ctx, p, log)
 	recordApply("", outcomes, f.via)
 	return errors.Join(f.writeApplied(stdout, p, outcomes, err), err)
 }
@@ -423,6 +428,23 @@ func upgradeAll(cfg *config.Config) {
 		if t.Provider == "packages" || t.Provider == "tools" {
 			cfg.Targets[i].Upgrade = true
 		}
+	}
+}
+
+// warnNoProfile says so when a machine without a profile runs targets that
+// are restricted to profiles, since every profile then applies to it.
+func warnNoProfile(cfg config.Config, names []string, stderr io.Writer) {
+	if len(cfg.Profiles) > 0 {
+		return
+	}
+	restricted := 0
+	for _, t := range cfg.Targets {
+		if len(t.Profiles) > 0 && (len(names) == 0 || slices.Contains(names, t.Name)) {
+			restricted++
+		}
+	}
+	if restricted > 0 {
+		fmt.Fprintf(stderr, "no profile set for this Mac: %d target(s) restricted to profiles run anyway; run %s profile NAME\n", restricted, name)
 	}
 }
 

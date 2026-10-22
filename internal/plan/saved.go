@@ -30,6 +30,7 @@ type SavedAction struct {
 	Target   string `json:"target"`
 	Resource string `json:"resource"`
 	Detail   string `json:"detail"`
+	Digest   string `json:"digest,omitempty"`
 }
 
 const savedVersion = 1
@@ -52,7 +53,7 @@ func (s Saved) Write(w io.Writer) error {
 func (p Plan) savedActions() []SavedAction {
 	out := make([]SavedAction, 0, len(p.Actions))
 	for _, a := range p.sorted() {
-		out = append(out, SavedAction{Op: string(a.Op), Target: a.Target, Resource: a.Resource, Detail: a.Detail})
+		out = append(out, SavedAction{Op: string(a.Op), Target: a.Target, Resource: a.Resource, Detail: a.Detail, Digest: a.Digest})
 	}
 	return out
 }
@@ -80,6 +81,10 @@ func (s Saved) Matches(fresh Plan) error {
 	}
 	for i := range now {
 		if now[i] != s.Actions[i] {
+			if describe(s.Actions[i]) == describe(now[i]) {
+				return fmt.Errorf("the live state changed since this plan was saved: the content of %s %s changed; re-run plan",
+					now[i].Target, now[i].Resource)
+			}
 			return fmt.Errorf("the live state changed since this plan was saved.\n  reviewed: %s\n  now:      %s\nre-run plan",
 				describe(s.Actions[i]), describe(now[i]))
 		}

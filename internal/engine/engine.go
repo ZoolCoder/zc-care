@@ -218,22 +218,79 @@ func Run(ctx context.Context, p plan.Plan, w io.Writer) ([]Outcome, error) {
 	return r.outcomes, errors.Join(r.errs...)
 }
 
+// ErrPending marks an apply that succeeded but left changes it did not run:
+// targets that were MANUAL until this apply installed what they need.
+var ErrPending = errors.New("changes are still pending")
+
 // Apply runs p, then re-plans: an action that reported success but left the
 // target still different is a failure too. It returns the outcome of each
-// action it ran, even on error.
+// action it ran, even on error. Targets that only became plannable through
+// this apply, such as dotfiles waiting for chezmoi, are reported as
+// ErrPending, never run: they were not in the plan anyone reviewed.
 func (e *Engine) Apply(ctx context.Context, p plan.Plan, w io.Writer) ([]Outcome, error) {
+	return e.apply(ctx, p, w, false)
+}
+
+// ApplyFollowing is Apply, plus one more pass for those targets when none of
+// their actions deletes or needs a confirmation. Use it only when p is the
+// plan the user just saw, not a saved one.
+func (e *Engine) ApplyFollowing(ctx context.Context, p plan.Plan, w io.Writer) ([]Outcome, error) {
+	return e.apply(ctx, p, w, true)
+}
+
+func (e *Engine) apply(ctx context.Context, p plan.Plan, w io.Writer, follow bool) ([]Outcome, error) {
 	r := run(ctx, p, w)
 	errs := r.errs
+	var after plan.Plan
 	if r.skipped == 0 {
-		if err := e.verify(ctx, r.done); err != nil {
+		var err error
+		if after, err = e.verify(ctx, r.done); err != nil {
 			errs = append(errs, err)
 		}
 	}
 	if len(errs) > 0 {
 		return r.outcomes, errors.Join(errs...)
 	}
+	outcomes := r.outcomes
+	if actions := unblocked(p, after, r.done); len(actions) > 0 {
+		next := plan.Plan{Actions: actions}
+		if !follow || next.Destructive() {
+			return outcomes, fmt.Errorf("%w: %d change(s) became possible after this apply; run apply again", ErrPending, len(actions))
+		}
+		second := run(ctx, next, w)
+		outcomes = append(outcomes, second.outcomes...)
+		errs = second.errs
+		if second.skipped == 0 {
+			if _, err := e.verify(ctx, second.done); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		if len(errs) > 0 {
+			return outcomes, errors.Join(errs...)
+		}
+	}
 	_, err := fmt.Fprintln(w, "applied and verified")
-	return r.outcomes, err
+	return outcomes, err
+}
+
+// unblocked is the executable actions after has on targets that had a MANUAL
+// line in p: a prerequisite the apply installed made them plannable.
+func unblocked(p, after plan.Plan, done []plan.Action) []plan.Action {
+	blocked := map[string]bool{}
+	for _, a := range p.Manual() {
+		blocked[a.Target] = true
+	}
+	ran := map[[2]string]bool{}
+	for _, a := range done {
+		ran[[2]string{a.Target, a.Resource}] = true
+	}
+	var out []plan.Action
+	for _, a := range after.Executable() {
+		if blocked[a.Target] && !ran[[2]string{a.Target, a.Resource}] {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 // Revert is the plan that puts back what the recorded undos replaced. Each
@@ -289,14 +346,15 @@ func cannotUndo(u plan.Undo) string {
 
 // verify re-plans and reports any of the done actions that is still
 // outstanding. Only those are checked: a plan cut down with -only leaves the
-// rest outstanding on purpose, and a failed action is already reported.
-func (e *Engine) verify(ctx context.Context, done []plan.Action) error {
+// rest outstanding on purpose, and a failed action is already reported. It
+// returns the fresh plan, empty when nothing was done.
+func (e *Engine) verify(ctx context.Context, done []plan.Action) (plan.Plan, error) {
 	if len(done) == 0 {
-		return nil
+		return plan.Plan{}, nil
 	}
 	after, err := e.Plan(ctx)
 	if err != nil {
-		return fmt.Errorf("verify: %w", err)
+		return after, fmt.Errorf("verify: %w", err)
 	}
 	type key struct{ target, resource string }
 	applied := make(map[key]bool, len(done))
@@ -310,9 +368,9 @@ func (e *Engine) verify(ctx context.Context, done []plan.Action) error {
 		}
 	}
 	if left > 0 {
-		return fmt.Errorf("applied, but %d change(s) are still outstanding; run plan to see them", left)
+		return after, fmt.Errorf("applied, but %d change(s) are still outstanding; run plan to see them", left)
 	}
-	return nil
+	return after, nil
 }
 
 // TargetStatus is one target's live summary. InPlace and Declared are set

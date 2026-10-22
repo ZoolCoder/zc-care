@@ -64,6 +64,18 @@ here with what to edit.
   fails with E2BIG.
 - `drift -hour` must be 0 to 23; `-h` on any command prints that command's
   flags.
+- `apply` runs one second pass for targets that were MANUAL only because the
+  apply had not installed their tool yet, such as dotfiles before chezmoi,
+  unless the pass deletes or needs a confirmation or the plan was saved; then
+  it exits 1 and says how many changes became possible, so you run `apply`
+  again.
+- A saved plan records a digest of the content it will write, so a source
+  file edited after the review is refused as a changed live state.
+- `validate` refuses paths with `$` or `~user`, which were never expanded
+  and would have landed under the config's folder.
+- `plan` warns when the Mac has no profile set but targets are restricted
+  to profiles, since every one of them then runs.
+- `init -from-mac` reads single-quoted Brewfile entries.
 
 ### Security checks
 

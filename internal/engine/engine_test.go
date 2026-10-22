@@ -229,3 +229,129 @@ func TestSelectLeavesOutOtherProfilesTargets(t *testing.T) {
 		t.Fatalf("a machine without profiles gets every target: %+v", got)
 	}
 }
+
+// world is a machine where target "dot" cannot plan until target "pkg" has
+// installed what it needs, like dotfiles waiting for chezmoi.
+type world struct {
+	installed, configured bool
+	destructive           bool
+}
+
+type installer struct{ w *world }
+
+func (i installer) Plan(context.Context, config.Target) ([]plan.Action, error) {
+	if i.w.installed {
+		return nil, nil
+	}
+	return []plan.Action{{Op: plan.OpCreate, Target: "pkg", Resource: "tool",
+		Do: func(context.Context) error { i.w.installed = true; return nil }}}, nil
+}
+func (installer) Measure(context.Context, config.Target) (provider.Live, error) {
+	return provider.Live{}, nil
+}
+
+type dependent struct{ w *world }
+
+func (d dependent) Plan(context.Context, config.Target) ([]plan.Action, error) {
+	switch {
+	case d.w.configured:
+		return nil, nil
+	case !d.w.installed:
+		return []plan.Action{{Op: plan.OpManual, Target: "dot", Resource: "rc", Detail: "tool is not on PATH"}}, nil
+	}
+	return []plan.Action{{Op: plan.OpCreate, Target: "dot", Resource: "rc", Destructive: d.w.destructive,
+		Do: func(context.Context) error { d.w.configured = true; return nil }}}, nil
+}
+func (dependent) Measure(context.Context, config.Target) (provider.Live, error) {
+	return provider.Live{}, nil
+}
+
+func dependentEngine(t *testing.T, w *world) (*Engine, plan.Plan) {
+	t.Helper()
+	c := config.Config{Version: 1, Targets: []config.Target{
+		{Name: "pkg", Provider: "installer", Path: "a"},
+		{Name: "dot", Provider: "dependent", Path: "b"},
+	}}
+	e, err := New(c, Providers{"installer": installer{w}, "dependent": dependent{w}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.Plan(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e, p
+}
+
+func TestApplyFollowingRunsTargetsThatWereManual(t *testing.T) {
+	w := &world{}
+	e, p := dependentEngine(t, w)
+	var out bytes.Buffer
+	outcomes, err := e.ApplyFollowing(context.Background(), p, &out)
+	if err != nil || !w.configured || len(outcomes) != 2 {
+		t.Fatalf("configured %v outcomes %d err %v", w.configured, len(outcomes), err)
+	}
+	if !strings.Contains(out.String(), "applied and verified") {
+		t.Fatalf("out %q", out.String())
+	}
+}
+
+func TestApplyReportsWhatBecamePossible(t *testing.T) {
+	w := &world{}
+	e, p := dependentEngine(t, w)
+	_, err := e.Apply(context.Background(), p, &bytes.Buffer{})
+	if !errors.Is(err, ErrPending) || w.configured || !strings.Contains(err.Error(), "1 change(s)") {
+		t.Fatalf("configured %v err %v", w.configured, err)
+	}
+}
+
+func TestApplyFollowingLeavesDestructiveChangesToConfirm(t *testing.T) {
+	w := &world{destructive: true}
+	e, p := dependentEngine(t, w)
+	_, err := e.ApplyFollowing(context.Background(), p, &bytes.Buffer{})
+	if !errors.Is(err, ErrPending) || w.configured {
+		t.Fatalf("configured %v err %v", w.configured, err)
+	}
+}
+
+func TestAddAndPlanRemoveNeedOneTarget(t *testing.T) {
+	e, _ := New(cfg(t.TempDir()), Default(), nil)
+	if _, err := e.Add(provider.Entry{Kind: "brew", Name: "git"}); err == nil || !strings.Contains(err.Error(), "exactly one target") {
+		t.Fatalf("add two targets: %v", err)
+	}
+	if _, err := e.PlanRemove("brew", "git"); err == nil || !strings.Contains(err.Error(), "exactly one target") {
+		t.Fatalf("remove two targets: %v", err)
+	}
+	e, _ = New(cfg(t.TempDir()), Default(), []string{"a"})
+	if _, err := e.Add(provider.Entry{}); err == nil || !strings.Contains(err.Error(), "cannot add") {
+		t.Fatalf("add localdir: %v", err)
+	}
+	if _, err := e.PlanRemove("brew", "git"); err == nil || !strings.Contains(err.Error(), "cannot remove") {
+		t.Fatalf("remove localdir: %v", err)
+	}
+}
+
+type editable struct{ added provider.Entry }
+
+func (editable) Plan(context.Context, config.Target) ([]plan.Action, error) { return nil, nil }
+func (editable) Measure(context.Context, config.Target) (provider.Live, error) {
+	return provider.Live{}, nil
+}
+func (e *editable) Add(_ config.Target, entry provider.Entry) error { e.added = entry; return nil }
+func (editable) PlanRemove(_ config.Target, kind, name string) (plan.Action, error) {
+	return plan.Action{Op: plan.OpDelete, Target: "e", Resource: kind + ":" + name}, nil
+}
+
+func TestAddAndPlanRemoveReachTheProvider(t *testing.T) {
+	prov := &editable{}
+	c := config.Config{Version: 1, Targets: []config.Target{{Name: "e", Provider: "editable", Path: "a"}}}
+	e, _ := New(c, Providers{"editable": prov}, nil)
+	entry := provider.Entry{Kind: "brew", Name: "git", Why: "vcs"}
+	if tgt, err := e.Add(entry); err != nil || tgt.Name != "e" || prov.added != entry {
+		t.Fatalf("add %+v %v", prov.added, err)
+	}
+	p, err := e.PlanRemove("brew", "git")
+	if err != nil || len(p.Actions) != 1 || p.Actions[0].Resource != "brew:git" || !p.Destructive() {
+		t.Fatalf("remove %+v %v", p, err)
+	}
+}

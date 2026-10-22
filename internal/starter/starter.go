@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/zoolcoder/zc-care/internal/manifest"
@@ -198,9 +197,18 @@ func resource(line string) (string, bool) {
 		return "", false
 	}
 	quoted, _, _ := strings.Cut(rest, ",")
-	name, err := strconv.Unquote(strings.TrimSpace(quoted))
-	if err != nil || name == "" {
+	name, ok := unquote(strings.TrimSpace(quoted))
+	if !ok {
 		return "", false
 	}
 	return kind + ":" + name, true
+}
+
+// unquote strips one pair of double or single quotes, as a Brewfile allows
+// either.
+func unquote(s string) (string, bool) {
+	if len(s) < 3 || s[0] != s[len(s)-1] || (s[0] != '"' && s[0] != '\'') {
+		return "", false
+	}
+	return s[1 : len(s)-1], true
 }

@@ -243,6 +243,7 @@ func (c Config) Validate() error {
 				errs = append(errs, fmt.Errorf("%s: profile %q must be kebab-case", where, p))
 			}
 		}
+		errs = append(errs, t.checkPaths(where)...)
 		if !slices.Contains(Providers, t.Provider) {
 			errs = append(errs, fmt.Errorf("%s: provider %q is not one of %s", where, t.Provider, strings.Join(Providers, ", ")))
 		} else {
@@ -250,6 +251,20 @@ func (c Config) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// checkPaths refuses the path spellings resolve does not expand: it knows ~
+// and ~/ only, so $HOME/x or ~user/x would silently become a path under the
+// config's directory.
+func (t Target) checkPaths(where string) []error {
+	var errs []error
+	paths := append([]string{t.Path, t.File, t.Source, t.Destination, t.Wallpaper, t.Screensaver}, t.Agents...)
+	for _, p := range paths {
+		if strings.Contains(p, "$") || (strings.HasPrefix(p, "~") && p != "~" && !strings.HasPrefix(p, "~/")) {
+			errs = append(errs, fmt.Errorf("%s: path %q is not supported: write ~/... or an absolute or relative path; environment variables and ~user are not expanded", where, p))
+		}
+	}
+	return errs
 }
 
 // fieldCheck collects the problems with one target's fields.

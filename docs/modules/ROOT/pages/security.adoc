@@ -5,7 +5,9 @@
 
 * *Nothing is applied that was not shown.* A saved plan refuses to apply when
   the machine changed since. ZC Care plans again before applying. The
-  dotfiles provider applies only the planned paths.
+  dotfiles provider applies only the planned paths. A plan also records a
+  digest of the content it will write, so a source file edited after the
+  review is refused as a moved live state.
 * *Deletions need a person.* The CLI and ZC Care ask, and the MCP server
   cancels.
 * *Nothing is uninstalled unasked.* Apply only installs. `remove` and `undo`

@@ -32,6 +32,9 @@ type Action struct {
 	Target   string // the config target the change belongs to
 	Resource string // the thing being changed inside the target
 	Detail   string // human-readable, never a secret value
+	// Digest, when set, fingerprints the content Do will write, so a saved
+	// plan notices a source that changed without changing its Detail.
+	Digest string
 	// Destructive marks a change that is no delete but loses something the
 	// tool did not write, such as an edit made outside it, or that runs a
 	// script. It needs the same confirmation as a delete.

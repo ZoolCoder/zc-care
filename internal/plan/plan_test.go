@@ -107,3 +107,25 @@ func TestSavedMatches(t *testing.T) {
 		t.Fatal("future version accepted")
 	}
 }
+
+func TestSavedRefusesAChangedDigest(t *testing.T) {
+	reviewed := sample()
+	reviewed.Actions[0].Digest = "sha256:aaa"
+	var buf bytes.Buffer
+	if err := reviewed.Save(&buf, nil); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := LoadSaved(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saved.Matches(reviewed); err != nil {
+		t.Fatal(err)
+	}
+	moved := sample()
+	moved.Actions[0].Digest = "sha256:bbb"
+	err = saved.Matches(moved)
+	if err == nil || !strings.Contains(err.Error(), "content of") || strings.Contains(err.Error(), "reviewed:") {
+		t.Fatalf("digest-only change: %v", err)
+	}
+}

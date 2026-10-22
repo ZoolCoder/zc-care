@@ -6,7 +6,7 @@
 | Command | What it does
 
 | `plan` | Read live state and list what would change. The default.
-| `apply [FILE]` | Make the changes, then plan again to verify. With a saved plan, exactly those.
+| `apply [FILE]` | Make the changes, then plan again to verify. With a saved plan, exactly those. Targets that were `MANUAL` only because the apply had not installed their tool yet (dotfiles before chezmoi) run in one second pass, unless they delete or need a confirmation, and never from a saved plan; otherwise the apply exits `1` and says how many changes became possible, so you run `apply` again.
 | `status` | What is in place per target, without diffing.
 | `list` | Every package, app, dotfile and runtime the config declares, one line each: its state, installed version, the app it configures, and why it is there. Then what is installed but declared nowhere.
 | `add ITEM` | Declare a package or runtime in one target's manifest, with why it is there. Installs nothing; `plan` and `apply` do.

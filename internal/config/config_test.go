@@ -184,3 +184,17 @@ func TestProfilesAreKebabCaseAndRoundTrip(t *testing.T) {
 		t.Fatalf("read %v %v", got, err)
 	}
 }
+
+func TestParseRefusesPathsItDoesNotExpand(t *testing.T) {
+	for _, path := range []string{"$HOME/x", "${HOME}/x", "~root/x", "~x", "a/$B"} {
+		_, err := Parse([]byte("version: 1\ntargets:\n  - name: n\n    provider: localdir\n    path: " + `"` + path + `"` + "\n"))
+		if err == nil || !strings.Contains(err.Error(), "is not supported") {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+	for _, path := range []string{"~", "~/x", "/abs/x", "rel/x"} {
+		if _, err := Parse([]byte("version: 1\ntargets:\n  - name: n\n    provider: localdir\n    path: " + `"` + path + `"` + "\n")); err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+}

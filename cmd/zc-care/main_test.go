@@ -340,3 +340,22 @@ func TestInitWritesAStarterThatPlans(t *testing.T) {
 		t.Fatalf("list: %v\n%s", err, out)
 	}
 }
+
+func TestWarnNoProfile(t *testing.T) {
+	cfg := config.Config{Targets: []config.Target{
+		{Name: "a"}, {Name: "b", Profiles: []string{"work"}}, {Name: "c", Profiles: []string{"dev"}},
+	}}
+	var out bytes.Buffer
+	warnNoProfile(cfg, nil, &out)
+	want := "no profile set for this Mac: 2 target(s) restricted to profiles run anyway; run zc-care profile NAME\n"
+	if out.String() != want {
+		t.Fatalf("got %q", out.String())
+	}
+	out.Reset()
+	warnNoProfile(cfg, []string{"a"}, &out)
+	cfg.Profiles = []string{"work"}
+	warnNoProfile(cfg, nil, &out)
+	if out.Len() != 0 {
+		t.Fatalf("warned: %q", out.String())
+	}
+}
