@@ -45,9 +45,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      # Installs the linter only: make lint runs it once, with gofmt, vet and the hook test.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.14.0
+          install-only: true
       - run: make lint
       - run: go test ./...
       - run: make app-test
@@ -112,10 +114,15 @@ jobs:
           git switch -C "$branch" origin/develop
           mkdir -p Casks
           cp dist/zc-care.rb Casks/zc-care.rb
+          # A re-run after the cask landed on develop has nothing to open.
+          if git diff --quiet -- Casks/zc-care.rb; then
+            echo "cask for ${GITHUB_REF_NAME} is already on develop"
+            exit 0
+          fi
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Casks/zc-care.rb
-          git commit -m "chore(brew): zc-care cask for ${GITHUB_REF_NAME}" || echo "cask already up to date on develop"
+          git commit -m "chore(brew): zc-care cask for ${GITHUB_REF_NAME}"
           git push --force-with-lease origin "$branch"
           if [[ -z $(gh pr list --head "$branch" --state open --json number --jq '.[].number') ]]; then
             gh pr create --base develop --head "$branch" \
