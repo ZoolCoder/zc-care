@@ -382,6 +382,8 @@ final class Care {
         guard store.busy == nil, Alerts.confirm(store.removeQuestion(file.name),
                                                 "\(Store.bytes(file.size)) in \(file.url.deletingLastPathComponent().path).",
                                                 button: store.removeButton) else { return }
+        store.busy = "Removing \(file.name)"
+        defer { store.busy = nil }
         let removal = await remove([file.url])
         if removal.failures.isEmpty {
             largeFiles.removeAll { $0.id == file.id }
@@ -427,6 +429,8 @@ final class Care {
         guard store.busy == nil, allowed(others.map(\.url)), await !openInApp(others.map(\.url)), Alerts.confirm(store.removeQuestion(Store.counted(others.count, "similar image")),
                                                 "\(Store.bytes(group.wasted)). \(group.best.name) stays.",
                                                 button: store.removeButton) else { return }
+        store.busy = "Removing similar images"
+        defer { store.busy = nil }
         let (moved, trashed) = await removeEach(others)
         drop(Set(moved.map(\.id)))
         monitor.readDisk()
@@ -455,6 +459,8 @@ final class Care {
             store.message = Store.Message(text: "The copies of \(keeper.name) changed while you decided; Rescan to compare them again.", failed: true)
             return
         }
+        store.busy = "Removing copies of \(keeper.name)"
+        defer { store.busy = nil }
         let (moved, trashed) = await removeEach(others)
         let gone = Set(moved.map(\.id))
         duplicates = duplicates.compactMap { group in
@@ -707,7 +713,7 @@ final class Care {
         store.record(.ai, picked.count == 1 ? picked[0].tool : "AI Clutter", freed: freed, trashed: removal.trashed)
         monitor.readDisk()
         store.message = Store.Message(text: "AI clutter: freed \(Store.bytes(freed))" + removal.ending,
-                                      failed: false)
+                                      failed: !removal.failures.isEmpty)
     }
 
     // MARK: Applications

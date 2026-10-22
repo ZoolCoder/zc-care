@@ -35,16 +35,15 @@ public enum SimilarImages {
         let files = Duplicates.outsideRepos(LargeFiles.candidates(paths: paths, home: home, minimum: minimum), home: home)
             .sorted { ($0.modified ?? .distantPast) > ($1.modified ?? .distantPast) }
             .prefix(limit)
-        let printed = files.compactMap { file in featurePrint(file.url).map { (file, $0) } }
+        // Ranked first, so each group's seed is the image that stays and
+        // every other member was measured against it, not a lesser one.
+        let printed = ranked(Array(files), pixels: pixels).compactMap { file in featurePrint(file.url).map { (file, $0) } }
         let clusters = cluster(count: printed.count) { i, j in
             var d: Float = .infinity
             try? printed[i].1.computeDistance(&d, to: printed[j].1)
             return d
         }
-        return clusters.map { indices in
-            let group = indices.map { printed[$0].0 }
-            return SimilarGroup(files: ranked(group, pixels: pixels))
-        }
+        return clusters.map { indices in SimilarGroup(files: indices.map { printed[$0].0 }) }
         .sorted { $0.wasted > $1.wasted }
     }
 

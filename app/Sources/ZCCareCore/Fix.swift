@@ -23,6 +23,13 @@ public enum Fix: Equatable, Sendable {
     /// body that uncomments pam_tid.so or appends it. Tests use it.
     static let touchIDLine = #"sudo /bin/sh -c 'f=/etc/pam.d/sudo_local; if grep -q pam_tid.so $f 2>/dev/null; then sed -i "" "s/^#[[:space:]]*\(auth[[:space:]].*pam_tid\.so\)/\1/" $f; else printf "auth       sufficient     pam_tid.so\n" >> $f; fi'"#
 
+    /// The `sh -c` lines the doctor's table holds, in full: the only shell
+    /// bodies that may run as root, since a body is otherwise free text.
+    static let rootShellLines: Set<String> = [
+        touchIDLine,
+        "sudo /bin/sh -c 'launchctl disable system/com.apple.smbd; launchctl bootout system/com.apple.smbd 2>/dev/null; true'",
+    ]
+
     /// The programs a root fix may start, by full path and by name.
     static let rootPrograms: Set<String> = [
         "/usr/libexec/ApplicationFirewall/socketfilterfw", "socketfilterfw",
@@ -38,14 +45,16 @@ public enum Fix: Equatable, Sendable {
     /// The detail, when it is exactly one `sudo <program> ...` line of a
     /// listed program with nothing a shell would act on: prose around a
     /// command, or a second command, must not reach the password dialog.
-    /// `sh -c '<body>'` passes with a single-quoted body, which the outer
-    /// shell leaves alone.
+    /// `sh -c '<body>'` passes only as one of the doctor's own lines, with
+    /// a single-quoted body the outer shell leaves alone.
     static func rootCommand(in detail: String) -> String? {
         let line = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         guard line.hasPrefix("sudo "), !line.contains(where: \.isNewline) else { return nil }
         let command = String(line.dropFirst("sudo ".count))
         guard let program = command.split(separator: " ").first.map(String.init), rootPrograms.contains(program) else { return nil }
-        if program == "sh" || program == "/bin/sh" { return isQuotedShell(command, program: program) ? command : nil }
+        if program == "sh" || program == "/bin/sh" {
+            return isQuotedShell(command, program: program) && rootShellLines.contains(line) ? command : nil
+        }
         return command.allSatisfy(plainArgument.contains) ? command : nil
     }
 

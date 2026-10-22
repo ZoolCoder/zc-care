@@ -97,11 +97,12 @@ private func write(_ url: URL, bytes: Int) throws {
         "sudo sh -c chmod 777 /",
         "sudo sh -c 'echo it's'",
         "sudo bash -c 'true'",
+        // Quoted, but not one of the doctor's own lines: the body is free text.
+        "sudo sh -c 'softwareupdate --schedule on && defaults write /Library/x y -bool true'",
     ] {
         #expect(fix(detail) == .info(detail))
     }
-    let quoted = "sudo sh -c 'softwareupdate --schedule on && defaults write /Library/x y -bool true'"
-    guard case .command = fix(quoted) else { Issue.record("quoted sh -c lost its fix"); return }
+    guard case .command = fix(Fix.touchIDLine) else { Issue.record("the doctor's sh -c line lost its fix"); return }
     guard case .command = fix("sudo /usr/sbin/spctl --global-enable") else { Issue.record("listed program lost its fix"); return }
 }
 
