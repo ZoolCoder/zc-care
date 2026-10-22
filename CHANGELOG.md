@@ -4,7 +4,11 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
-## Unreleased
+## v0.3.0 — 2026-10-23
+
+Undo that refuses to overwrite a later edit, saved plans checked against the
+live state, a hook that asks before launchers and globs, Setapp and cloud
+aware cleanup, and pinned, reproducible release builds.
 
 ### ZC Care
 
