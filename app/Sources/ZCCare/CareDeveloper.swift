@@ -52,7 +52,6 @@ struct DeveloperView: View {
                                 Button(care.store.deletesPermanently ? "Delete \(picked.count)" : "Move \(picked.count) to Trash") {
                                     Task {
                                         await care.trashDependencies(care.dependencies.filter { picked.contains($0.id) })
-                                        picked.formIntersection(care.dependencies.map(\.id))
                                     }
                                 }
                                 .controlSize(.small)
@@ -95,6 +94,7 @@ struct DeveloperView: View {
                 .padding(.bottom, 70)
             }
         }
+        .onChange(of: care.dependencies.map(\.id)) { _, ids in picked.formIntersection(ids) }
     }
 
     private var xcode: some View {

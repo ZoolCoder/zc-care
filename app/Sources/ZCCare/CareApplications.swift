@@ -147,9 +147,12 @@ private struct AppFiles: View {
         .padding(.bottom, 8)
         .task(id: [app.id] + care.store.ignoreList.paths) {
             let app = app, home = NSHomeDirectory(), ignore = care.store.ignoreList, installed = care.installedIDs
-            files = await Task.detached(priority: .userInitiated) {
+            let found = await Task.detached(priority: .userInitiated) {
                 Leftovers.files(of: app, home: home, ignoring: ignore, installed: installed)
             }.value
+            // A newer task owns `files` once this one is cancelled.
+            guard !Task.isCancelled else { return }
+            files = found
         }
     }
 }

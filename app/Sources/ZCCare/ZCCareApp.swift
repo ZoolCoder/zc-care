@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settings = HostWindow(title: "ZC Care Settings", size: NSSize(width: 480, height: 600)) { [unowned self] in
         SettingsView(store: store) { [weak self] in self?.showWelcome() }
     }
+    private var toldHotkeyTaken = false
     private var welcome: HostWindow<WelcomeView>?
     private var apps: HostWindow<AppPickerView>?
     private var setup: HostWindow<SetupView>?
@@ -48,8 +49,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.openSettings = { [weak self] in self?.settings.show() }
         store.openApps = { [weak self] in self?.showApps() }
         store.openSetup = { [weak self] in self?.showSetup() }
-        store.hotkeyChanged = { [weak self] on in on ? self?.hotkey.register() : self?.hotkey.unregister() }
-        if store.hotkey { hotkey.register() }
+        store.hotkeyChanged = { [weak self] on in on ? self?.registerHotkey() : self?.hotkey.unregister() }
+        if store.hotkey { registerHotkey() }
         Task { await store.start() }
         care.care.startSchedule()
         // A Mac without a config starts in the Setup Assistant; the welcome
@@ -62,6 +63,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showWelcome()
             }
         }
+    }
+
+    /// Registers ⌃⌥Z; when another app holds it, the owner is told once.
+    private func registerHotkey() {
+        let status = hotkey.register()
+        guard status != noErr else { return }
+        NSLog("ZC Care: the ⌃⌥Z shortcut could not be registered (OSStatus \(status))")
+        guard !toldHotkeyTaken else { return }
+        toldHotkeyTaken = true
+        store.message = Store.Message(text: "The ⌃⌥Z shortcut is taken by another app (error \(status)).", failed: true)
     }
 
     /// A clicked alert opens where its fix is: a full disk Cleanup, the

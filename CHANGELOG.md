@@ -55,6 +55,39 @@ here with what to edit.
   manifests folder no longer turns off model cleanup, a corrupt activity log
   that cannot be moved aside is kept rather than overwritten, and Claude
   temp cleanup leaves a folder alone after reading 2000 entries.
+- Fix All as Administrator runs exactly the fixes the preview listed. If a
+  refresh changed which checks fail, nothing runs and the app asks you to
+  review again.
+- Cancel now works while installing, applying or updating, and stops the
+  running zc-care process.
+- The app picker shows the error when it cannot read this Mac's profiles,
+  instead of an empty list.
+- Free Up and Clean Up wait for a running scan to finish, so the confirmed
+  total always matches what is cleaned. Fixing a single finding rechecks that
+  no other change started while the confirmation was open.
+- If the Put Back record cannot be saved after a cleanup, the app says so.
+  Emptying the Trash now says why it failed.
+- My Workstation shows the error when it cannot load, and Refresh retries,
+  instead of spinning forever.
+- The app tells you once when another app already holds the Control-Option-Z
+  shortcut.
+- The floating panel stays open while a job runs and closes when it ends if
+  you clicked elsewhere meanwhile.
+- The network speed reader no longer reads past the end of a truncated
+  interface record.
+- Moving similar images, project dependencies or app leftovers to the Trash
+  no longer starts if another removal began while the app was checking for
+  open files. Clearing browser data refuses if the browser was started while
+  the confirmation was open.
+- Adopting an app into Homebrew shows the real reason when adding the cask to
+  the config fails. Removing a broken launch agent that your config declares
+  warns that the next apply recreates it.
+- Leftover file lists no longer show results of an older scan after a newer
+  one started. The Junk folder picker no longer clears everything while its
+  list is loading, and reopening it quickly no longer mixes lists. The
+  Developer view keeps its selection count in step with the list after
+  Rescan. Quitting a running app from the Mac tab waits while another job is
+  busy.
 - The app runs the automatic-login fix and the updated Touch ID fix from the
   doctor's own sudo lines, and shows AirDrop and automatic update findings
   as System Settings advice.

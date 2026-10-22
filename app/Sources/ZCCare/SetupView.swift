@@ -304,7 +304,8 @@ private struct SecureStep: View {
             loaded = true
         }
         .sheet(isPresented: $previewing) {
-            RootPreview(steps: Fix.rootSteps(for: failing)) { Task { await store.secureAll() } }
+            let steps = Fix.rootSteps(for: failing)
+            RootPreview(steps: steps) { Task { await store.secureAll(steps) } }
         }
     }
 

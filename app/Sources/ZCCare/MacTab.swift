@@ -427,7 +427,7 @@ private struct TopList: View {
                     Text(order == .memory ? Store.bytes(proc.memory, .memory) : "\(Int(proc.cpu.rounded())) %")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     if let app, app.activationPolicy == .regular, app != .current {
-                        Button("Quit") { store.quit(app) }.controlSize(.small)
+                        Button("Quit") { store.quit(app) }.controlSize(.small).gatedOnBusy(store)
                     }
                 }
                 .modifier(Hover())

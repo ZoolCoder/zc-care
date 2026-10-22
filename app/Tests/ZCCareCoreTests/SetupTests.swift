@@ -69,3 +69,9 @@ struct ScriptRunner: Runner {
     #expect(script.contains("--type authentication") && script.contains("--type signing"))
     #expect(script.contains("ssh-add --apple-use-keychain"))
 }
+
+@Test func joinedStepsRunAsOneCommandAndNoneRunsNothing() {
+    let steps = [Fix.RootStep(title: "a", command: "spctl --master-enable"), Fix.RootStep(title: "b", command: "softwareupdate --schedule on")]
+    #expect(Fix.joined(steps) == "spctl --master-enable && softwareupdate --schedule on")
+    #expect(Fix.joined([]) == nil)
+}

@@ -456,7 +456,8 @@ final class Care {
         guard store.busy == nil, !removing else { return }
         removing = true
         defer { removing = false }
-        guard allowed(others.map(\.url)), await !openInApp(others.map(\.url)), Alerts.confirm(store.removeQuestion(Store.counted(others.count, "similar image")),
+        guard allowed(others.map(\.url)), await !openInApp(others.map(\.url)), store.busy == nil,
+              Alerts.confirm(store.removeQuestion(Store.counted(others.count, "similar image")),
                                                 "\(Store.bytes(group.wasted)). \(group.best.name) stays.",
                                                 button: store.removeButton) else { return }
         store.busy = "Removing similar images"
@@ -626,7 +627,7 @@ final class Care {
             return
         }
         let total = folders.reduce(0) { $0 + $1.size }
-        guard Alerts.confirm(store.removeQuestion(Store.counted(folders.count, "dependency folder")),
+        guard store.busy == nil, Alerts.confirm(store.removeQuestion(Store.counted(folders.count, "dependency folder")),
                              "\(Store.bytes(total)). The next install in each project brings them back.\n\n"
                                  + Alerts.lines(folders.map { ($0.url.path as NSString).abbreviatingWithTildeInPath }),
                              button: store.removeButton) else { return }
@@ -958,7 +959,7 @@ final class Care {
               allowed(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
         removing = true
         defer { removing = false }
-        guard await !openInApp(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
+        guard await !openInApp(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }), store.busy == nil else { return }
         let total = picked.reduce(0) { $0 + $1.size }
         guard Alerts.confirm(store.removeQuestion("what \(Store.counted(picked.count, "removed app")) left"),
                              "\(Store.bytes(total)) in caches, settings and support files:\n\n"
@@ -1011,12 +1012,17 @@ final class Care {
             store.message = Store.Message(text: "\(app.name): \(installFailure)", failed: true)
             return
         }
-        let add = try? await cli.run(["add", "-target", target, "-why", "Adopted from /Applications by ZC Care", "cask:" + token])
-        store.message = add?.status == 0
-            ? Store.Message(text: "\(app.name) is now cask \(token) in \(target).", failed: false)
-            : Store.Message(text: "Homebrew adopted \(app.name), but add failed: \(lastLine(add?.stderr) ?? "")", failed: true)
+        var addFailure: String?
+        do {
+            let add = try await cli.run(["add", "-target", target, "-why", "Adopted from /Applications by ZC Care", "cask:" + token])
+            if add.status != 0 { addFailure = lastLine(add.stderr) ?? "exit status \(add.status)" }
+        } catch {
+            addFailure = error.localizedDescription
+        }
+        store.message = addFailure.map { Store.Message(text: "Homebrew adopted \(app.name), but add failed: \($0)", failed: true) }
+            ?? Store.Message(text: "\(app.name) is now cask \(token) in \(target).", failed: false)
         await loadApps()
-        if add?.status == 0 { await store.configChanged() }
+        if addFailure == nil { await store.configChanged() }
     }
 
     /// Removes by the choice in Settings: to the Trash, or for good.
@@ -1139,10 +1145,11 @@ final class Care {
     /// Boots out an agent whose program is gone and moves its plist to the
     /// Trash. Only the user's own: /Library's need an administrator.
     func remove(_ agent: LaunchAgent) async {
-        guard store.busy == nil, agent.path.hasPrefix(NSHomeDirectory() + "/"), allowed([URL(fileURLWithPath: agent.path)]),
-              Alerts.confirm("Remove \(agent.label)?",
+        guard store.busy == nil, agent.path.hasPrefix(NSHomeDirectory() + "/"), allowed([URL(fileURLWithPath: agent.path)]) else { return }
+        let drift = managed(agent) ? " Your zc-care config declares it, so this shows as drift and the next apply recreates it; remove it from the config too." : ""
+        guard Alerts.confirm("Remove \(agent.label)?",
                              "It runs \((agent.program as NSString).abbreviatingWithTildeInPath), which is gone. "
-                                 + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash."), button: "Remove") else { return }
+                                 + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash.") + drift, button: "Remove") else { return }
         store.busy = "Removing \(agent.label)"
         defer { store.busy = nil }
         await bootOut([agent.path])
@@ -1253,6 +1260,10 @@ final class Care {
                                  ? "This permanently deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)); nothing goes to the Trash.\n\n"
                                  : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect,
                              button: "Clear") else { return }
+        guard store.busy == nil, !isRunning(trace.bundleID) else {
+            store.message = Store.Message(text: "Quit \(trace.browser) first, then clear its \(trace.kind.lowercased()).", failed: true)
+            return
+        }
         store.busy = "Clearing \(trace.browser) \(trace.kind.lowercased())"
         defer { store.busy = nil }
         let permanently = store.deletesPermanently

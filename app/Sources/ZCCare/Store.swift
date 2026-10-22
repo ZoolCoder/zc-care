@@ -53,6 +53,9 @@ final class Store {
     /// reads them.
     var inventory: [Item]?
     var history: [HistoryEntry]?
+    var loadingWorkstation = false
+    /// Why My Workstation could not read; Refresh tries again.
+    var workstationError: String?
     /// What ZC Care cleaned and ran, for My Activity.
     var activity = ActivityLog.load(from: Store.activityFile)
     /// Launch agents that run on a calendar, such as the weekly upkeep.
@@ -400,10 +403,15 @@ final class Store {
         }
     }
 
-    /// Fixes every failed check that runs as root, behind one password
-    /// dialog. The caller has shown the commands and had them confirmed.
-    func secureAll() async {
-        guard busy == nil, let command = Fix.rootCommands(for: snapshot?.security ?? []) else { return }
+    /// Runs exactly the steps the owner confirmed, behind one password
+    /// dialog. A refresh may have changed which checks fail since the
+    /// preview: then nothing runs and the owner reviews the new list.
+    func secureAll(_ confirmed: [Fix.RootStep]) async {
+        guard busy == nil else { return }
+        guard Fix.rootSteps(for: snapshot?.security ?? []) == confirmed, let command = Fix.joined(confirmed) else {
+            message = Message(text: "The failed checks changed. Review the fixes again.", failed: true)
+            return
+        }
         busy = "Securing this Mac"
         defer { busy = nil }
         let failed = await asRoot(command)
@@ -497,12 +505,18 @@ final class Store {
                 return
             }
             if confirm || widened || doc.deletes, !Alerts.confirm(plan: doc) { return }
-            let result = try await careCLI.apply(saved: planFile)
+            let file = planFile
+            let applied = await cancellable { () -> Result<CommandResult, Error> in
+                do { return .success(try await careCLI.apply(saved: file)) } catch { return .failure(error) }
+            }
+            let result = try applied.get()
             let log = writeLog(result)
             plan = nil
             message = result.status == 0
                 ? Message(text: "\(label): done and verified.", failed: false, log: log)
                 : Message(text: lastLine(of: result) ?? "\(label) failed.", failed: true, log: log)
+        } catch is CancellationError {
+            message = Message(text: "\(label): cancelled.", failed: true)
         } catch {
             message = Message(text: error.localizedDescription, failed: true)
         }
@@ -629,6 +643,10 @@ final class Store {
         switch Fix(for: check) {
         case .command(let command):
             guard Alerts.confirm(fix: command, for: check.title) else { return }
+            guard busy == nil else {
+                message = Message(text: "Another change is still running.", failed: true)
+                return
+            }
             busy = "Fixing \(check.title)"
             defer { busy = nil }
             let failed = await asRoot(command)
@@ -652,13 +670,16 @@ final class Store {
     /// Workstation.
     func loadWorkstation() async {
         guard let careCLI else { return }
+        loadingWorkstation = true
+        defer { loadingWorkstation = false }
         async let items = careCLI.items()
         async let log = careCLI.history()
         do {
             inventory = try await items
             history = try await log
+            workstationError = nil
         } catch {
-            message = Message(text: error.localizedDescription, failed: true)
+            workstationError = error.localizedDescription
         }
     }
 

@@ -65,6 +65,12 @@ public enum Fix: Equatable, Sendable {
         return !command.dropFirst(opening.count).dropLast().contains("'")
     }
 
+    /// The steps as one command, so one password dialog runs them all.
+    /// Nil when there are none.
+    public static func joined(_ steps: [RootStep]) -> String? {
+        steps.isEmpty ? nil : steps.map(\.command).joined(separator: " && ")
+    }
+
     public init(for check: Check) {
         let detail = check.detail ?? ""
         if Fix.rootFixable.contains(check.name), let command = Fix.rootCommand(in: detail) {

@@ -128,6 +128,7 @@ private struct JunkRow: View {
     @State private var open = false
     @State private var entries: [JunkEntry]?
     @State private var picked: Set<String> = []
+    @State private var loading: Task<Void, Never>?
 
     var body: some View {
         let size = care.monitor.junk[spot.id]
@@ -140,7 +141,7 @@ private struct JunkRow: View {
                     .disabled((size ?? 0) == 0)
                 Button(open ? "Clear Selected" : "Clear") { Task { await clear() } }
                     .controlSize(.small)
-                    .disabled((size ?? 0) == 0 || care.store.busy != nil || (open && picked.isEmpty))
+                    .disabled((size ?? 0) == 0 || care.store.busy != nil || (open && (entries == nil || picked.isEmpty)))
             }
             if open {
                 if let entries {
@@ -199,12 +200,15 @@ private struct JunkRow: View {
     private func toggle() {
         guard entries != nil || !open else { return }
         open.toggle()
+        loading?.cancel()
         guard open else { return }
         entries = nil
+        picked = []
         let spot = spot
-        Task {
+        loading = Task {
             let keep = await care.monitor.keep(spot, open: care.monitor.runningApps())
             let found = await Task.detached { spot.contents(keeping: keep) }.value
+            guard open, !Task.isCancelled else { return }
             entries = found
             picked = Set(found.map(\.id))
         }

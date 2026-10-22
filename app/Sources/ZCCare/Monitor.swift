@@ -188,7 +188,11 @@ extension Store {
 
     func record(_ kind: ActivityEntry.Kind, _ title: String, freed bytes: Int64 = 0, trashed: [Trashed]? = nil) {
         activity.add(ActivityEntry(kind: kind, title: title, bytes: bytes, trashed: trashed?.isEmpty == true ? nil : trashed))
-        try? activity.save(to: Self.activityFile)
+        do {
+            try activity.save(to: Self.activityFile)
+        } catch {
+            message = Message(text: "\(title) is done, but Put Back could not be saved: \(error.localizedDescription)", failed: true)
+        }
     }
 
     /// Moves an entry's items out of the Trash to where they were. The
@@ -222,9 +226,14 @@ extension Store {
             : Message(text: "Could not put back \(stuck.joined(separator: ", ")).", failed: true)
     }
 
+    private func busyScanning() {
+        message = Message(text: "A scan is still running. Clean up once it finishes.", failed: true)
+    }
+
     /// Clears the folder, or only the entries picked in Cleanup's preview,
     /// whose sizes `picked` gives.
     func clean(_ spot: Junk, only picked: [JunkEntry]? = nil) async {
+        guard !monitor.scanning else { return busyScanning() }
         let size = monitor.junk[spot.id] ?? 0
         let verb = deletesPermanently ? "permanently deletes" : "moves to the Trash"
         let what = picked.map {
@@ -249,6 +258,7 @@ extension Store {
 
     /// Clears every Free Up folder after one question, for Smart Care.
     func cleanAll() async {
+        guard !monitor.scanning else { return busyScanning() }
         let spots = Junk.spots(home: NSHomeDirectory()).filter { (monitor.junk[$0.id] ?? 0) > 0 }
         let total = spots.reduce(Int64(0)) { $0 + (monitor.junk[$1.id] ?? 0) }
         let list = spots.map { "\($0.title): \(Self.bytes(monitor.junk[$0.id] ?? 0))" }.joined(separator: "\n")
@@ -288,12 +298,13 @@ extension Store {
         busy = "Emptying the Trash"
         defer { busy = nil }
         let before = monitor.vitals.disk?.available ?? 0
-        let r = try? await ProcessRunner().run("/usr/bin/osascript", ["-e", #"tell application "Finder" to empty trash"#], env: [:])
+        let failure = await self.failure("Finder refused") {
+            try await ProcessRunner().run("/usr/bin/osascript", ["-e", #"tell application "Finder" to empty trash"#], env: [:])
+        }
         monitor.readDisk()
-        if r?.status == 0 { record(.junk, "Trash Bins", freed: max((monitor.vitals.disk?.available ?? 0) - before, 0)) }
-        message = r?.status == 0
-            ? Message(text: "The Trash is empty.", failed: false)
-            : Message(text: "Trash not emptied. \(r?.stderr ?? "")", failed: true)
+        if failure == nil { record(.junk, "Trash Bins", freed: max((monitor.vitals.disk?.available ?? 0) - before, 0)) }
+        message = failure.map { Message(text: "Trash not emptied. \($0)", failed: true) }
+            ?? Message(text: "The Trash is empty.", failed: false)
     }
 
     func testSpeed() async {

@@ -138,7 +138,7 @@ struct AppPickerView: View {
             choice = loaded
             // The skip list already holds the Mac's pick: the chips show
             // who it is for without re-ticking.
-            let mine = (try? await store.setupCLI?.machineProfiles()) ?? []
+            let mine = try await store.setupCLI?.machineProfiles() ?? []
             profiles = Set(mine).intersection(loaded.profiles)
             phase = loaded.items.isEmpty ? .failed("Your config declares no packages.") : .picking
         } catch {
