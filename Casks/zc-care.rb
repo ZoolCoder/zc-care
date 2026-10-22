@@ -1,6 +1,6 @@
 cask "zc-care" do
-  version "0.2.0"
-  sha256 "cffaf3fcac62c2a900c4271c91c927655f1131c063dd1b03e2dc90b9fd0bce86"
+  version "0.3.0"
+  sha256 "31ed1a4b70c0662025ee857db31eb4131f2dfc498005131db3321b94baa696f5"
 
   url "https://github.com/zoolcoder/zc-care/releases/download/v#{version}/ZCCare_#{version}.zip"
   name "ZC Care"
