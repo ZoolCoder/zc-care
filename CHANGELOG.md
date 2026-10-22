@@ -9,7 +9,8 @@ here with what to edit.
 ### Release and CI
 
 - The security workflow scans `go.mod` with osv-scanner; the scanner has no
-  extractor for `go.sum` and failed every run.
+  extractor for `go.sum` and failed every run. `osv-scanner.toml` lists the
+  two findings it skips, with the reason for each.
 
 ## v0.3.0 — 2026-10-23
 
