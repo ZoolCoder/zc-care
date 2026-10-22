@@ -42,7 +42,7 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	r.AddCheck(doctor.Binary(name))
 	host, _ := os.Hostname()
 	r.Add("system", doctor.OK, fmt.Sprintf("%s %s/%s", host, runtime.GOOS, runtime.GOARCH))
-	cfg, err := config.Load(*path, nil)
+	cfg, err := config.Load(*path, stdin)
 	r.Err("config", err, fmt.Sprintf("%s, %d target(s)", *path, len(cfg.Targets)))
 	if err == nil {
 		eng, err := engine.New(cfg, engine.Default(), nil)
@@ -133,14 +133,21 @@ func shadowDetail(shadows []tools.Shadow) string {
 	return strings.Join(names, ", ") + `; activate mise last in the shell profile, after anything else that adds to PATH, such as eval "$(mise activate zsh)"`
 }
 
+// statusUnknown marks a check that could not read its answer. It is not a
+// failure, so it never changes doctor's exit code.
+const statusUnknown = "unknown"
+
 // addSecurity reports a check. A weak setting is the owner's call, not a
 // broken install, so it warns.
 func addSecurity(r *doctor.Report, prefix string, res security.Result) {
-	if res.OK {
-		r.Add(prefix+res.Name, doctor.OK, "")
-	} else {
-		r.Add(prefix+res.Name, doctor.Warn, res.Detail)
+	status := doctor.Warn
+	switch {
+	case res.OK:
+		status = doctor.OK
+	case res.Unknown:
+		status = statusUnknown
 	}
+	r.Add(prefix+res.Name, status, res.Detail)
 }
 
 func writeJSON(w io.Writer, v any) error {

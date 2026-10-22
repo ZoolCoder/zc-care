@@ -27,22 +27,33 @@ var claudeSettings = []string{".claude/settings.json", ".claude/settings.local.j
 type mcpServer struct {
 	Command string            `json:"command"`
 	Args    []string          `json:"args"`
+	URL     string            `json:"url"`
 	Env     map[string]string `json:"env"`
 	Headers map[string]string `json:"headers"`
 }
 
 var (
-	secretName = regexp.MustCompile(`(?i)(key|token|secret|password|auth)`)
+	camelBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
+	// secretWord is a whole word in a name, so AUTHOR and MONKEY pass.
+	secretWord = regexp.MustCompile(`(^|[^a-z])(api[-_]?key|key|token|secret|password|passwd|o?auth|authorization|credentials?)s?([^a-z]|$)`)
 	// tomlSecret is a secret-named key set to a literal in Codex's TOML.
 	tomlSecret = regexp.MustCompile(`(?im)^\s*"?([a-z0-9_]*(?:key|token|secret|password)[a-z0-9_]*)"?\s*=\s*"[^"$]{8,}"`)
+	// argSecret is a flag with its value attached, such as --api-key=abc.
+	argSecret = regexp.MustCompile(`^--?([\w-]+)=(.+)$`)
+	// urlSecret is a query parameter, such as ?key=abc.
+	urlSecret = regexp.MustCompile(`[?&]([\w.-]+)=([^&#\s]+)`)
 )
+
+func isSecretName(name string) bool {
+	return secretWord.MatchString(strings.ToLower(camelBoundary.ReplaceAllString(name, "${1}_${2}")))
+}
 
 // AI checks the configs that give AI agents tools: MCP servers holding API
 // keys in plain text, MCP servers that run whatever version a package
 // registry serves today, and Claude Code permission rules that let any shell
 // command run without a question.
 func (u User) AI() []Result {
-	servers := map[string]map[string]mcpServer{} // file -> name -> server
+	servers := map[string]map[string]mcpServer{} // where -> name -> server
 	for _, f := range mcpConfigs {
 		var doc struct {
 			MCPServers map[string]mcpServer `json:"mcpServers"`
@@ -53,20 +64,35 @@ func (u User) AI() []Result {
 		if !u.readJSON(f, &doc) {
 			continue
 		}
-		all := maps.Clone(doc.MCPServers)
-		if all == nil {
-			all = map[string]mcpServer{}
+		servers["~/"+f] = doc.MCPServers
+		for dir, p := range doc.Projects {
+			servers["~/"+f+"#"+dir] = p.MCPServers
+			if f == ".claude.json" {
+				u.addProjectServers(servers, dir)
+			}
 		}
-		for _, p := range doc.Projects {
-			maps.Copy(all, p.MCPServers)
-		}
-		servers["~/"+f] = all
 	}
 	return []Result{u.plaintextKeys(servers), unpinned(servers), u.broadPermissions()}
 }
 
-func (u User) readJSON(rel string, v any) bool {
-	b, err := os.ReadFile(filepath.Join(u.home, rel))
+// addProjectServers adds the servers a project shares in its own .mcp.json.
+func (u User) addProjectServers(servers map[string]map[string]mcpServer, dir string) {
+	if !filepath.IsAbs(dir) {
+		return
+	}
+	file := filepath.Join(dir, ".mcp.json")
+	var doc struct {
+		MCPServers map[string]mcpServer `json:"mcpServers"`
+	}
+	if readJSONAt(file, &doc) {
+		servers[strings.Replace(file, u.home+string(filepath.Separator), "~/", 1)] = doc.MCPServers
+	}
+}
+
+func (u User) readJSON(rel string, v any) bool { return readJSONAt(filepath.Join(u.home, rel), v) }
+
+func readJSONAt(file string, v any) bool {
+	b, err := os.ReadFile(file)
 	return err == nil && json.Unmarshal(b, v) == nil
 }
 
@@ -75,13 +101,8 @@ func (u User) plaintextKeys(servers map[string]map[string]mcpServer) Result {
 	var found []string
 	for _, file := range slices.Sorted(maps.Keys(servers)) {
 		for _, n := range slices.Sorted(maps.Keys(servers[file])) {
-			s := servers[file][n]
-			for _, vars := range []map[string]string{s.Env, s.Headers} {
-				for _, k := range slices.Sorted(maps.Keys(vars)) {
-					if secretName.MatchString(k) && literal(vars[k]) {
-						found = append(found, file+" "+n+"."+k)
-					}
-				}
+			for _, key := range servers[file][n].literalSecrets() {
+				found = append(found, file+" "+n+"."+key)
 			}
 		}
 	}
@@ -97,13 +118,46 @@ func (u User) plaintextKeys(servers map[string]map[string]mcpServer) Result {
 		"; move each key to the keychain or a password manager and pass it in as ${VAR}"}
 }
 
-// literal is a value written out, not a reference to the environment.
-func literal(v string) bool {
-	return len(v) >= 8 && !strings.HasPrefix(v, "$") && !strings.Contains(v, "{{")
+// literalSecrets names where the server holds a secret written out: an env
+// var or header, a --flag=value argument, or a query parameter in a URL.
+func (s mcpServer) literalSecrets() []string {
+	var found []string
+	for _, vars := range []map[string]string{s.Env, s.Headers} {
+		for _, k := range slices.Sorted(maps.Keys(vars)) {
+			if isSecretName(k) && literal(vars[k]) {
+				found = append(found, k)
+			}
+		}
+	}
+	for _, a := range s.Args {
+		if m := argSecret.FindStringSubmatch(a); m != nil && isSecretName(m[1]) && literal(m[2]) {
+			found = append(found, "--"+strings.TrimLeft(m[1], "-"))
+		}
+	}
+	for _, u := range append([]string{s.URL}, s.Args...) {
+		for _, m := range urlSecret.FindAllStringSubmatch(u, -1) {
+			if isSecretName(m[1]) && literal(m[2]) {
+				found = append(found, "url?"+m[1])
+			}
+		}
+	}
+	return found
 }
 
-// unpinned names MCP servers started through npx, bunx or uvx without a
-// version: each start runs whatever the registry serves that day.
+// literal is a value written out, not a reference to the environment. An
+// Authorization header keeps its scheme in front of the secret.
+func literal(v string) bool {
+	for _, scheme := range []string{"Bearer ", "Basic "} {
+		if len(v) >= len(scheme) && strings.EqualFold(v[:len(scheme)], scheme) {
+			v = strings.TrimSpace(v[len(scheme):])
+			break
+		}
+	}
+	return len(v) >= 8 && !strings.HasPrefix(v, "$") && !strings.Contains(v, "${") && !strings.Contains(v, "{{")
+}
+
+// unpinned names MCP servers started through npx, bunx or uvx without an
+// exact version: each start runs whatever the registry serves that day.
 func unpinned(servers map[string]map[string]mcpServer) Result {
 	const name = "MCP servers pinned to a version"
 	var found []string
@@ -121,26 +175,66 @@ func unpinned(servers map[string]map[string]mcpServer) Result {
 		"; name a version, such as pkg@1.2.3, and update it on purpose"}
 }
 
-// floating returns the package a runner starts when no version pins it.
+var (
+	npmVersion = regexp.MustCompile(`^\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]+)?$`)
+	pyVersion  = regexp.MustCompile(`^\d[\w.+!-]*$`)
+)
+
+// exactVersion is pkg@1.2.3 or pkg==1.2.3; a tag (latest, beta), a range
+// (^1.2, >=1) or a partial version (1, 1.2) moves.
+func exactVersion(spec string) bool {
+	if i := strings.Index(spec, "=="); i > 0 {
+		return pyVersion.MatchString(spec[i+2:])
+	}
+	// A scoped package starts with @; its version follows the next @.
+	at := strings.LastIndex(spec, "@")
+	return at > 0 && npmVersion.MatchString(spec[at+1:])
+}
+
+// valueFlags take the next argument as their value, which is not a package.
+var valueFlags = []string{
+	"-c", "--call", "--registry", "--prefix", "--cache", "--node-options", "--userconfig",
+	"--python", "--with", "--with-requirements", "--index", "--index-url", "--env-file", "--directory",
+}
+
+// packages are the specs a runner fetches: those named by -p, --package or
+// --from, else the first argument that is not an option.
+func packages(runner string, args []string) []string {
+	var named []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		flag, value, attached := strings.Cut(a, "=")
+		switch {
+		case flag == "--package" || flag == "--from" || (flag == "-p" && runner != "uvx"):
+			if !attached && i+1 < len(args) {
+				value = args[i+1]
+				i++
+			}
+			named = append(named, value)
+		case slices.Contains(valueFlags, flag) || (flag == "-p" && runner == "uvx"):
+			if !attached {
+				i++
+			}
+		case strings.HasPrefix(a, "-"):
+		case len(named) > 0:
+			return named
+		default:
+			return []string{a}
+		}
+	}
+	return named
+}
+
+// floating returns the first package a runner starts without an exact version.
 func floating(s mcpServer) (string, bool) {
 	runner := path.Base(filepath.ToSlash(s.Command))
 	if !slices.Contains([]string{"npx", "bunx", "uvx", "pnpx"}, runner) {
 		return "", false
 	}
-	for _, a := range s.Args {
-		if strings.HasPrefix(a, "-") {
-			continue
+	for _, pkg := range packages(runner, s.Args) {
+		if !exactVersion(pkg) {
+			return pkg, true
 		}
-		if runner == "uvx" {
-			return a, !strings.Contains(a, "==") && !strings.Contains(a, "@")
-		}
-		// A scoped package starts with @; its version follows the next @.
-		at := strings.LastIndex(a, "@")
-		version := ""
-		if at > 0 {
-			version = a[at+1:]
-		}
-		return a, version == "" || version == "latest"
 	}
 	return "", false
 }

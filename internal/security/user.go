@@ -6,14 +6,19 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/zoolcoder/zc-care/internal/sh"
 )
+
+// scanTimeout bounds one gitleaks run over a long history.
+const scanTimeout = 60 * time.Second
 
 // User checks what lives in the home folder on every system: keys that open
 // without a passphrase, unsigned commits, secrets typed into the shell, and
@@ -57,7 +62,8 @@ func (u User) sshKeys() Result {
 }
 
 // unprotectedKey reads a private key's header: an OpenSSH key names its
-// cipher, a PEM key says ENCRYPTED when it has a passphrase.
+// cipher, a PEM key says ENCRYPTED when it has a passphrase. A FIDO key
+// (sk-...) is only a handle to the hardware token, so it holds no secret.
 func unprotectedKey(b []byte) bool {
 	const openssh = "-----BEGIN OPENSSH PRIVATE KEY-----"
 	switch {
@@ -66,16 +72,40 @@ func unprotectedKey(b []byte) bool {
 		body, _, _ = strings.Cut(body, "-----END")
 		raw, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(body), ""))
 		magic := "openssh-key-v1\x00"
-		if err != nil || !strings.HasPrefix(string(raw), magic) || len(raw) < len(magic)+4 {
+		if err != nil || !strings.HasPrefix(string(raw), magic) {
 			return false
 		}
+		// cipher, kdf, kdf options, key count, then the public key blob.
 		raw = raw[len(magic):]
-		n := binary.BigEndian.Uint32(raw)
-		return int(n) <= len(raw)-4 && string(raw[4:4+n]) == "none"
+		cipher, raw, ok := sshString(raw)
+		for i := 0; i < 2 && ok; i++ {
+			_, raw, ok = sshString(raw)
+		}
+		if !ok || len(raw) < 4 {
+			return false
+		}
+		blob, _, ok := sshString(raw[4:])
+		keyType, _, _ := sshString(blob)
+		if !ok {
+			return false
+		}
+		return string(cipher) == "none" && !strings.HasPrefix(string(keyType), "sk-")
 	case bytes.Contains(b, []byte("PRIVATE KEY-----")):
 		return !bytes.Contains(b, []byte("ENCRYPTED"))
 	}
 	return false
+}
+
+// sshString reads one length-prefixed field of the OpenSSH key format.
+func sshString(b []byte) (field, rest []byte, ok bool) {
+	if len(b) < 4 {
+		return nil, nil, false
+	}
+	n := binary.BigEndian.Uint32(b)
+	if uint64(n) > uint64(len(b)-4) {
+		return nil, nil, false
+	}
+	return b[4 : 4+n], b[4+n:], true
 }
 
 // commitSigning checks that git signs commits, so a pushed commit provably
@@ -93,38 +123,60 @@ func (u User) commitSigning(ctx context.Context) Result {
 
 // historySecrets runs gitleaks over the shell histories and atuin's, and
 // reports which rules matched where. --redact keeps the secret itself out of
-// what gitleaks returns.
+// what gitleaks returns. A scan that failed says so: it is not a clean one.
 func (u User) historySecrets(ctx context.Context) Result {
 	const name = "no secrets in shell history"
 	if !u.r.Has("gitleaks") {
 		return Result{Name: name, Warn: true, Detail: "install gitleaks to check: brew install gitleaks"}
 	}
 	scan := []string{"--no-banner", "--redact", "--report-format", "json", "--report-path", "-", "--exit-code", "0"}
-	var found []string
+	var found, failed []string
+	record := func(where, report string, err error) {
+		if err == nil {
+			var hits []string
+			if hits, err = leaks(where, []byte(report)); err == nil {
+				found = append(found, hits...)
+				return
+			}
+		}
+		failed = append(failed, where+": "+err.Error())
+	}
 	for _, f := range []string{".zsh_history", ".bash_history", ".local/share/fish/fish_history"} {
 		path := filepath.Join(u.home, f)
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		out, _ := u.r.Output(ctx, "gitleaks", append([]string{"dir", path}, scan...)...)
-		found = append(found, leaks("~/"+f, out)...)
+		out, err := output(ctx, u.r, scanTimeout, append([]string{"gitleaks", "dir", path}, scan...)...)
+		record("~/"+f, out, err)
 	}
 	if u.r.Has("atuin") {
-		out, _ := u.r.Output(ctx, "/bin/sh", "-c", "atuin history list --cmd-only | gitleaks stdin "+strings.Join(scan, " "))
-		found = append(found, leaks("atuin", out)...)
+		// pipefail makes a failing atuin fail the scan, not pass it as empty.
+		out, err := output(ctx, u.r, scanTimeout, "/bin/sh", "-c",
+			"set -o pipefail; atuin history list --cmd-only | gitleaks stdin "+strings.Join(scan, " "))
+		record("atuin", out, err)
 	}
-	if len(found) == 0 {
+	var detail []string
+	if len(failed) > 0 {
+		detail = append(detail, "gitleaks failed: "+strings.Join(failed, ", "))
+	}
+	if len(found) > 0 {
+		detail = append(detail, strings.Join(found, ", ")+"; rotate those secrets, then delete the lines from the history")
+	}
+	if len(detail) == 0 {
 		return Result{Name: name, OK: true}
 	}
-	return Result{Name: name, Warn: true, Detail: strings.Join(found, ", ") +
-		"; rotate those secrets, then delete the lines from the history"}
+	return Result{Name: name, Warn: true, Detail: strings.Join(detail, "; ")}
 }
 
-// leaks summarises a gitleaks JSON report as "where: rule xN".
-func leaks(where string, report []byte) []string {
+// leaks summarises a gitleaks JSON report as "where: rule xN". gitleaks
+// prints [] when it finds nothing, so anything but a JSON array is an error.
+func leaks(where string, report []byte) ([]string, error) {
+	if !bytes.HasPrefix(bytes.TrimSpace(report), []byte("[")) {
+		return nil, errors.New("no JSON report")
+	}
 	var findings []struct{ RuleID string }
-	if json.Unmarshal(report, &findings) != nil {
-		return nil
+	if err := json.Unmarshal(report, &findings); err != nil {
+		return nil, fmt.Errorf("unreadable report: %w", err)
 	}
 	count := map[string]int{}
 	var rules []string
@@ -139,5 +191,5 @@ func leaks(where string, report []byte) []string {
 	for _, r := range rules {
 		out = append(out, fmt.Sprintf("%s: %s x%d", where, r, count[r]))
 	}
-	return out
+	return out, nil
 }

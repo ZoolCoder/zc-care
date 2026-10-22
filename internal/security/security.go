@@ -6,11 +6,14 @@ package security
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zoolcoder/zc-care/internal/sh"
 )
@@ -22,12 +25,20 @@ type Result struct {
 	Detail string
 	// Warn marks a finding to look at rather than a failure.
 	Warn bool
+	// Unknown marks a check that could not read its answer; Detail says why.
+	// It is neither a pass nor a failure, and it never carries a fix.
+	Unknown bool
 	// Fix is the commands that repair a failed check, when commands can; the
 	// rest stay advice in Detail.
 	Fix [][]string
 }
 
-const firewall = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+const (
+	firewall       = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+	softwareUpdate = "/Library/Preferences/com.apple.SoftwareUpdate"
+
+	readTimeout = 10 * time.Second
+)
 
 type check struct {
 	name, fix string
@@ -39,6 +50,30 @@ func contains(s string) func(string) bool {
 	return func(out string) bool { return strings.Contains(out, s) }
 }
 
+// listens reports whether netstat output shows a TCP server on port that
+// another machine can reach: a wildcard or LAN address, not loopback.
+func listens(port string) func(string) bool {
+	return func(out string) bool {
+		for _, line := range strings.Split(out, "\n") {
+			f := strings.Fields(line)
+			if len(f) < 6 || !strings.HasPrefix(f[0], "tcp") || f[len(f)-1] != "LISTEN" {
+				continue
+			}
+			addr, ok := strings.CutSuffix(f[3], "."+port)
+			if ok && addr != "::1" && addr != "localhost" && !strings.HasPrefix(addr, "127.") {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+func not(f func(string) bool) func(string) bool {
+	return func(out string) bool { return !f(out) }
+}
+
+var netstat = []string{"netstat", "-an", "-p", "tcp"}
+
 var checks = []check{
 	{"FileVault disk encryption", "turn FileVault on in System Settings, Privacy & Security",
 		[]string{"fdesetup", "status"}, contains("FileVault is On")},
@@ -46,37 +81,25 @@ var checks = []check{
 		[]string{firewall, "--getglobalstate"}, contains("is enabled")},
 	{"firewall stealth mode", "sudo " + firewall + " --setstealthmode on",
 		[]string{firewall, "--getstealthmode"}, contains("mode is on")},
-	// sysadminctl prints its answer to standard error.
-	{"password after sleep or screen saver", "System Settings, Lock Screen: require a password immediately",
-		[]string{"/bin/sh", "-c", "sysadminctl -screenLock status 2>&1"},
-		func(out string) bool {
-			return strings.Contains(out, "screenLock") && !strings.Contains(out, "screenLock is off")
-		}},
 	{"Gatekeeper", "sudo spctl --global-enable",
 		[]string{"spctl", "--status"}, contains("assessments enabled")},
 	{"System Integrity Protection", "start up in Recovery and run csrutil enable",
 		[]string{"csrutil", "status"}, contains("status: enabled")},
 	{"automatic update checks", "sudo softwareupdate --schedule on",
 		[]string{"softwareupdate", "--schedule"}, contains("turned on")},
-	{"security updates install on their own", "System Settings, General, Software Update, Automatic updates: turn on security responses",
-		[]string{"/bin/sh", "-c", "defaults read /Library/Preferences/com.apple.SoftwareUpdate CriticalUpdateInstall; defaults read /Library/Preferences/com.apple.SoftwareUpdate ConfigDataInstall"},
-		func(out string) bool {
-			return strings.Fields(out) != nil && slices.Equal(strings.Fields(out), []string{"1", "1"})
-		}},
-	{"File Sharing off", "sudo launchctl disable system/com.apple.smbd",
-		[]string{"netstat", "-an", "-p", "tcp"},
-		func(out string) bool { return !smb.MatchString(out) }},
+	{"File Sharing off", fixLine("File Sharing off"), netstat, not(listens("445"))},
 	{"Remote Login off", "System Settings, General, Sharing: turn Remote Login off, or limit it to your user",
-		[]string{"netstat", "-an", "-p", "tcp"},
-		func(out string) bool { return !sshd.MatchString(out) }},
+		netstat, not(listens("22"))},
 	{"Screen Sharing off", "System Settings, General, Sharing: turn Screen Sharing and Remote Management off",
-		[]string{"netstat", "-an", "-p", "tcp"},
-		func(out string) bool { return !vnc.MatchString(out) }},
+		netstat, not(listens("5900"))},
 	// Each reads a key that is absent on a safe Mac, so the shell forgives
 	// the error and an empty answer passes.
 	{"automatic login off", "System Settings, Users & Groups: set Automatically log in as to Off",
 		[]string{"/bin/sh", "-c", "defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null; true"},
 		func(out string) bool { return strings.TrimSpace(out) == "" }},
+	{"Guest account off", fixLine("Guest account off"),
+		[]string{"/bin/sh", "-c", "defaults read /Library/Preferences/com.apple.loginwindow GuestEnabled 2>/dev/null; true"},
+		func(out string) bool { return slices.Contains([]string{"", "0"}, strings.TrimSpace(out)) }},
 	// A Mac without a backup disk says so on standard error.
 	{"Time Machine backups", "System Settings, General, Time Machine: add a backup disk",
 		[]string{"/bin/sh", "-c", "tmutil destinationinfo 2>&1; true"},
@@ -86,13 +109,8 @@ var checks = []check{
 		func(out string) bool { return !strings.Contains(out, "Everyone") }},
 }
 
-var (
-	smb  = regexp.MustCompile(`[.:]445 .*LISTEN`)
-	sshd = regexp.MustCompile(`[.:]22 .*LISTEN`)
-	vnc  = regexp.MustCompile(`[.:]5900 .*LISTEN`)
-	// touchID is the line sudo_local.template ships commented out.
-	touchID = regexp.MustCompile(`(?m)^auth\s+sufficient\s+pam_tid\.so`)
-)
+// touchID is the line sudo_local.template ships commented out.
+var touchID = regexp.MustCompile(`(?m)^auth\s+sufficient\s+pam_tid\.so`)
 
 // Checker runs the checks through r; pam is the sudo PAM file that enables
 // Touch ID.
@@ -103,17 +121,41 @@ type Checker struct {
 
 func New(r sh.Runner) Checker { return Checker{r: r, pam: "/etc/pam.d/sudo_local"} }
 
-// Run runs every check, in a fixed order.
+// Run runs every check, in a fixed order. A check that cannot read its
+// answer is Unknown, not a failure.
 func (c Checker) Run(ctx context.Context) []Result {
 	var results []Result
 	for _, ch := range checks {
-		out, err := c.r.Output(ctx, ch.cmd[0], ch.cmd[1:]...)
-		results = append(results, result(ch.name, err == nil && ch.pass(string(out)), ch.fix))
+		out, err := output(ctx, c.r, readTimeout, ch.cmd...)
+		if err != nil {
+			results = append(results, unknown(ch.name, err))
+			continue
+		}
+		results = append(results, result(ch.name, ch.pass(out), ch.fix))
 	}
+	results = append(results, c.screenLock(ctx)...)
+	results = append(results, c.securityUpdates(ctx))
 	pam, _ := os.ReadFile(c.pam)
-	results = append(results, result("Touch ID for sudo", touchID.Match(pam),
-		`sed "s/^#auth/auth/" /etc/pam.d/sudo_local.template | sudo tee /etc/pam.d/sudo_local`))
+	results = append(results, result("Touch ID for sudo", touchID.Match(pam), fixLine("Touch ID for sudo")))
 	return append(results, c.exposed(ctx))
+}
+
+var errTimeout = errors.New("timed out")
+
+// output runs a command with a time limit, so one stuck tool cannot hang
+// the report. The error carries the command's standard error.
+func output(ctx context.Context, r sh.Runner, limit time.Duration, argv ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	out, err := r.Output(ctx, argv[0], argv[1:]...)
+	if err != nil && ctx.Err() != nil {
+		err = fmt.Errorf("%s: %w after %s", sh.Line(argv[0], argv[1:]...), errTimeout, limit)
+	}
+	return string(out), err
+}
+
+func unknown(name string, err error) Result {
+	return Result{Name: name, Unknown: true, Detail: "could not read: " + err.Error()}
 }
 
 func result(name string, ok bool, fix string) Result {
@@ -123,18 +165,101 @@ func result(name string, ok bool, fix string) Result {
 	return Result{Name: name, Detail: fix, Fix: fixes[name]}
 }
 
+var lockDelay = regexp.MustCompile(`delay is (\d+) second`)
+
+// screenLock checks that a password is asked at once or within 5 seconds of
+// sleep or the screen saver, then the screen saver's own delay.
+func (c Checker) screenLock(ctx context.Context) []Result {
+	const name = "password after sleep or screen saver"
+	const advice = "System Settings, Lock Screen: require a password immediately"
+	// sysadminctl prints its answer to standard error.
+	out, err := output(ctx, c.r, readTimeout, "/bin/sh", "-c", "sysadminctl -screenLock status 2>&1")
+	var lock Result
+	switch {
+	case err != nil:
+		lock = unknown(name, err)
+	case strings.Contains(out, "screenLock is off"):
+		lock = result(name, false, advice)
+	case strings.Contains(out, "immediate"):
+		lock = result(name, true, advice)
+	case lockDelay.MatchString(out):
+		seconds, _ := strconv.Atoi(lockDelay.FindStringSubmatch(out)[1])
+		lock = result(name, seconds <= 5, advice)
+	default:
+		lock = unknown(name, fmt.Errorf("unexpected answer %q", strings.TrimSpace(out)))
+	}
+	return []Result{lock, c.screenSaver(ctx)}
+}
+
+// screenSaver reads the idle seconds before the screen saver starts; the key
+// is absent until someone sets it, and 0 means never.
+func (c Checker) screenSaver(ctx context.Context) Result {
+	const name = "screen saver starts within 10 minutes"
+	out, err := output(ctx, c.r, readTimeout, "/bin/sh", "-c",
+		"defaults -currentHost read com.apple.screensaver idleTime 2>/dev/null; true")
+	if err != nil {
+		return unknown(name, err)
+	}
+	idle, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil || (idle > 0 && idle <= 600) {
+		return Result{Name: name, OK: true}
+	}
+	return Result{Name: name, Warn: true, Detail: "System Settings, Lock Screen: start the screen saver after 10 minutes or less"}
+}
+
+// updateKeys are the automatic update settings. Apple turns each on until
+// someone turns it off, so an absent key counts as on.
+var updateKeys = []string{"CriticalUpdateInstall", "ConfigDataInstall", "AutomaticDownload", "AutomaticallyInstallMacOSUpdates"}
+
+func (c Checker) securityUpdates(ctx context.Context) Result {
+	const name = "security updates install on their own"
+	var script strings.Builder
+	for _, k := range updateKeys {
+		fmt.Fprintf(&script, "echo %s=$(defaults read %s %s 2>/dev/null); ", k, softwareUpdate, k)
+	}
+	out, err := output(ctx, c.r, readTimeout, "/bin/sh", "-c", script.String())
+	if err != nil {
+		return unknown(name, err)
+	}
+	var off, absent []string
+	for _, line := range strings.Split(out, "\n") {
+		key, value, _ := strings.Cut(strings.TrimSpace(line), "=")
+		switch {
+		case key == "":
+		case value == "0":
+			off = append(off, key)
+		case value == "":
+			absent = append(absent, key)
+		}
+	}
+	if len(off) > 0 {
+		r := result(name, false, "System Settings, General, Software Update, Automatic updates: turn on security responses")
+		r.Detail += " (off: " + strings.Join(off, ", ") + ")"
+		return r
+	}
+	r := Result{Name: name, OK: true}
+	if len(absent) > 0 {
+		r.Detail = "not set, so on by default: " + strings.Join(absent, ", ")
+	}
+	return r
+}
+
 // exposed lists servers listening on every network interface, which any
 // network you join can reach; a dev server is safer on 127.0.0.1. rapportd is
 // macOS's own Continuity service.
 func (c Checker) exposed(ctx context.Context) Result {
 	const name = "servers on every network interface"
-	// lsof exits 1 when nothing listens. Field output, one field a line,
-	// keeps whole names with spaces; +c 0 stops it cutting them at 9.
-	out, _ := c.r.Output(ctx, "lsof", "-nP", "+c", "0", "-iTCP", "-sTCP:LISTEN", "-Fcn")
+	// lsof exits 1 when nothing listens, so only a timeout is an error. Field
+	// output, one field a line, keeps whole names with spaces; +c 0 stops it
+	// cutting them at 9.
+	out, err := output(ctx, c.r, readTimeout, "lsof", "-nP", "+c", "0", "-iTCP", "-sTCP:LISTEN", "-Fcn")
+	if errors.Is(err, errTimeout) {
+		return unknown(name, err)
+	}
 	var commands []string
 	ports := map[string][]string{}
 	var command string
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		switch {
 		case strings.HasPrefix(line, "c"):
 			command = line[1:]
