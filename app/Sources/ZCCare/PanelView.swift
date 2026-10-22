@@ -675,6 +675,7 @@ private struct ServiceRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help(item.kind == "agent" ? "Run Now, Reload or Unload" : "Restart or Stop")
         }
         .disabled(store.busy != nil)
         .modifier(Hover())

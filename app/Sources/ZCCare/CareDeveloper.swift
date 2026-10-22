@@ -49,7 +49,7 @@ struct DeveloperView: View {
                                     picked = picked.count == care.dependencies.count ? [] : Set(care.dependencies.map(\.id))
                                 }
                                 .controlSize(.small)
-                                Button("Move \(picked.count) to Trash") {
+                                Button(care.store.deletesPermanently ? "Delete \(picked.count)" : "Move \(picked.count) to Trash") {
                                     Task {
                                         await care.trashDependencies(care.dependencies.filter { picked.contains($0.id) })
                                         picked.formIntersection(care.dependencies.map(\.id))
@@ -62,7 +62,11 @@ struct DeveloperView: View {
                         }
                     }
                     if !care.xcodeSpots.isEmpty { xcode }
-                    if let usage = care.docker, !usage.isEmpty { docker(usage) }
+                    if let usage = care.docker, !usage.isEmpty {
+                        docker(usage)
+                    } else if care.docker == nil, dockerInstalled {
+                        dockerDown
+                    }
                     CareSection("Local AI Models") {
                         if care.models.isEmpty {
                             Text(care.scanningDeveloper ? "Looking for models…"
@@ -79,9 +83,10 @@ struct DeveloperView: View {
                                 }
                                 .controlSize(.small)
                                 .help("Show in Finder")
-                                Button("Trash") { Task { await care.trash(model) } }
+                                Button(removalButton(care.store)) { Task { await care.trash(model) } }
                                     .controlSize(.small)
-                                    .disabled(care.store.busy != nil)
+                                    .help(removalVerb(care.store))
+                                    .gatedOnBusy(care.store)
                             }
                         }
                     }
@@ -102,9 +107,10 @@ struct DeveloperView: View {
                     }
                     .controlSize(.small)
                     .help("Show in Finder")
-                    Button("Trash") { Task { await care.trash(spot) } }
+                    Button(removalButton(care.store)) { Task { await care.trash(spot) } }
                         .controlSize(.small)
-                        .disabled(care.store.busy != nil)
+                        .help(removalVerb(care.store))
+                        .gatedOnBusy(care.store)
                 }
             }
         }
@@ -119,13 +125,13 @@ struct DeveloperView: View {
                     value: Store.bytes(item.size)) { EmptyView() }
             }
             HStack {
-                Text("Pruning removes what no container uses; images are pulled or built again.")
+                Text("Pruning deletes for good, there is no Trash for it. Build cache and dangling images come back when Docker builds or pulls.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Prune Build Cache") {
                     Task {
                         await care.pruneDocker("Prune Docker build cache", arguments: Docker.pruneBuildCache,
-                                               what: "Removes Docker's build cache. The next build is slower and rebuilds it.")
+                                               what: "Deletes Docker's build cache for good; Docker has no Trash. The next build is slower and rebuilds it.")
                     }
                 }
                 .controlSize(.small)
@@ -133,7 +139,7 @@ struct DeveloperView: View {
                 Button("Prune Dangling Images") {
                     Task {
                         await care.pruneDocker("Prune dangling Docker images", arguments: Docker.pruneDanglingImages,
-                                               what: "Removes images with no tag and no container. Tagged images stay.")
+                                               what: "Deletes images with no tag and no container for good; Docker has no Trash. Tagged images stay.")
                     }
                 }
                 .controlSize(.small)
@@ -143,8 +149,25 @@ struct DeveloperView: View {
         }
     }
 
+    /// The CLI is there; whether its daemon answers is what `care.docker` tells.
+    private var dockerInstalled: Bool {
+        care.store.program("docker") != nil
+            || ["/usr/local/bin/docker", "/Applications/Docker.app/Contents/Resources/bin/docker"]
+                .contains { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private var dockerDown: some View {
+        CareSection("Docker") {
+            CareRow(icon: SymbolTile(symbol: "shippingbox.fill", colors: Tint.gray, size: 32),
+                title: "Docker is not running", detail: "Start Docker Desktop, then Rescan to see its images and build cache.",
+                value: "") { EmptyView() }
+        }
+    }
+
     private var subtitle: String {
-        care.developer > 0 ? "\(Store.bytes(care.developer)) in idle project dependencies and local AI models"
-            : "Idle project dependencies and local AI models"
+        let total = care.developer + care.xcodeSpots.reduce(0) { $0 + $1.size }
+            + (care.docker ?? []).reduce(0) { $0 + $1.size }
+        return total > 0 ? "\(Store.bytes(total)) in Xcode, Docker, idle project dependencies and local AI models"
+            : "Xcode, Docker, idle project dependencies and local AI models"
     }
 }

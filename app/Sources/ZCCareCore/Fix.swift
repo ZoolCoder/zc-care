@@ -15,11 +15,13 @@ public enum Fix: Equatable, Sendable {
     /// process's name or an MCP server's, which must never run as root.
     static let rootFixable: Set<String> = [
         "security firewall", "security firewall stealth mode", "security Gatekeeper",
-        "security automatic update checks", "security File Sharing off", "security Touch ID for sudo",
+        "security automatic update checks", "security File Sharing off", "security Guest account off",
+        "security Touch ID for sudo",
     ]
 
-    /// The one line the doctor's table gives Touch ID for sudo, which pipes.
-    static let touchIDLine = #"sed "s/^#auth/auth/" /etc/pam.d/sudo_local.template | sudo tee /etc/pam.d/sudo_local"#
+    /// The line the doctor's table gives Touch ID for sudo: one `sh -c`
+    /// body that uncomments pam_tid.so or appends it. Tests use it.
+    static let touchIDLine = #"sudo /bin/sh -c 'f=/etc/pam.d/sudo_local; if grep -q pam_tid.so $f 2>/dev/null; then sed -i "" "s/^#[[:space:]]*\(auth[[:space:]].*pam_tid\.so\)/\1/" $f; else printf "auth       sufficient     pam_tid.so\n" >> $f; fi'"#
 
     /// The programs a root fix may start, by full path and by name.
     static let rootPrograms: Set<String> = [
@@ -40,7 +42,6 @@ public enum Fix: Equatable, Sendable {
     /// shell leaves alone.
     static func rootCommand(in detail: String) -> String? {
         let line = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        if line == touchIDLine { return line.replacingOccurrences(of: "sudo ", with: "") }
         guard line.hasPrefix("sudo "), !line.contains(where: \.isNewline) else { return nil }
         let command = String(line.dropFirst("sudo ".count))
         guard let program = command.split(separator: " ").first.map(String.init), rootPrograms.contains(program) else { return nil }

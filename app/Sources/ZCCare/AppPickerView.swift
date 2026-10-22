@@ -72,6 +72,9 @@ struct AppPickerView: View {
                 ProgressView().controlSize(.small)
                 Text(store.busy ?? "Installing").font(.callout).foregroundStyle(.secondary)
                 Spacer()
+                if let cancel = store.cancelBusy {
+                    Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                }
             default:
                 Button("Later", action: close).keyboardShortcut(.cancelAction)
                 Spacer()

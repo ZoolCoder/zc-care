@@ -17,17 +17,31 @@ enum Access {
     }
 }
 
+/// Keeps a window open while its closure says no, as the title-bar button asks.
+private final class CloseGate: NSObject, NSWindowDelegate {
+    let allowsClose: @MainActor () -> Bool
+
+    init(allowsClose: @escaping @MainActor () -> Bool) { self.allowsClose = allowsClose }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        MainActor.assumeIsolated { allowsClose() }
+    }
+}
+
 /// A small window that hosts one SwiftUI view, made on first show and kept.
 @MainActor
 final class HostWindow<Content: View> {
     private var window: NSWindow?
+    private let gate: CloseGate?
     private let title: String
     private let size: NSSize
     /// Dark, its content under a clear title bar, as the Care window is.
     private let themed: Bool
     private let content: () -> Content
 
-    init(title: String, size: NSSize, themed: Bool = false, content: @escaping () -> Content) {
+    init(title: String, size: NSSize, themed: Bool = false, allowsClose: (@MainActor () -> Bool)? = nil,
+         content: @escaping () -> Content) {
+        gate = allowsClose.map(CloseGate.init)
         self.title = title
         self.size = size
         self.themed = themed
@@ -57,6 +71,7 @@ final class HostWindow<Content: View> {
             window.isMovableByWindowBackground = true
         }
         window.isReleasedWhenClosed = false
+        window.delegate = gate
         window.contentViewController = NSHostingController(rootView: content())
         window.setContentSize(size)
         window.center()
@@ -70,6 +85,7 @@ struct SettingsView: View {
     @Bindable var store: Store
     var showWelcome: () -> Void
     @State private var fullDisk = Access.fullDisk
+    @State private var confirmsDelete = false
 
     var body: some View {
         Form {
@@ -125,8 +141,14 @@ struct SettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             Section("Cleanup") {
-                Toggle("Delete permanently instead of moving to the Trash", isOn: $store.deletesPermanently)
-                Text("Caches, browser data and AI clutter go to the Trash, where My Activity can put them back. Space frees once the Trash is emptied.")
+                Toggle("Delete permanently instead of moving to the Trash", isOn: Binding(
+                    get: { store.deletesPermanently },
+                    set: { on in
+                        if on { confirmsDelete = true } else { store.deletesPermanently = false }
+                    }))
+                Text(store.deletesPermanently
+                     ? "Cleanups are deleted at once and cannot be put back."
+                     : "Cleanups go to the Trash and can be put back from My Activity. Space frees once the Trash is emptied.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Smart Care") {
@@ -207,6 +229,12 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 480)
         .frame(minHeight: 560)
+        .alert("Delete cleanups for good?", isPresented: $confirmsDelete) {
+            Button("Delete Permanently", role: .destructive) { store.deletesPermanently = true }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Cleanups skip the Trash. My Activity can no longer put them back, and Smart Care, Cleanup and the uninstaller delete at once.")
+        }
         // Back from System Settings, the grant shows at once.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             fullDisk = Access.fullDisk

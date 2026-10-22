@@ -83,7 +83,13 @@ private func readPid(_ file: URL) async -> pid_t? {
         #expect(fix(detail) == .info(detail))
     }
     let touch = Check(name: "security Touch ID for sudo", status: "warn", detail: Fix.touchIDLine)
-    guard case .command = Fix(for: touch) else { Issue.record("Touch ID lost its fix"); return }
+    guard case .command(let body) = Fix(for: touch) else { Issue.record("Touch ID lost its fix"); return }
+    #expect(body.hasPrefix("/bin/sh -c '") && body.contains("pam_tid.so"))
+    let guest = Check(name: "security Guest account off", status: "warn", detail: "sudo sysadminctl -guestAccount off")
+    #expect(Fix(for: guest) == .command("sysadminctl -guestAccount off"))
+    let sharing = Check(name: "security File Sharing off", status: "warn",
+        detail: "sudo /bin/sh -c 'launchctl disable system/com.apple.smbd; launchctl bootout system/com.apple.smbd 2>/dev/null; true'")
+    guard case .command = Fix(for: sharing) else { Issue.record("File Sharing lost its fix"); return }
 }
 
 @Test func removalSaysWhyAnItemStayed() throws {

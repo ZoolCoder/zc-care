@@ -98,8 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// A new picker each time, so it reads what the Mac has now.
     private func showApps() {
+        // An install in flight keeps its window; the picker comes forward.
+        if store.busy != nil, let apps { apps.show(); return }
         apps?.close()
-        let window = HostWindow(title: "Choose Apps", size: NSSize(width: 620, height: 700), themed: true) { [unowned self] in
+        let window = HostWindow(title: "Choose Apps", size: NSSize(width: 620, height: 700), themed: true,
+                                allowsClose: { [unowned self] in store.busy == nil }) { [unowned self] in
             AppPickerView(store: store) { [weak self] in self?.apps?.close() }
         }
         apps = window
@@ -107,8 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSetup() {
+        if store.busy != nil, let setup { setup.show(); return }
         setup?.close()
-        let window = HostWindow(title: "Set Up This Mac", size: NSSize(width: 580, height: 680), themed: true) { [unowned self] in
+        let window = HostWindow(title: "Set Up This Mac", size: NSSize(width: 580, height: 680), themed: true,
+                                allowsClose: { [unowned self] in store.busy == nil }) { [unowned self] in
             SetupView(store: store) { [weak self] in self?.setup?.close() }
         }
         setup = window
