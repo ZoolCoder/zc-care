@@ -13,6 +13,9 @@ here with what to edit.
 
 ### Release and CI
 
+- The cask uses `postflight_steps` and `depends_on macos: :sonoma`; Homebrew 7
+  deprecates `postflight` blocks and the `">= :sonoma"` string. Its
+  description no longer names the platform, so `brew style` passes.
 - The security workflow scans `go.mod` with osv-scanner; the scanner has no
   extractor for `go.sum` and failed every run. `osv-scanner.toml` lists the
   two findings it skips, with the reason for each.
