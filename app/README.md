@@ -29,6 +29,7 @@ links it onto PATH:
 
 ```console
 $ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew trust zoolcoder/zc-care    # newer Homebrew loads a third-party tap only once you trust it
 $ brew install --cask zc-care
 ```
 
