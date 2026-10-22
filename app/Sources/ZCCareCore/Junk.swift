@@ -80,12 +80,28 @@ public struct Junk: Sendable, Equatable, Identifiable {
         for command in commands {
             var rest = command[...]
             while let found = rest.range(of: folder) {
-                let name = rest[found.upperBound...].prefix { $0 != "/" && $0 != " " }
-                if !name.isEmpty { names.insert(String(name)) }
-                rest = rest[found.upperBound...]
+                let after = rest[found.upperBound...]
+                // ps prints the command unquoted, so a name with spaces runs to the next "/" or the end.
+                let name = after.prefix { $0 != "/" }
+                let words = Self.candidates(String(name))
+                let existing = words.filter { FileManager.default.fileExists(atPath: folder + $0) }
+                names.formUnion(existing.isEmpty ? words.prefix(1) : existing[...])
+                rest = after
             }
         }
         return names
+    }
+
+    /// A name ps printed may be followed by arguments: each word-boundary prefix may be the entry's name.
+    private static func candidates(_ text: String) -> [String] {
+        var out: [String] = []
+        var end = text.startIndex
+        while end < text.endIndex {
+            end = text[end...].dropFirst().firstIndex(of: " ") ?? text.endIndex
+            let name = text[..<end].trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { out.append(name) }
+        }
+        return out
     }
 
     private func entries(keeping extra: Set<String>) -> [URL] {

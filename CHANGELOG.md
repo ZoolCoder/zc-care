@@ -30,6 +30,29 @@ here with what to edit.
 - Cleanup reports a failure when some files could not be removed, Show in
   Finder buttons have an accessibility label, `zccare://` links are
   case-insensitive, and Set Up This Mac offers Try Again after any error.
+- Uninstalling an app no longer trashes or boots out the launch agents and
+  per-host settings of another installed app whose id extends its own
+  (Chrome and Chrome Canary), the uninstall preview no longer lists an
+  ignored file inside a leftover folder as trashed with it, and leftover
+  detection counts apps in Setapp and on other volumes as installed.
+- Claude Code temp folders stay while any file inside them changed in the
+  last day, a running command that names a path followed by a quote, tab or
+  `=` protects that path, a running process whose path contains spaces keeps
+  its cache, and project dependency folders are never called idle when the
+  project is too large to read in full.
+- Docker maintenance steps run against this Mac's own daemon only, ignoring
+  `DOCKER_HOST` and `DOCKER_CONTEXT`; Ollama blobs are not offered for
+  removal when any manifest cannot be read.
+- A corrupt `activity.json` is moved aside as `activity.json.broken-<time>`
+  instead of being overwritten, so Put Back records survive, and Put Back
+  recreates missing parent folders as private (0700).
+- Cloud Cleanup lists only files iCloud confirms as uploaded and never lists
+  Google Drive, OneDrive or Dropbox files for download removal; Space Lens
+  growth for a path missing from the scan shows nothing instead of the whole
+  disk's growth.
+- The app runs the automatic-login fix and the updated Touch ID fix from the
+  doctor's own sudo lines, and shows AirDrop and automatic update findings
+  as System Settings advice.
 
 ### CLI
 
@@ -109,6 +132,25 @@ here with what to edit.
 
 ### Security checks
 
+- The MCP pin check prints no raw argument: it skips the value after an
+  unknown flag and shows only a name-shaped package spec, so
+  `npx --token ghp_xxx pkg` leaks nothing. One wrong-typed value in a client
+  config (a numeric PORT or argument) no longer hides the whole file from the
+  key and pin checks, short secrets under a secret-named key are flagged with
+  no 8-character floor, and servers started through `npm exec`, `pnpm dlx`,
+  `yarn dlx` or `bun x` are checked for a pinned version.
+- `doctor` and `doctor -fix` agree: automatic login shows its fix command,
+  while AirDrop and automatic updates stay advice; the update advice says
+  macOS installs updates and restarts on its own.
+- The Touch ID for sudo fix turns an active `auth optional pam_tid.so` line
+  into a working `auth sufficient` line.
+- A disabled Gatekeeper fails even when `spctl --status` exits non-zero; the
+  listening-servers check flags LAN-address listeners and reports unknown
+  when `lsof` fails.
+- Commit signing needs `gpg.format ssh`, a `user.signingkey` that exists and
+  `commit.gpgsign true`, the advice names the key, an SSH key file that
+  cannot be parsed is reported as unknown rather than protected, and the git
+  config read has a timeout.
 - A check that could not read its answer reports `unknown` instead of a
   pass or a fail; `doctor -fix` does not count it as still failing and says
   `could not verify` instead of claiming the fix was verified. Ctrl-C during

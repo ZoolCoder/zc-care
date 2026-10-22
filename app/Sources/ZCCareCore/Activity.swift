@@ -69,7 +69,8 @@ public struct Trashed: Codable, Sendable, Equatable {
     func restore() -> Bool {
         let to = URL(fileURLWithPath: original)
         do {
-            try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
             try FileManager.default.moveItem(at: URL(fileURLWithPath: inTrash), to: to)
             return true
         } catch {
@@ -132,7 +133,11 @@ public struct ActivityLog: Codable, Sendable, Equatable {
 
     public static func load(from url: URL) -> ActivityLog {
         guard let data = try? Data(contentsOf: url) else { return ActivityLog() }
-        return (try? JSONDecoder().decode(ActivityLog.self, from: data)) ?? ActivityLog()
+        if let log = try? JSONDecoder().decode(ActivityLog.self, from: data) { return log }
+        // The next save would overwrite what Put Back still needs: keep the file.
+        let stamp = Int(Date.now.timeIntervalSince1970)
+        try? FileManager.default.moveItem(at: url, to: url.appendingPathExtension("broken-\(stamp)"))
+        return ActivityLog()
     }
 
     public func save(to url: URL) throws {

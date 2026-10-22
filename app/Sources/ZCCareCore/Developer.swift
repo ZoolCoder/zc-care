@@ -67,15 +67,17 @@ public enum ProjectDependencies {
     /// The newest change among the project's own entries and those in its
     /// folders three levels down: editing src/app/main.ts changes none of
     /// the folders above it. A commit or a pull is work too, and moves
-    /// .git/index or .git/HEAD.
+    /// .git/index or .git/HEAD. A project too big to read in full counts as
+    /// touched now: its idleness cannot be shown.
     static func lastTouched(project: URL, skipping: String) -> Date {
         let keys: Set<URLResourceKey> = [.contentModificationDateKey, .isDirectoryKey]
         var newest = Date.distantPast
         var seen = 0
+        var capped = false
         func visit(_ folder: URL, depth: Int) {
             let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: Array(keys))) ?? []
             for entry in entries where entry.lastPathComponent != ".DS_Store" {
-                guard seen < touchedEntryCap, !Task.isCancelled else { return }
+                guard seen < touchedEntryCap, !Task.isCancelled else { capped = true; return }
                 seen += 1
                 let name = entry.lastPathComponent
                 if folder == project, name == skipping { continue }
@@ -87,6 +89,7 @@ public enum ProjectDependencies {
             }
         }
         visit(project, depth: 3)
+        if capped { return .now }
         for name in ["index", "HEAD"] {
             let url = project.appendingPathComponent(".git/" + name)
             newest = max(newest, (try? url.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast)
@@ -136,13 +139,13 @@ public enum AIModels {
     static func ollama(root: URL) -> [AIModel] {
         guard let files = FileManager.default.enumerator(at: root.appendingPathComponent("manifests"), includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
         var read: [(url: URL, manifest: Manifest)] = []
-        for case let url as URL in files where (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
-            guard let data = try? Data(contentsOf: url), let m = try? JSONDecoder().decode(Manifest.self, from: data),
-                  m.all.allSatisfy({ isBlobDigest($0.digest) }) else { continue }
-            read.append((url, m))
-        }
         var users: [String: Int] = [:]
-        for (_, m) in read { for d in Set(m.all.map(\.digest)) { users[d, default: 0] += 1 } }
+        for case let url as URL in files where (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+            // A manifest that does not decode may share any blob, so no blob is safe to remove.
+            guard let data = try? Data(contentsOf: url), let m = try? JSONDecoder().decode(Manifest.self, from: data) else { return [] }
+            for d in Set(m.all.map(\.digest)) { users[d, default: 0] += 1 }
+            if m.all.allSatisfy({ isBlobDigest($0.digest) }) { read.append((url, m)) }
+        }
         return read.map { url, m in
             // The enumerator may answer with /private/var for /var: count from the end.
             let parts = url.pathComponents.suffix(3)

@@ -143,13 +143,20 @@ public struct SpaceScan: Codable, Sendable, Equatable {
     public func growers(under path: String? = nil, from minimum: Int64 = noticeable, limit: Int = 5) -> [Grower] {
         guard previousRoot != nil else { return [] }
         var found: [Grower] = []
+        let start: SpaceNode
+        if let path {
+            guard let node = root.find(path) else { return [] }
+            start = node
+        } else {
+            start = root
+        }
         func walk(_ node: SpaceNode) {
             for child in node.children {
                 if let grew = growth(of: child.path), grew >= minimum { found.append(Grower(path: child.path, grew: grew)) }
                 walk(child)
             }
         }
-        walk(path.flatMap(root.find) ?? root)
+        walk(start)
         let grew = Dictionary(found.map { ($0.path, $0.grew) }, uniquingKeysWith: { a, _ in a })
         return found
             .filter { grower in

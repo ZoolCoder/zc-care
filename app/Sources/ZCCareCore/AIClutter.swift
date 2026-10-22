@@ -46,7 +46,7 @@ public enum AIClutter {
         let support = home + "/Library/Application Support/"
         var spots = [
             // A session's temp folder is busy while it runs: a day untouched means it is done.
-            Spot(tool: "Claude Code", kind: "Temp Files", path: claudeTemp, pick: { untouched($0, for: 1, now: now) }),
+            Spot(tool: "Claude Code", kind: "Temp Files", path: claudeTemp, pick: { untouched($0, for: 1, now: now, deep: true) }),
             Spot(tool: "Claude Code", kind: "Logs", path: home + "/.claude/debug", pick: { _ in true }),
             Spot(tool: "Claude", kind: "Caches", path: home + "/Library/Caches/com.anthropic.claudefordesktop"),
             Spot(tool: "Claude", kind: "Caches", path: home + "/Library/Caches/com.anthropic.claudefordesktop.ShipIt"),
@@ -94,16 +94,29 @@ public enum AIClutter {
             var rest = command[...]
             while let found = rest.range(of: path) {
                 let next = rest[found.upperBound...].first
-                if next == nil || next == "/" || next == " " { return true }
+                if next.map({ !isPathCharacter($0) }) ?? true { return true }
                 rest = rest[found.upperBound...]
             }
             return false
         }
     }
 
-    static func untouched(_ url: URL, for days: Double, now: Date) -> Bool {
-        let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-        return now.timeIntervalSince(modified) > days * 86400
+    /// A longer name such as /tmp/claude-5011 is another path; anything else after the path ends it.
+    private static func isPathCharacter(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || "._-+@~%,".contains(c)
+    }
+
+    /// With `deep`, the newest change anywhere inside counts: a session that
+    /// keeps writing deep in its folder leaves the folder's own date alone.
+    static func untouched(_ url: URL, for days: Double, now: Date, deep: Bool = false) -> Bool {
+        let key = URLResourceKey.contentModificationDateKey
+        var newest = (try? url.resourceValues(forKeys: [key]))?.contentModificationDate ?? .distantPast
+        if deep, let walk = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [key]) {
+            for case let inner as URL in walk {
+                if let date = (try? inner.resourceValues(forKeys: [key]))?.contentModificationDate { newest = max(newest, date) }
+            }
+        }
+        return now.timeIntervalSince(newest) > days * 86400
     }
 
     /// One entry per tool and kind: Claude's caches sit in several folders.

@@ -10,6 +10,8 @@ public struct MaintenanceTask: Sendable, Equatable, Identifiable {
     public var steps: [[String]]
     /// Needs an administrator: runs through osascript, which asks for the password.
     public var admin = false
+    /// Steps run through Docker.run, which pins them to this Mac's own daemon.
+    public var docker = false
     /// How often Smart Care suggests it; nil for a task run only when
     /// something is wrong.
     public var every: TimeInterval?
@@ -55,7 +57,7 @@ public enum Maintenance {
                                          symbol: "shippingbox.fill",
                                          steps: [[docker, "image", "prune", "-f"], [docker, "network", "prune", "-f"],
                                                  [docker, "builder", "prune", "-f"]],
-                                         every: 14 * day))
+                                         docker: true, every: 14 * day))
         }
         return tasks
     }
@@ -137,6 +139,17 @@ extension Leftovers {
                    size: paths.reduce(0) { $0 + DiskUsage.allocated(URL(fileURLWithPath: $1)) })
         }
         .sorted { $0.size > $1.size }
+    }
+
+    /// Bundle ids of the apps Launch Services may not know: Setapp's and
+    /// those on other volumes.
+    public static func externalAppIDs(setapp: String = "/Applications/Setapp", volumes: String = "/Volumes") -> Set<String> {
+        let fm = FileManager.default
+        let folders = [setapp] + ((try? fm.contentsOfDirectory(atPath: volumes)) ?? []).map { volumes + "/" + $0 + "/Applications" }
+        let bundles = folders.flatMap { folder in
+            ((try? fm.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }.map { folder + "/" + $0 }
+        }
+        return Set(bundles.compactMap { Bundle(path: $0)?.bundleIdentifier })
     }
 
     /// Apple's ids, also inside group ids such as

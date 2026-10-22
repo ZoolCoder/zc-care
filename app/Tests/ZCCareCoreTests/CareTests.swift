@@ -493,8 +493,10 @@ private func write(_ url: URL, bytes: Int) throws {
     let temp = home.appendingPathComponent("tmp/claude-501")
     try write(temp.appendingPathComponent("old/x"), bytes: 100_000)
     try write(temp.appendingPathComponent("busy/x"), bytes: 100_000)
-    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86400)],
-                                          ofItemAtPath: temp.appendingPathComponent("old").path)
+    for inside in ["old/x", "old"] {
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -3 * 86400)],
+                                              ofItemAtPath: temp.appendingPathComponent(inside).path)
+    }
     try write(home.appendingPathComponent("Library/Application Support/Cursor/Cache/a"), bytes: 50_000)
     try write(home.appendingPathComponent("Library/Application Support/Cursor/User/settings.json"), bytes: 50_000)
 
@@ -677,14 +679,15 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(CloudDrives.name(folder: "pCloud-Drive") == "pCloud")
 }
 
-@Test func cloudDrivesCountDownloadedFilesBiggestFirst() throws {
+@Test func cloudDrivesCountDownloadedFilesButListOnlyUploadedOnes() throws {
     let folder = try tempDir()
     defer { try? FileManager.default.removeItem(at: folder) }
     try write(folder.appendingPathComponent("a/big.mov"), bytes: 400_000)
     try write(folder.appendingPathComponent("mid.zip"), bytes: 200_000)
     try write(folder.appendingPathComponent("tiny.txt"), bytes: 10)
+    // Only iCloud says a file is uploaded; without that, nothing is offered for removal.
     let found = CloudDrives.downloaded(in: folder, minimum: 100_000)
-    #expect(found.files.map(\.name) == ["big.mov", "mid.zip"])
+    #expect(found.files.isEmpty)
     #expect(found.total >= 600_000)
 }
 

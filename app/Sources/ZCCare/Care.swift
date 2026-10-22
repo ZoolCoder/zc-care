@@ -792,13 +792,15 @@ final class Care {
         }
     }
 
+    var installedIDs: Set<String> { Set(apps.compactMap(\.bundleID)) }
+
     /// Removes the app and what it left in the Library. A Brewfile app goes
     /// through zc-care remove, which drops it from the manifest too;
     /// the rest go to the Trash, where they can be put back.
     func uninstall(_ app: InstalledApp) async {
         guard store.busy == nil, allowed([app.url]), canTouch(app) else { return }
         // What the ignore list names stays behind; the rest still goes.
-        let leftovers = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory())
+        let leftovers = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
             .filter { !store.ignoreList.touches($0) }
         let method = Uninstall.method(declared: app.declared, source: app.source)
         var how: String
@@ -893,7 +895,7 @@ final class Care {
     /// the Trash, and the app stays.
     func reset(_ app: InstalledApp) async {
         guard store.busy == nil, canTouch(app) else { return }
-        let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory())
+        let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
             .filter { !store.ignoreList.touches($0) }
         guard !data.isEmpty else {
             store.message = Store.Message(text: "\(app.name) keeps no settings or data to reset.", failed: false)
@@ -936,9 +938,11 @@ final class Care {
                 ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }
                     .map { folder + "/" + $0 }
             }
+            let external = Leftovers.externalAppIDs()
             let vendors = Set(apps.compactMap { Bundle(path: $0)?.bundleIdentifier }.map(Leftovers.vendor))
+                .union(external.map(Leftovers.vendor))
             return Leftovers.orphans(home: home, vendors: vendors) {
-                inUse.contains($0) || NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
+                inUse.contains($0) || external.contains($0) || NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
             }
         }.value
         applyIgnoreList()
@@ -1168,7 +1172,11 @@ final class Care {
         }
         for step in task.steps {
             let failed = await store.failure("\(step[0]) failed") {
-                try await ProcessRunner().run(step[0], Array(step.dropFirst()), env: self.store.loginEnv)
+                let arguments = Array(step.dropFirst())
+                if task.docker {
+                    return try await Docker.run(step[0], arguments, env: self.store.loginEnv, runner: ProcessRunner())
+                }
+                return try await ProcessRunner().run(step[0], arguments, env: self.store.loginEnv)
             }
             if let failed { return failed }
         }
