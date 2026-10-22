@@ -395,3 +395,28 @@ func TestTouchIDFixKeepsOtherLines(t *testing.T) {
 		}
 	}
 }
+
+func TestLoopbackForms(t *testing.T) {
+	cases := map[string]bool{
+		"::1": true, "::1%lo0": true, "127.0.0.1": true, "localhost": true,
+		"*": false, "fe80::1%en0": false, "192.168.1.5": false, "10.0.0.2%en0": false,
+	}
+	for host, want := range cases {
+		if got := loopback(host); got != want {
+			t.Errorf("%q: %v, want %v", host, got, want)
+		}
+	}
+}
+
+func TestLsofAddressForms(t *testing.T) {
+	cases := map[string]bool{
+		"[::1]:8080": true, "127.0.0.1:*": true, "localhost:8080": true, "[::1%lo0]:8080": true,
+		"*:8080": false, "[fe80::1%en0]:8080": false,
+	}
+	for name, want := range cases {
+		host, _, ok := lastColon(name)
+		if !ok || loopback(strings.Trim(host, "[]")) != want {
+			t.Errorf("%q: host %q ok %v, want loopback %v", name, host, ok, want)
+		}
+	}
+}

@@ -10,7 +10,9 @@
   review is refused as a moved live state. A keychain secret is never hashed
   into a saved plan, so the digest covers the manifest entry (the reference),
   not the resolved value: a secret rotated between `plan -o` and `apply FILE`
-  is written without the plan noticing.
+  is written without the plan noticing. The dotfiles digest covers the chezmoi
+  source file, not the rendered result, so a change in template data alone is
+  not noticed either.
 * *Deletions need a person.* The CLI and ZC Care ask, and the MCP server
   cancels.
 * *Nothing is uninstalled unasked.* Apply only installs. `remove` and `undo`

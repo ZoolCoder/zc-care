@@ -72,6 +72,7 @@ func listens(port string) func(string) bool {
 
 // loopback is an address only this machine can reach.
 func loopback(host string) bool {
+	host, _, _ = strings.Cut(host, "%")
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}

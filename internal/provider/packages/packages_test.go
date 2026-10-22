@@ -123,7 +123,7 @@ func TestMasMissingMakesAppStoreAppsManual(t *testing.T) {
 	r := brewMachine()
 	r.Programs = []string{"brew"}
 	actions, err := New(r).Plan(context.Background(), writeManifest(t, "Brewfile", `mas "Bitwarden", id: 1352778147`))
-	if err != nil || len(actions) != 1 || actions[0].Op != plan.OpManual || !strings.Contains(actions[0].Detail, "brew install mas") {
+	if err != nil || len(actions) != 1 || actions[0].Op != plan.OpManual || !actions[0].Waiting || !strings.Contains(actions[0].Detail, "brew install mas") {
 		t.Fatalf("plan %+v %v", actions, err)
 	}
 }

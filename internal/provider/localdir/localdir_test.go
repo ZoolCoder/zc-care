@@ -237,3 +237,60 @@ func TestSymlinkFileLeadingOutsideIsRefused(t *testing.T) {
 		t.Fatalf("link replaced: %v", err)
 	}
 }
+
+func planWrite(t *testing.T, dir, name string) error {
+	t.Helper()
+	actions, err := New().Plan(context.Background(), config.Target{Name: "a", Path: dir, Files: map[string]string{name: "new"}})
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("%+v %v", actions, err)
+	}
+	return actions[0].Do(context.Background())
+}
+
+func TestDanglingSymlinkIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink("missing.sh", filepath.Join(dir, "link")); err != nil {
+		t.Skip(err)
+	}
+	if err := planWrite(t, dir, "link"); err == nil || !strings.Contains(err.Error(), "link is a symlink to a missing file") {
+		t.Fatalf("err %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "missing.sh")); !os.IsNotExist(err) {
+		t.Fatalf("target created: %v", err)
+	}
+}
+
+func TestSymlinkToDirectoryIsRefused(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("d", filepath.Join(dir, "link")); err != nil {
+		t.Skip(err)
+	}
+	if err := planWrite(t, dir, "link"); err == nil || !strings.Contains(err.Error(), "link is a symlink to a directory") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestSymlinkIntoASubdirectoryIsWrittenThrough(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "real"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("sub/real", filepath.Join(dir, "link")); err != nil {
+		t.Skip(err)
+	}
+	if err := planWrite(t, dir, "link"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "sub", "real")); string(got) != "new" {
+		t.Fatalf("real file %q", got)
+	}
+	if _, err := os.Readlink(filepath.Join(dir, "link")); err != nil {
+		t.Fatalf("link replaced: %v", err)
+	}
+}

@@ -228,6 +228,9 @@ func TestFloatingNeedsAnExactVersion(t *testing.T) {
 		{"npx", []string{"pkg"}, "pkg"},
 		{"npx", []string{"--token", "ghp_abcdefgh", "pkg"}, "pkg"},
 		{"npx", []string{"--yes", "pkg"}, "pkg"},
+		{"npx", []string{"--legacy-peer-deps", "pkg@latest"}, "pkg@latest"},
+		{"uvx", []string{"--upgrade", "pkg"}, "pkg"},
+		{"npx", []string{"--unknown", "ghp_abcdefgh", "pkg@1.0.0"}, ""},
 		{"npx", []string{"pkg@^1.2"}, "pkg@^1.2"},
 		{"npx", []string{"--token=ghp_abcdefgh", "pkg@1.0.0"}, ""},
 		{"npx", []string{"https://user:ghp_abcdefgh@host/p.tgz"}, "unrecognised spec"},
@@ -322,5 +325,30 @@ func TestSecretsInAnyPlaceButReferences(t *testing.T) {
 	}
 	if literal("Bearer ${GITHUB_TOKEN}") || !literal("Bearer ghp_abcdefghij") {
 		t.Error("a Bearer reference is not a literal, a Bearer token is")
+	}
+}
+
+func TestServerThatIsNotAnObjectIsReportedUnreadable(t *testing.T) {
+	for _, body := range []string{`{"mcpServers":{"a":"npx pkg"}}`, `{"mcpServers":{"a":3}}`, `{"mcpServers":{"a":["x"]}}`} {
+		dir := home(t, map[string]string{".claude.json": body})
+		r, ok := byName(User{home: dir}.AI())["AI configs can be read"]
+		if !ok || !r.Unknown || !strings.Contains(r.Detail, ".claude.json") {
+			t.Errorf("%s: %+v", body, r)
+		}
+	}
+	dir := home(t, map[string]string{".claude.json": `{"mcpServers":{"a":null}}`})
+	if _, ok := byName(User{home: dir}.AI())["AI configs can be read"]; ok {
+		t.Error("a null server is not unreadable")
+	}
+}
+
+func TestUnrecognisedKeyFormatIsAnError(t *testing.T) {
+	if _, err := unprotectedKey([]byte("PuTTY-User-Key-File-3: ssh-ed25519\n")); !errors.Is(err, errUnparsedKey) {
+		t.Fatalf("err %v", err)
+	}
+	dir := home(t, map[string]string{".ssh/odd": "not a key\n", ".ssh/config": "Host *\n", ".ssh/known_hosts": "x"})
+	r := User{home: dir}.sshKeys()
+	if !r.Unknown || !strings.Contains(r.Detail, "odd") || strings.Contains(r.Detail, "config") {
+		t.Fatalf("%+v", r)
 	}
 }

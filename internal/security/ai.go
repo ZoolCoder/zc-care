@@ -1,7 +1,9 @@
 package security
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"maps"
 	"os"
 	"path"
@@ -32,11 +34,17 @@ type mcpServer struct {
 	Headers map[string]string
 }
 
-// UnmarshalJSON reads a server field by field, turning a number or boolean
+// UnmarshalJSON rejects anything but an object (or null), so a malformed entry
+// is reported instead of passing every check. It reads a server field by field, turning a number or boolean
 // into its text, so one value of the wrong type (a numeric PORT) cannot make
 // the whole config unreadable and let its keys go unchecked.
 func (s *mcpServer) UnmarshalJSON(b []byte) error {
 	var raw map[string]json.RawMessage
+	if t := bytes.TrimSpace(b); string(t) == "null" {
+		return nil
+	} else if len(t) == 0 || t[0] != '{' {
+		return errors.New("server entry is not an object")
+	}
 	if json.Unmarshal(b, &raw) != nil {
 		return nil
 	}
@@ -105,6 +113,7 @@ func isSecretName(name string) bool {
 // command run without a question.
 func (u User) AI() []Result {
 	servers := map[string]map[string]mcpServer{} // where -> name -> server
+	var unreadable []string
 	for _, f := range mcpConfigs {
 		var doc struct {
 			MCPServers map[string]mcpServer `json:"mcpServers"`
@@ -113,6 +122,9 @@ func (u User) AI() []Result {
 			} `json:"projects"`
 		}
 		if !u.readJSON(f, &doc) {
+			if _, err := os.Stat(filepath.Join(u.home, f)); err == nil {
+				unreadable = append(unreadable, "~/"+f)
+			}
 			continue
 		}
 		servers["~/"+f] = doc.MCPServers
@@ -123,7 +135,12 @@ func (u User) AI() []Result {
 			}
 		}
 	}
-	return []Result{u.plaintextKeys(servers), unpinned(servers), u.broadPermissions()}
+	results := []Result{u.plaintextKeys(servers), unpinned(servers), u.broadPermissions()}
+	if len(unreadable) > 0 {
+		results = append(results, Result{Name: "AI configs can be read", Unknown: true,
+			Detail: "could not parse " + strings.Join(unreadable, " ") + "; its servers were not checked"})
+	}
+	return results
 }
 
 // addProjectServers adds the servers a project shares in its own .mcp.json.
@@ -254,7 +271,7 @@ var switches = []string{
 
 // valueFlags take the next argument as their value, which is not a package.
 var valueFlags = []string{
-	"-c", "--call", "--registry", "--prefix", "--cache", "--node-options", "--userconfig",
+	"-c", "--call", "--registry", "--token", "--auth-token", "--scope", "--otp", "--prefix", "--cache", "--node-options", "--userconfig",
 	"--python", "--with", "--with-requirements", "--index", "--index-url", "--env-file", "--directory",
 }
 
@@ -277,7 +294,11 @@ func packages(runner string, args []string) []string {
 				i++
 			}
 		case strings.HasPrefix(a, "--") && a != "--" && !attached && !slices.Contains(switches, flag):
-			i++
+			// An unknown flag may or may not take a value: the next word is
+			// the package when it is name-shaped, else skipped as a value.
+			if i+1 < len(args) && !nameShaped(args[i+1]) {
+				i++
+			}
 		case strings.HasPrefix(a, "-"):
 		case len(named) > 0:
 			return named
@@ -286,6 +307,15 @@ func packages(runner string, args []string) []string {
 		}
 	}
 	return named
+}
+
+// secretLook is a word that reads as a token, not a package name.
+var secretLook = regexp.MustCompile(`^(ghp_|gho_|ghs_|github_pat_|sk-|xox|npm_|glpat-)`)
+
+// nameShaped is a word fit to be a package name: it has no =, is no option
+// and does not look like a token.
+func nameShaped(word string) bool {
+	return packageSpec.MatchString(word) && !strings.HasPrefix(word, "-") && !secretLook.MatchString(word)
 }
 
 // packageSpec is [@scope/]name with an optional version or specifier: all

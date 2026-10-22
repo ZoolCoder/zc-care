@@ -93,7 +93,7 @@ func (p Provider) read(ctx context.Context, t config.Target) (state, error) {
 	}
 	for _, i := range items {
 		if reason, ok := unreadable[i.Kind]; ok {
-			s.manual = append(s.manual, manual(t, i.resource(), reason))
+			s.manual = append(s.manual, plan.MissingProgram(t.Name, i.resource(), reason))
 			continue
 		}
 		switch {

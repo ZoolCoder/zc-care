@@ -50,6 +50,11 @@ here with what to edit.
   Google Drive, OneDrive or Dropbox files for download removal; Space Lens
   growth for a path missing from the scan shows nothing instead of the whole
   disk's growth.
+- Uninstalling an app no longer trashes agents of a sibling app installed
+  through Setapp or on another volume, a stray `.DS_Store` in Ollama's
+  manifests folder no longer turns off model cleanup, a corrupt activity log
+  that cannot be moved aside is kept rather than overwritten, and Claude
+  temp cleanup leaves a folder alone after reading 2000 entries.
 - The app runs the automatic-login fix and the updated Touch ID fix from the
   doctor's own sudo lines, and shows AirDrop and automatic update findings
   as System Settings advice.
@@ -129,6 +134,10 @@ here with what to edit.
 - Undo journal IDs carry a random suffix, so two saves in the same clock
   tick no longer collide. `undo -id` with `-n` says "use -n or -id, not
   both".
+- A missing `mas` waits for the apply that installs it through brew, so App
+  Store apps are retried in the follow-up pass. The localdir provider refuses
+  to write through a symlink to a missing file or to a directory, naming the
+  file, and creates parent folders next to the link's real target.
 
 ### Security checks
 
@@ -147,6 +156,12 @@ here with what to edit.
 - A disabled Gatekeeper fails even when `spctl --status` exits non-zero; the
   listening-servers check flags LAN-address listeners and reports unknown
   when `lsof` fails.
+- `npx --legacy-peer-deps pkg@latest` and `uvx --upgrade pkg` are no longer
+  hidden from the unpinned-server check, an MCP server entry that is not an
+  object or a config that does not parse is reported as unknown instead of
+  skipped, an SSH key in an unrecognised format is unknown rather than
+  protected (`config`, `known_hosts*` and `authorized_keys*` are skipped),
+  and a loopback listener with a zone (`::1%lo0`) is not reported as exposed.
 - Commit signing needs `gpg.format ssh`, a `user.signingkey` that exists and
   `commit.gpgsign true`, the advice names the key, an SSH key file that
   cannot be parsed is reported as unknown rather than protected, and the git
@@ -167,6 +182,23 @@ here with what to edit.
 
 ### Agents and MCP
 
+- No MCP tool takes a config argument: the server's own config is the only
+  one, and `apply` refuses a saved plan that names another.
+- `apply` claims the plan with an atomic rename, so two servers on one
+  state folder cannot apply one plan_id. An apply that ran actions spends
+  the plan even when it failed; one refused before running keeps it until it
+  expires.
+- The terminal command a refused apply prints is shell-quoted, control
+  characters are stripped from every tool result, and `detail`, `desc` and
+  `why` are named as untrusted text.
+- The hook asks on globs, launchers (`find -exec`, `xargs`, `git -c alias.`,
+  `env`, `time`, `sh -c`), `eval`, interpreter pipes and escaped command
+  names that could hide zc-care, on an unlisted subcommand or a flag value
+  that hid it (`zc-care -n sync`), and on `export`; `diff` stays allowed.
+- The no-MCP path states the 10-minute, single-use and same-turn rules, and
+  the add-software skill no longer edits the Brewfile for `mas` items.
+- The injected-description, stale-plan and plan-id-reuse evals grade
+  recorded tool calls against mocked `zc-care` tools.
 - Saved plans expire after 10 minutes and a successful apply spends the plan.
   Apply ends with a one-line digest of what was applied and what MANUAL work
   is left.

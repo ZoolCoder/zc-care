@@ -159,11 +159,11 @@ func write(t config.Target, name string, content []byte, op plan.Op, detail stri
 				return err
 			}
 			defer func() { _ = root.Close() }()
-			if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
-				return err
-			}
 			resolved, err := resolve(root, name)
 			if err != nil {
+				return err
+			}
+			if err := root.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
 				return err
 			}
 			return replaceFile(root, resolved, content)
@@ -174,10 +174,17 @@ const maxLinkHops = 40
 
 // resolve follows a symlink at name while it stays inside root, so the write
 // lands on the file the link points to and the link stays. A link that leads
-// out of root is an error.
+// out of root, one to a missing file and one to a directory are errors.
 func resolve(root *os.Root, name string) (string, error) {
+	original := name
 	for range maxLinkHops {
 		info, err := root.Lstat(name)
+		if name != original && errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("%s is a symlink to a missing file", original)
+		}
+		if name != original && err == nil && info.IsDir() {
+			return "", fmt.Errorf("%s is a symlink to a directory", original)
+		}
 		if errors.Is(err, fs.ErrNotExist) || (err == nil && info.Mode()&fs.ModeSymlink == 0) {
 			return name, nil
 		}

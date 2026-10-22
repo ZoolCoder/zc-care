@@ -49,7 +49,7 @@ func (u User) sshKeys() Result {
 	entries, _ := os.ReadDir(filepath.Join(u.home, ".ssh"))
 	var open, unreadable []string
 	for _, e := range entries {
-		if e.IsDir() || strings.HasSuffix(e.Name(), ".pub") {
+		if e.IsDir() || strings.HasSuffix(e.Name(), ".pub") || notAKey(e.Name()) {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(u.home, ".ssh", e.Name()))
@@ -79,6 +79,12 @@ func (u User) sshKeys() Result {
 		return Result{Name: name, Unknown: true, Detail: strings.Join(detail, "; ")}
 	}
 	return Result{Name: name, OK: true}
+}
+
+// notAKey is a file ssh keeps beside the keys, which holds none.
+func notAKey(name string) bool {
+	return slices.Contains([]string{"config", "environment", "rc", "allowed_signers", ".DS_Store"}, name) ||
+		strings.HasPrefix(name, "known_hosts") || strings.HasPrefix(name, "authorized_keys")
 }
 
 var errUnparsedKey = errors.New("could not parse the key")
@@ -116,7 +122,7 @@ func unprotectedKey(b []byte) (bool, error) {
 	case bytes.Contains(b, []byte("PRIVATE KEY-----")):
 		return !bytes.Contains(b, []byte("ENCRYPTED")), nil
 	}
-	return false, nil
+	return false, errUnparsedKey
 }
 
 // sshString reads one length-prefixed field of the OpenSSH key format.
