@@ -13,7 +13,7 @@ The manifests are the record of what this machine has and why. Software installe
 
 - The user named a tool: use it.
 - The user named a need ("something to profile Go", "a better ls"): offer one to three candidates, open source first, each with one line on the trade-off. Let the user pick.
-- Check it is not there already: `list` (MCP) or `zc-care list -json`, matching by name and app. An item `not declared` is installed but missing from the manifest: declare it, which installs nothing new.
+- Check it is not there already: `list`, matching by name and app. An item `not declared` is installed but missing from the manifest: declare it, which installs nothing new.
 
 ## 2. Find the exact entry
 
@@ -27,14 +27,13 @@ Choose the target (`packages` for apps and command line tools, `tools` for runti
 
 The why is one line about what the user uses it for, not the package's own description: "Profiles Go services with flame graphs", not "Go profiler".
 
-- MCP: `add` with `target`, `item` (`brew:jq`, `cask:raycast`, `runtime:go@1.26`), `why` and `section`.
-- CLI: `zc-care add -target packages -section Git -why "..." brew:git-absorb`
+`add` edits the manifest immediately; run it only for an item the user named, then plan and show it. Pass `target`, `item` (`brew:jq`, `cask:raycast`, `runtime:go@1.26`), `why` and `section`. It always edits the default config.
 
 Settings for the new tool go in the dotfiles source the config points at, never straight into the home directory.
 
 ## 4. Install
 
-Use the plan-apply skill for the one target: plan, show it, apply after a yes.
+Use the plan-apply skill for the one target.
 
 ## 5. Record
 

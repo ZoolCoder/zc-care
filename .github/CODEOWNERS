@@ -2,7 +2,7 @@
 # code are listed explicitly so a future co-maintainer can take a subtree.
 *                   @ZoolCoder
 /plugin/            @ZoolCoder
-/hooks/             @ZoolCoder
+/plugin/hooks/             @ZoolCoder
 /cmd/zc-care/ @ZoolCoder
 /SECURITY.md        @ZoolCoder
 /.github/           @ZoolCoder

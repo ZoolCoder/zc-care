@@ -6,7 +6,7 @@ BIN := bin/zc-care
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')-dev
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build run test test-unit race cover lint fmt install app app-icon app-test app-install evals docs docs-serve clean
+.PHONY: all build run test hook-test test-unit race cover lint fmt install app app-icon app-test app-install evals docs-gen docs docs-serve clean vuln verify
 
 all: lint test build
 
@@ -22,6 +22,10 @@ test:
 test-unit:
 	go test -short ./...
 
+# The PreToolUse guard in the plugin; part of lint, so test stays plain go test.
+hook-test:
+	sh plugin/hooks/guard-apply_test.sh
+
 race:
 	go test -race ./...
 
@@ -31,10 +35,10 @@ cover:
 	go test -coverpkg=./... -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
 
-lint:
+lint: hook-test
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; echo "not gofmt-clean"; exit 1; }
 	go vet ./...
-	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; else echo "golangci-lint not installed, go vet only"; fi
+	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; else echo "golangci-lint not installed: brew install golangci-lint (CI pins v2.14.0)" >&2; exit 1; fi
 
 fmt:
 	gofmt -w .
@@ -77,7 +81,7 @@ docs-gen: ## rewrite the generated command reference from the usage text
 	UPDATE_DOCS=1 go test ./cmd/zc-care -run TestCommandReferenceMatchesUsage
 
 docs:
-	[ -d node_modules ] || npm ci
+	@if [ ! -d node_modules ] || [ package-lock.json -nt node_modules ]; then npm ci; fi
 	npm run docs
 
 docs-serve: docs
@@ -85,3 +89,10 @@ docs-serve: docs
 
 clean:
 	rm -rf bin dist build coverage.out
+
+# govulncheck, pinned like CI; swap for go tool once the tool directive is in go.mod.
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+verify:
+	go mod verify

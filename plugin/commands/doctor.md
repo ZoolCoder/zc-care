@@ -2,4 +2,4 @@
 description: Check the install and the config
 ---
 
-Run `zc-care doctor -json` (or the MCP `doctor` tool) and report each check that is not ok, with the fix it names. Use the setup skill when the binary or the config is missing.
+Use the setup skill: run doctor and report each check that is not ok, with the fix it names.

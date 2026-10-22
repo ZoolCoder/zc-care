@@ -69,7 +69,7 @@ func TestSavedRemovalPlanAppliesOnlyToItsItem(t *testing.T) {
 	unchanged(t, brewfile)
 }
 
-func TestMCPRemoveOnlyPlansAndTheTerminalAppliesIt(t *testing.T) {
+func TestMCPRemoveOnlyPlansAndNamesTheTerminalCommand(t *testing.T) {
 	cfg, brewfile := packagesFixture(t)
 	s := mcpServer(t.TempDir())
 	text, err := s.Call("remove", map[string]any{"config": cfg, "target": "pkgs", "item": "brew:htop"})
@@ -77,8 +77,10 @@ func TestMCPRemoveOnlyPlansAndTheTerminalAppliesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reply struct {
-		ID   string `json:"plan_id"`
-		Plan struct {
+		Appliable bool   `json:"appliable"`
+		Command   string `json:"command"`
+		ID        string `json:"plan_id"`
+		Plan      struct {
 			Actions []struct {
 				Op          string
 				Resource    string
@@ -90,10 +92,8 @@ func TestMCPRemoveOnlyPlansAndTheTerminalAppliesIt(t *testing.T) {
 		reply.Plan.Actions[0].Op != "DELETE" || !reply.Plan.Actions[0].Destructive {
 		t.Fatalf("remove %q: %v", text, err)
 	}
-	unchanged(t, brewfile)
-	_, err = s.Call("apply", map[string]any{"plan_id": reply.ID})
-	if err == nil || !strings.Contains(err.Error(), "Ask the user to run: "+name+" apply") || !strings.Contains(err.Error(), "-remove=brew:htop") {
-		t.Fatalf("apply of a removal: %v", err)
+	if reply.Appliable || reply.ID != "" || reply.Command != name+" remove -target pkgs brew:htop" {
+		t.Fatalf("remove reply %q", text)
 	}
 	unchanged(t, brewfile)
 }
