@@ -190,7 +190,7 @@ func write(t *testing.T, path, body string) {
 	}
 }
 
-func TestDigestPrefersTheDiffAndFallsBackToTheSourceFile(t *testing.T) {
+func TestDigestHashesTheSourceFileOnly(t *testing.T) {
 	tg := target(t)
 	base := "chezmoi --source " + tg.Source + " --no-tty --destination /home/me "
 	file := "/home/me/.zshrc"
@@ -205,11 +205,10 @@ func TestDigestPrefersTheDiffAndFallsBackToTheSourceFile(t *testing.T) {
 		t.Fatalf("digest %q with nothing to read", got)
 	}
 	r.Out[base+"source-path "+file] = src + "\n"
-	fromSource := p.digest(ctx, tg, file)
+	want := p.digest(ctx, tg, file)
 	r.Out[base+"diff --recursive=false "+file] = "+export A=1\n"
-	fromDiff := p.digest(ctx, tg, file)
-	if fromSource == "" || fromDiff == "" || fromSource == fromDiff {
-		t.Fatalf("source %q diff %q", fromSource, fromDiff)
+	if want == "" || p.digest(ctx, tg, file) != want {
+		t.Fatalf("digest %q changed when chezmoi diff did", want)
 	}
 }
 

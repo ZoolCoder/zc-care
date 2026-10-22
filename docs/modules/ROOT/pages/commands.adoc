@@ -226,7 +226,7 @@ history. Pass `-yes` to skip the prompt.
 ----
 $ zc-care remove -target packages brew:htop
 DELETE  packages  brew:htop  uninstall with brew and drop it from /Users/me/config/Brewfile
-this plan deletes things, overwrites edits made outside the tool or runs scripts. type yes to continue: yes
+this plan deletes things, overwrites edits made outside the tool or values undo cannot restore, or runs scripts. type yes to continue: yes
 $ zc-care remove -target packages mas:409201541
 ----
 
@@ -256,7 +256,7 @@ it and runs it through the same engine.
 Some changes are listed as `MANUAL` with the reason, because there is no safe
 way back: upgrades and runtime installs (no downgrades), dotfile scripts, and
 settings that hold an array or a dictionary, which is why `apply` asks before
-overwriting one. Uninstalling and overwriting a file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
+overwriting one (the plan line says so). Uninstalling and overwriting a file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
 `history` as from `undo`, but it cannot be undone, and neither can
 `doctor -fix`. The MCP server does not offer `undo`.
 

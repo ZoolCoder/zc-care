@@ -273,12 +273,15 @@ func (e *Engine) apply(ctx context.Context, p plan.Plan, w io.Writer, follow boo
 	return outcomes, err
 }
 
-// unblocked is the executable actions after has on targets that had a MANUAL
-// line in p: a prerequisite the apply installed made them plannable.
+// unblocked is the executable actions after has on targets that waited in p
+// for a program: the apply installed it, so they became plannable. Other
+// MANUAL lines are permanent and do not count.
 func unblocked(p, after plan.Plan, done []plan.Action) []plan.Action {
 	blocked := map[string]bool{}
 	for _, a := range p.Manual() {
-		blocked[a.Target] = true
+		if a.Waiting {
+			blocked[a.Target] = true
+		}
 	}
 	ran := map[[2]string]bool{}
 	for _, a := range done {

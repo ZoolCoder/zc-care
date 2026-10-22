@@ -129,3 +129,40 @@ func TestSavedRefusesAChangedDigest(t *testing.T) {
 		t.Fatalf("digest-only change: %v", err)
 	}
 }
+
+func savedWithDigest(t *testing.T, digest string) Saved {
+	t.Helper()
+	reviewed := sample()
+	reviewed.Actions[0].Digest = digest
+	var buf bytes.Buffer
+	if err := reviewed.Save(&buf, nil); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := LoadSaved(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return saved
+}
+
+func TestSavedWithoutADigestIsUnknown(t *testing.T) {
+	fresh := sample()
+	fresh.Actions[0].Digest = "sha256:aaa"
+	err := savedWithDigest(t, "").Matches(fresh)
+	if err == nil || !strings.Contains(err.Error(), "saved before content digests existed") {
+		t.Fatalf("old plan: %v", err)
+	}
+}
+
+func TestSavedRefusesWhenTheContentCannotBeRead(t *testing.T) {
+	err := savedWithDigest(t, "sha256:aaa").Matches(sample())
+	if err == nil || !strings.Contains(err.Error(), "could not be read") {
+		t.Fatalf("unreadable: %v", err)
+	}
+}
+
+func TestSavedWithNoDigestsComparesTheRest(t *testing.T) {
+	if err := savedWithDigest(t, "").Matches(sample()); err != nil {
+		t.Fatal(err)
+	}
+}

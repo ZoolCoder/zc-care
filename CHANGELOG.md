@@ -90,6 +90,22 @@ here with what to edit.
   array or dictionary setting, which undo cannot put back, asks first.
 - Saved plans refuse to apply when a dotfile, local file, rules file, skill
   or screen saver page changed since the plan.
+- A symlink inside a local-directory target is written through and stays a
+  link, undo restores the file it points to, and a link that leaves the
+  directory is refused.
+- `apply` runs its follow-up pass, or reports pending changes, only for
+  targets that were waiting on a missing tool (brew, mise, chezmoi, Ollama),
+  not for any target with a permanent MANUAL line.
+- A settings change that replaces an array, dictionary, data or date value
+  says in the plan that undo cannot restore it; the confirmation prompt names
+  this case and the MCP server refuses such plans.
+- A dotfiles plan's content digest hashes the chezmoi source file, so it no
+  longer changes when `chezmoi diff` fails or varies. A plan saved before
+  digests existed, or whose content can no longer be read, is refused with a
+  message that says to re-run `plan`.
+- Undo journal IDs carry a random suffix, so two saves in the same clock
+  tick no longer collide. `undo -id` with `-n` says "use -n or -id, not
+  both".
 
 ### Security checks
 

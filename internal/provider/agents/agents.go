@@ -325,8 +325,8 @@ func (p Provider) models(ctx context.Context, target string, models []string) ([
 		return nil, nil
 	}
 	if !p.r.Has("ollama") {
-		return []change{{item: item("ollama", "model", "ollama", provider.Manual), action: plan.Action{
-			Op: plan.OpManual, Target: target, Resource: "ollama", Detail: "install Ollama to pull the models"}}}, nil
+		return []change{{item: item("ollama", "model", "ollama", provider.Manual), action: plan.MissingProgram(
+			target, "ollama", "install Ollama to pull the models")}}, nil
 	}
 	out, err := p.r.Output(ctx, "ollama", "list")
 	if err != nil {

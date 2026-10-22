@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,7 +60,7 @@ func saveJournal(dataDir string, outcomes []engine.Outcome, via string) error {
 		return nil
 	}
 	now := time.Now()
-	e := journalEntry{ID: now.UTC().Format("20060102T150405.000000000"), At: now, Via: via}
+	e := journalEntry{ID: newJournalID(now), At: now, Via: via}
 	dir := journalDir(dataDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -75,6 +77,14 @@ func saveJournal(dataDir string, outcomes []engine.Outcome, via string) error {
 		e.Undos = append(e.Undos, u)
 	}
 	return e.write(dir)
+}
+
+// newJournalID sorts by time; the random tail keeps two saves in the same
+// clock tick apart.
+func newJournalID(now time.Time) string {
+	var tail [3]byte
+	_, _ = rand.Read(tail[:])
+	return now.UTC().Format("20060102T150405.000000000") + "-" + hex.EncodeToString(tail[:])
 }
 
 func (e journalEntry) write(dir string) error {

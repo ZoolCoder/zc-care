@@ -33,7 +33,7 @@ func runUndo(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	if *id != "" && flagGiven(flags, "n") {
-		return errors.New("-id picks one entry and -n a number of them; give one of the two")
+		return errors.New("use -n or -id, not both")
 	}
 	entries, err := loadJournal(*data, stderr)
 	if err != nil {

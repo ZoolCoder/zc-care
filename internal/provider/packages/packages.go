@@ -121,7 +121,7 @@ func (e errMissing) Error() string {
 func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, error) {
 	s, err := p.read(ctx, t)
 	if missing := (errMissing{}); errors.As(err, &missing) {
-		return []plan.Action{manual(t, missing.name, missing.Error())}, nil
+		return []plan.Action{plan.MissingProgram(t.Name, missing.name, missing.Error())}, nil
 	}
 	if err != nil {
 		return nil, err

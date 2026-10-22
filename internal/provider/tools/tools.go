@@ -41,7 +41,10 @@ type tool struct{ name, version string }
 func (t tool) String() string { return t.name + "@" + t.version }
 
 // errManual is a gap a person must close before mise can be read.
-type errManual struct{ resource, msg string }
+type errManual struct {
+	resource, msg string
+	waiting       bool // mise itself is missing
+}
 
 func (e errManual) Error() string { return e.msg }
 
@@ -65,7 +68,7 @@ func (p Provider) declared(ctx context.Context, t config.Target) (map[tool]insta
 // symlinks resolved.
 func (p Provider) ls(ctx context.Context, t config.Target) (map[string][]version, string, error) {
 	if !p.r.Has("mise") {
-		return nil, "", errManual{"mise", "mise is not on PATH; install mise first"}
+		return nil, "", errManual{"mise", "mise is not on PATH; install mise first", true}
 	}
 	file, err := filepath.EvalSymlinks(t.File)
 	if err != nil {
@@ -74,7 +77,7 @@ func (p Provider) ls(ctx context.Context, t config.Target) (map[string][]version
 	out, err := p.r.Output(ctx, "mise", "ls", "--json", "-C", filepath.Dir(t.File))
 	if err != nil {
 		if strings.Contains(err.Error(), "not trusted") {
-			return nil, "", errManual{"trust", "mise does not trust " + t.File + "; review it, then run mise trust " + t.File}
+			return nil, "", errManual{"trust", "mise does not trust " + t.File + "; review it, then run mise trust " + t.File, false}
 		}
 		return nil, "", err
 	}
@@ -123,7 +126,7 @@ func sameFile(a, b string) bool {
 func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, error) {
 	tools, err := p.declared(ctx, t)
 	if m := (errManual{}); errors.As(err, &m) {
-		return []plan.Action{{Op: plan.OpManual, Target: t.Name, Resource: m.resource, Detail: m.msg}}, nil
+		return []plan.Action{{Op: plan.OpManual, Target: t.Name, Resource: m.resource, Detail: m.msg, Waiting: m.waiting}}, nil
 	}
 	if err != nil {
 		return nil, err

@@ -161,6 +161,9 @@ func TestOverwritingAnArrayNeedsConfirmation(t *testing.T) {
 		if a.Destructive != want {
 			t.Errorf("%s: destructive %v, want %v", a.Resource, a.Destructive, want)
 		}
+		if want && !strings.Contains(a.Detail, "undo cannot restore (") {
+			t.Errorf("%s: detail %q does not say why", a.Resource, a.Detail)
+		}
 	}
 }
 

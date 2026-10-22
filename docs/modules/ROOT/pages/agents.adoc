@@ -14,7 +14,7 @@
 | `capture` | The manifest one target would declare to match this machine. Writes nothing. Read-only.
 | `validate` | Check the config offline. Read-only.
 | `plan` | Plan and save it. Returns a `plan_id`. Changes nothing.
-| `apply` | Apply a saved plan by `plan_id`. Refuses a plan older than 10 minutes, a plan that deletes, overwrites an outside edit or runs a script, and a plan whose live state moved. Ends with a one-line digest.
+| `apply` | Apply a saved plan by `plan_id`. Refuses a plan older than 10 minutes, a plan that deletes, overwrites an outside edit or runs a script, and a plan whose live state moved. Ends with a one-line digest. A settings change that replaces an array, dictionary, data or date value, which undo cannot restore, counts as an overwrite and is applied at a terminal.
 | `doctor` | Install health, security settings and AI agent configs. Read-only.
 | `history` | What was applied, newest first, and from where. Read-only.
 | `drift` | What the last daily drift check found. Read-only.

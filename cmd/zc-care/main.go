@@ -78,7 +78,7 @@ Flags:
                    then ./` + name + `.yaml, then ~/.config/` + name + `/` + name + `.yaml
   -target value    limit to this target; repeat for several
   -yes             skip the confirmation prompt for deletions, overwrites of outside
-                   edits and scripts
+                   edits or unrestorable values, and scripts
   -exit-code       plan: exit 2 for changes, 3 for manual-only; diff: exit 2 when the
                    snapshots differ
   -upgrade         plan and apply: also upgrade outdated packages and runtimes
@@ -352,7 +352,7 @@ func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.
 	}
 	if p.Destructive() && !f.yes {
 		if f.path == "-" {
-			return errors.New("this plan deletes things, overwrites outside edits or runs scripts, and the config came from stdin; pass -yes to confirm")
+			return errors.New("this plan deletes things, overwrites outside edits or values undo cannot restore, or runs scripts, and the config came from stdin; pass -yes to confirm")
 		}
 		if !confirm(stdin, log, destructiveWhy) {
 			return errCancelled
@@ -498,7 +498,7 @@ func writeStatus(w io.Writer, rows []engine.TargetStatus, asJSON bool) error {
 	return nil
 }
 
-const destructiveWhy = "this plan deletes things, overwrites edits made outside the tool or runs scripts"
+const destructiveWhy = "this plan deletes things, overwrites edits made outside the tool or values undo cannot restore, or runs scripts"
 
 func confirm(stdin io.Reader, stdout io.Writer, why string) bool {
 	fmt.Fprintf(stdout, "\n%s. type yes to continue: ", why)

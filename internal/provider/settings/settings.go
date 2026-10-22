@@ -173,8 +173,12 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 			op, detail = plan.OpUpdate, fmt.Sprintf("%s to %v", k.have, k.want)
 		}
 		args := writeArgs(k.domain, k.name, k.want)
+		unrecordable := overwritesUnrecordable(k)
+		if unrecordable {
+			detail += "; replaces a value undo cannot restore (" + strings.TrimPrefix(k.typ, "Type is ") + ")"
+		}
 		actions = append(actions, plan.Action{Op: op, Target: t.Name, Resource: k.resource(), Detail: detail,
-			Destructive: overwritesUnrecordable(k),
+			Destructive: unrecordable,
 			Before:      func(ctx context.Context) (plan.Undo, error) { return p.before(ctx, k.domain, k.name) },
 			Do:          func(ctx context.Context) error { return p.r.Run(ctx, "defaults", args...) }})
 		if proc, ok := restarts[k.domain]; ok {

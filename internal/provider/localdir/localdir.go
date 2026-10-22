@@ -128,6 +128,10 @@ func before(t config.Target, name string) (plan.Undo, error) {
 		return plan.Undo{}, err
 	}
 	defer func() { _ = root.Close() }()
+	name, err = resolve(root, name)
+	if err != nil {
+		return plan.Undo{}, err
+	}
 	file := filepath.Join(t.Path, name)
 	info, err := root.Stat(name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -158,8 +162,39 @@ func write(t config.Target, name string, content []byte, op plan.Op, detail stri
 			if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 				return err
 			}
-			return replaceFile(root, name, content)
+			resolved, err := resolve(root, name)
+			if err != nil {
+				return err
+			}
+			return replaceFile(root, resolved, content)
 		}}
+}
+
+const maxLinkHops = 40
+
+// resolve follows a symlink at name while it stays inside root, so the write
+// lands on the file the link points to and the link stays. A link that leads
+// out of root is an error.
+func resolve(root *os.Root, name string) (string, error) {
+	for range maxLinkHops {
+		info, err := root.Lstat(name)
+		if errors.Is(err, fs.ErrNotExist) || (err == nil && info.Mode()&fs.ModeSymlink == 0) {
+			return name, nil
+		}
+		if err != nil {
+			return "", err
+		}
+		dest, err := root.Readlink(name)
+		if err != nil {
+			return "", err
+		}
+		next := filepath.Join(filepath.Dir(name), dest)
+		if filepath.IsAbs(dest) || !filepath.IsLocal(next) {
+			return "", fmt.Errorf("%s is a symlink to %s, outside the target directory", name, dest)
+		}
+		name = next
+	}
+	return "", fmt.Errorf("%s: too many levels of symlinks", name)
 }
 
 // replaceFile writes name through a temporary file and one rename, so a

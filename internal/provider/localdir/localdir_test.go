@@ -177,3 +177,63 @@ func TestUndoRestoresUpdatedDeletedAndCreatedFiles(t *testing.T) {
 		t.Fatalf("created file still there: %v", err)
 	}
 }
+
+func TestSymlinkInsideTheRootIsWrittenThrough(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real.sh")
+	if err := os.WriteFile(real, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.sh")
+	if err := os.Symlink("real.sh", link); err != nil {
+		t.Skip(err)
+	}
+	actions, err := New().Plan(ctx, config.Target{Name: "a", Path: dir, Files: map[string]string{"link.sh": "new"}})
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("%+v %v", actions, err)
+	}
+	reverts := undoAll(t, actions)
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link replaced: %v %v", info, err)
+	}
+	got, _ := os.ReadFile(real)
+	info, _ := os.Stat(real)
+	if string(got) != "new" || info.Mode().Perm() != 0o755 {
+		t.Fatalf("real file %q mode %v", got, info.Mode())
+	}
+	for _, r := range reverts {
+		if err := r.Do(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ = os.ReadFile(real)
+	if _, err := os.Readlink(link); err != nil || string(got) != "old" {
+		t.Fatalf("after undo: real %q, link err %v", got, err)
+	}
+}
+
+func TestSymlinkFileLeadingOutsideIsRefused(t *testing.T) {
+	ctx := context.Background()
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(dir, "link")); err != nil {
+		t.Skip(err)
+	}
+	actions, err := New().Plan(ctx, config.Target{Name: "a", Path: dir, Files: map[string]string{"link": "new"}})
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("%+v %v", actions, err)
+	}
+	if err := actions[0].Do(ctx); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatalf("write through an escaping link: %v", err)
+	}
+	if got, _ := os.ReadFile(outside); string(got) != "keep" {
+		t.Fatalf("outside file changed to %q", got)
+	}
+	if _, err := os.Readlink(filepath.Join(dir, "link")); err != nil {
+		t.Fatalf("link replaced: %v", err)
+	}
+}

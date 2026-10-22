@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -250,14 +251,17 @@ func (installer) Measure(context.Context, config.Target) (provider.Live, error) 
 	return provider.Live{}, nil
 }
 
-type dependent struct{ w *world }
+type dependent struct {
+	w         *world
+	permanent bool // the MANUAL is not about the missing tool
+}
 
 func (d dependent) Plan(context.Context, config.Target) ([]plan.Action, error) {
 	switch {
 	case d.w.configured:
 		return nil, nil
 	case !d.w.installed:
-		return []plan.Action{{Op: plan.OpManual, Target: "dot", Resource: "rc", Detail: "tool is not on PATH"}}, nil
+		return []plan.Action{{Op: plan.OpManual, Target: "dot", Resource: "rc", Detail: "tool is not on PATH", Waiting: !d.permanent}}, nil
 	}
 	return []plan.Action{{Op: plan.OpCreate, Target: "dot", Resource: "rc", Destructive: d.w.destructive,
 		Do: func(context.Context) error { d.w.configured = true; return nil }}}, nil
@@ -266,13 +270,13 @@ func (dependent) Measure(context.Context, config.Target) (provider.Live, error) 
 	return provider.Live{}, nil
 }
 
-func dependentEngine(t *testing.T, w *world) (*Engine, plan.Plan) {
+func dependentEngine(t *testing.T, w *world, permanent ...bool) (*Engine, plan.Plan) {
 	t.Helper()
 	c := config.Config{Version: 1, Targets: []config.Target{
 		{Name: "pkg", Provider: "installer", Path: "a"},
 		{Name: "dot", Provider: "dependent", Path: "b"},
 	}}
-	e, err := New(c, Providers{"installer": installer{w}, "dependent": dependent{w}}, nil)
+	e, err := New(c, Providers{"installer": installer{w}, "dependent": dependent{w, len(permanent) > 0}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,6 +315,20 @@ func TestApplyFollowingLeavesDestructiveChangesToConfirm(t *testing.T) {
 	_, err := e.ApplyFollowing(context.Background(), p, &bytes.Buffer{})
 	if !errors.Is(err, ErrPending) || w.configured {
 		t.Fatalf("configured %v err %v", w.configured, err)
+	}
+}
+
+func TestApplyFollowingIgnoresAPermanentManual(t *testing.T) {
+	w := &world{}
+	e, p := dependentEngine(t, w, true)
+	for name, apply := range map[string]func(context.Context, plan.Plan, io.Writer) ([]Outcome, error){
+		"apply": e.Apply, "following": e.ApplyFollowing,
+	} {
+		*w = world{}
+		_, err := apply(context.Background(), p, &bytes.Buffer{})
+		if w.configured || err != nil {
+			t.Fatalf("%s: configured %v err %v", name, w.configured, err)
+		}
 	}
 }
 

@@ -39,10 +39,19 @@ type Action struct {
 	// tool did not write, such as an edit made outside it, or that runs a
 	// script. It needs the same confirmation as a delete.
 	Destructive bool
+	// Waiting marks a MANUAL that exists only because a program is not
+	// installed: once an apply installs it, the target can plan real changes.
+	Waiting bool
 	// Before, when set, reads the state Do is about to replace, right before
 	// it runs, so undo can put it back. A failure does not stop Do.
 	Before func(context.Context) (Undo, error)
 	Do     func(context.Context) error
+}
+
+// MissingProgram is the MANUAL for a target that cannot plan until program
+// is installed.
+func MissingProgram(target, resource, detail string) Action {
+	return Action{Op: OpManual, Target: target, Resource: resource, Detail: detail, Waiting: true}
 }
 
 func (a Action) destroys() bool { return a.Op == OpDelete || a.Destructive }
