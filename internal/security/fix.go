@@ -4,11 +4,15 @@ import "strings"
 
 // touchIDScript turns Touch ID on in the sudo PAM file at path, keeping
 // every other line: it uncomments the pam_tid line, or appends it when the
-// file lacks one or does not exist.
+// file lacks one or does not exist. Only an auth line counts as the pam_tid
+// line, not a comment that mentions the module, and an append first ends a
+// last line that has no newline. The body holds no single quote, so Line
+// renders it as one single-quoted argument.
 func touchIDScript(path string) string {
-	return `f=` + path + `; if grep -q pam_tid.so $f 2>/dev/null; then ` +
+	return `f=` + path + `; if grep -q "^#*[[:space:]]*auth.*pam_tid\.so" $f 2>/dev/null; then ` +
 		`sed -i "" "s/^#[[:space:]]*\(auth[[:space:]].*pam_tid\.so\)/\1/" $f; ` +
-		`else printf "auth       sufficient     pam_tid.so\n" >> $f; fi`
+		`else [ -s $f ] && [ -n "$(tail -c1 $f)" ] && echo >> $f; ` +
+		`printf "auth       sufficient     pam_tid.so\n" >> $f; fi`
 }
 
 // fixes are the commands that repair a failed check, by check name. A check

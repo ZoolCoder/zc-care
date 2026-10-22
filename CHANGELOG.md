@@ -26,13 +26,20 @@ here with what to edit.
 - `diff -exit-code` exits 2 when the two snapshots differ; `export -o`
   refuses to overwrite without `-force`, and every written file is 0600.
 - `undo` records progress, so a second run after a failure skips what it
-  already put back; an entry with only manual work left exits 3.
+  already put back. Changes that cannot be undone are reported once with
+  exit 3, then the entry closes, so `undo` moves on to the next one. Each
+  undo is matched to its own outcome, so two entries on the same resource
+  no longer both count as reverted when only one revert succeeded.
 - A dotfile that was a symlink is restored as a symlink, and a dotfile write
   that fails half way keeps a partial undo record, labelled as such.
 - `undo` refuses to uninstall a cask that adopted an app already in
-  `/Applications`.
+  `/Applications` or `~/Applications`.
 - Brewfiles accept single quotes and multi-line entries; unsupported lines
-  become MANUAL instead of failing the plan.
+  become MANUAL instead of failing the plan, and so does every line inside
+  an `if`/`unless` block, which is not evaluated. Removing a multi-line
+  entry also removes its continuation lines.
+- `export -o -force` writes through a temp file and rename, so an existing
+  world-readable file ends up 0600 and a failed write leaves the old one.
 - `init` writes its three files together and never writes through a symlink
   under `-force`; localdir file names are cleaned and duplicates rejected;
   the profiles file is lowercased and checked.
@@ -48,14 +55,18 @@ here with what to edit.
 ### Security checks
 
 - A check that could not read its answer reports `unknown` instead of a
-  pass or a fail, and `doctor -fix` does not count it as still failing.
+  pass or a fail; `doctor -fix` does not count it as still failing and says
+  `could not verify` instead of claiming the fix was verified. Ctrl-C during
+  a check is a cancellation, not a timeout.
 - New checks: Guest account off, screen saver idle time, automatic macOS
   update downloads and installs.
 - Listening ports on loopback are ignored; FIDO `sk-` keys are not flagged
   for a missing passphrase.
 - Root fixes run as one `sudo` line each; File Sharing is disabled and
   stopped, automatic login removes `/etc/kcpassword`, and Touch ID for sudo
-  edits `/etc/pam.d/sudo_local` in place.
+  edits `/etc/pam.d/sudo_local` in place: it uncomments a real `auth ...
+  pam_tid.so` line, not a comment that mentions it, and ends an unterminated
+  last line before appending.
 
 ### Agents and MCP
 

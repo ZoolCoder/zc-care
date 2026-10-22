@@ -237,6 +237,23 @@ func TestCaptureWritesOnlyANewFileUnlessForced(t *testing.T) {
 	}
 }
 
+func TestForcedWriteTightensAnExistingWorldReadableFile(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "Brewfile")
+	if err := os.WriteFile(out, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFile(out, []byte("new\n"), true); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(out)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, %v", info.Mode(), err)
+	}
+	if got, _ := os.ReadFile(out); string(got) != "new\n" {
+		t.Fatalf("content %q", got)
+	}
+}
+
 func TestAddWritesTheManifestOnly(t *testing.T) {
 	root := t.TempDir()
 	cfg := filepath.Join(root, name+".yaml")

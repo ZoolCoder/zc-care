@@ -12,27 +12,59 @@ import (
 	"github.com/zoolcoder/zc-care/internal/plan"
 )
 
-func TestUndoManualOnlyKeepsEntryOpenAndExits3(t *testing.T) {
+func TestUndoManualOnlyIsReportedOnceThenCloses(t *testing.T) {
 	data := t.TempDir()
 	outcomes := []engine.Outcome{{Target: "notes", Resource: "a.txt"}}
 	if err := saveJournal(data, outcomes, "apply"); err != nil {
 		t.Fatal(err)
 	}
 	out, err := run(t, "", "undo", "-data", data)
-	if !errors.Is(err, errManualOnly) || !strings.Contains(out, "stays open") {
+	if !errors.Is(err, errManualOnly) || !strings.Contains(out, "cannot be undone") {
 		t.Fatalf("undo: %v\n%s", err, out)
 	}
 	entries, _ := loadJournal(data, io.Discard)
-	if len(entries) != 1 || entries[0].Undone {
-		t.Fatalf("entry marked undone: %+v", entries)
+	if len(entries) != 1 || !entries[0].Undone {
+		t.Fatalf("entry still open: %+v", entries)
+	}
+	out, err = run(t, "", "undo", "-data", data)
+	if err != nil || !strings.Contains(out, "nothing to undo") {
+		t.Fatalf("second undo: %v\n%s", err, out)
+	}
+}
+
+func TestUndoJSONDoesNotAcknowledgeManualUndos(t *testing.T) {
+	data := t.TempDir()
+	if err := saveJournal(data, []engine.Outcome{{Target: "notes", Resource: "a.txt"}}, "apply"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "", "undo", "-data", data, "-json"); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := loadJournal(data, io.Discard)
+	if entries[0].Undone || len(entries[0].Reverted) != 0 {
+		t.Fatalf("json mutated %+v", entries[0])
+	}
+}
+
+func TestRevertedByMatchesEachUndoToItsOwnOutcome(t *testing.T) {
+	u := plan.Undo{Provider: "packages", Target: "pk", Resource: "brew:x", Verb: "install"}
+	chosen := []journalEntry{{ID: "new", Undos: []plan.Undo{u}}, {ID: "old", Undos: []plan.Undo{u}}}
+	var p plan.Plan
+	outcomes := []engine.Outcome{
+		{Target: "pk", Resource: "brew:x"},
+		{Target: "pk", Resource: "brew:x", Err: errors.New("boom")},
+	}
+	reverted := revertedBy(chosen, p, outcomes, errors.New("1 change(s) failed"))
+	if !reverted("new", 0) || reverted("old", 0) {
+		t.Fatalf("new=%v old=%v", reverted("new", 0), reverted("old", 0))
 	}
 }
 
 func TestUndoRecordsProgressSoARetrySkipsWhatIsDone(t *testing.T) {
 	data, _ := journaledRevertible(t)
 	entries, _ := loadJournal(data, io.Discard)
-	done := func(u plan.Undo) bool { return u.Resource == ".zshrc" }
-	if left, err := markProgress(data, entries, done); err != nil || left != 0 {
+	done := func(string, int) bool { return true }
+	if left, _, err := markProgress(data, entries, done); err != nil || left != 0 {
 		t.Fatalf("progress %d: %v", left, err)
 	}
 	entries, _ = loadJournal(data, io.Discard)

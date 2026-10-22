@@ -145,10 +145,14 @@ var errTimeout = errors.New("timed out")
 // output runs a command with a time limit, so one stuck tool cannot hang
 // the report. The error carries the command's standard error.
 func output(ctx context.Context, r sh.Runner, limit time.Duration, argv ...string) (string, error) {
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	out, err := r.Output(ctx, argv[0], argv[1:]...)
-	if err != nil && ctx.Err() != nil {
+	if err != nil && parent.Err() != nil {
+		return string(out), parent.Err()
+	}
+	if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		err = fmt.Errorf("%s: %w after %s", sh.Line(argv[0], argv[1:]...), errTimeout, limit)
 	}
 	return string(out), err

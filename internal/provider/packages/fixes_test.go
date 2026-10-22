@@ -60,13 +60,47 @@ tap 'a/b'
 	for _, i := range items {
 		got = append(got, i.resource())
 	}
-	if want := []string{"tap:a/b", "brew:git", "brew:x", "mas:Big App", "cask:ghostty"}; !slices.Equal(got, want) {
+	if want := []string{"tap:a/b", "brew:git", "brew:x", "mas:Big App"}; !slices.Equal(got, want) {
 		t.Errorf("items %q, want %q", got, want)
 	}
 	if items[3].ID != "42" {
 		t.Errorf("mas id %q", items[3].ID)
 	}
-	if want := []string{`cask_args appdir: "/Applications"`, "if OS.mac?", "end"}; !slices.Equal(unsupported, want) {
+	if want := []string{`cask_args appdir: "/Applications"`, "if OS.mac?", `cask "ghostty" (inside a conditional block, which is not evaluated)`, "end"}; !slices.Equal(unsupported, want) {
 		t.Errorf("unsupported %q, want %q", unsupported, want)
+	}
+}
+
+func TestBrewfileConditionalBlocksAreNeverInstalled(t *testing.T) {
+	data := `brew "a"
+unless OS.mac?
+  brew "b"
+  if system "true"
+    brew "c"
+  end
+  brew "d"
+end
+brew "e"
+`
+	items, unsupported, err := parseBrewfile([]byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, i := range items {
+		got = append(got, i.resource())
+	}
+	if want := []string{"brew:a", "brew:e"}; !slices.Equal(got, want) {
+		t.Errorf("items %q, want %q", got, want)
+	}
+	if len(unsupported) != 7 {
+		t.Errorf("unsupported %q", unsupported)
+	}
+}
+
+func TestHomeApplicationsCountsAsAnAdoptionFolder(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	if !slices.Contains(applicationsDirs, filepath.Join(home, "Applications")) || !slices.Contains(applicationsDirs, "/Applications") {
+		t.Fatalf("dirs %q", applicationsDirs)
 	}
 }

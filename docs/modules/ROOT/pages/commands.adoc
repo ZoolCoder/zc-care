@@ -260,11 +260,13 @@ file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
 `doctor -fix`. The MCP server does not offer `undo`.
 
 An undo that fails half way remembers what it already put back: the next
-`undo` of the same entry skips those and retries the rest. An entry with
-nothing but manual work left exits 3. An apply that failed while writing a
+`undo` of the same entry skips those and retries the rest. Changes that
+cannot be undone are listed once, with exit 3; the entry then closes, so the
+next `undo` moves on. An apply that failed while writing a
 dotfile keeps a partial record, labelled `partial`, so the file's previous
 content can still be restored. Undo refuses to uninstall a cask that adopted
-an app already in `/Applications`, since removing it would take the app too.
+an app already in `/Applications` or `~/Applications`, since removing it
+would take the app too.
 
 == Capture
 
@@ -324,7 +326,7 @@ number, on the menu bar and in SketchyBar's `zccare` item.
 | `0` | Nothing to do, or the apply converged and was verified.
 | `1` | Something failed.
 | `2` | With `-exit-code`: changes are outstanding, or `diff` found a difference.
-| `3` | With `-exit-code`: nothing left but `MANUAL` items. `undo`: the entry has only manual work left.
+| `3` | With `-exit-code`: nothing left but `MANUAL` items. `undo`: the entry had changes that cannot be undone, listed for you.
 |===
 
 == JSON

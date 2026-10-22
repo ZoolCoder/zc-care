@@ -77,12 +77,18 @@ func Insert(data []byte, section, entry string) ([]byte, error) {
 }
 
 // Drop removes the entry whose key is want, matched without regard to case,
-// and reports whether there was one.
+// and reports whether there was one. An entry whose line ends in a comma goes
+// on in the next line, as in a Brewfile, and those lines go with it.
 func Drop(data []byte, key Key, want string) ([]byte, bool) {
 	raw := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-	for n, l := range scan(data) {
+	lines := scan(data)
+	for n, l := range lines {
 		if k, ok := key(l.entry); ok && strings.EqualFold(k, want) {
-			return []byte(strings.Join(slices.Delete(raw, n, n+1), "\n") + "\n"), true
+			end := n
+			for end+1 < len(lines) && strings.HasSuffix(lines[end].entry, ",") {
+				end++
+			}
+			return []byte(strings.Join(slices.Delete(raw, n, end+1), "\n") + "\n"), true
 		}
 	}
 	return data, false

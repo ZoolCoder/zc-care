@@ -13,13 +13,19 @@ import (
 
 const providerName = "packages"
 
-// applicationsDirs are where a cask's .app lands; a var so tests can point it
-// at a temp folder.
-var applicationsDirs = []string{"/Applications"}
+// applicationsDirs are where a cask's .app lands, the system folder and the
+// user's own; a var so tests can point it at a temp folder.
+var applicationsDirs = func() []string {
+	dirs := []string{"/Applications"}
+	if home, err := os.UserHomeDir(); err == nil {
+		dirs = append(dirs, filepath.Join(home, "Applications"))
+	}
+	return dirs
+}()
 
 // beforeInstall and beforeRemove need no read of their own: the change itself
 // says what the inverse is. A cask install is the exception. It adopts an app
-// already in /Applications, and uninstalling that would delete the user's app.
+// already in /Applications or ~/Applications, and uninstalling that would delete the user's app.
 func beforeInstall(r sh.Runner, i item) func(context.Context) (plan.Undo, error) {
 	return func(ctx context.Context) (plan.Undo, error) {
 		if i.Kind == "cask" {

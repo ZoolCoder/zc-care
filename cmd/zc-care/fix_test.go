@@ -66,6 +66,18 @@ func TestFixRunsAfterAYesAndNothingFixableSaysSo(t *testing.T) {
 	}
 }
 
+func TestFixThatCannotBeVerifiedSaysSoAndDoesNotFail(t *testing.T) {
+	r := &sh.Fake{} // answers no check, so every re-check is Unknown
+	var out bytes.Buffer
+	err := fixFindings(context.Background(), findings(), r, true, strings.NewReader(""), &out)
+	if err != nil {
+		t.Fatalf("an unverifiable fix failed the run: %v", err)
+	}
+	if !strings.Contains(out.String(), "could not verify firewall") || strings.Contains(out.String(), "fixed and verified") {
+		t.Fatalf("output:\n%s", out.String())
+	}
+}
+
 func TestDoctorFixRefusesJSON(t *testing.T) {
 	if _, err := run(t, "", "doctor", "-fix", "-json"); err == nil {
 		t.Fatal("-fix -json accepted")

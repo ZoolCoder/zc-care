@@ -92,16 +92,32 @@ func chooseEntries(entries []journalEntry, id string, n int) ([]journalEntry, er
 	return open[:min(n, len(open))], nil
 }
 
-// revertOrder is the undo records of entries (newest first), each entry's
-// own changes last to first: the later change is put back before the earlier.
-func revertOrder(entries []journalEntry) []plan.Undo {
-	var out []plan.Undo
+// pendingUndo is one undo record still to put back, with where it sits.
+type pendingUndo struct {
+	entry string
+	index int
+	undo  plan.Undo
+}
+
+// pendingUndos is the undo records of entries (newest first) not yet put back,
+// each entry's own changes last to first: the later change is put back before
+// the earlier.
+func pendingUndos(entries []journalEntry) []pendingUndo {
+	var out []pendingUndo
 	for _, e := range entries {
 		for i, u := range slices.Backward(e.Undos) {
 			if !slices.Contains(e.Reverted, i) {
-				out = append(out, u)
+				out = append(out, pendingUndo{e.ID, i, u})
 			}
 		}
+	}
+	return out
+}
+
+func revertOrder(entries []journalEntry) []plan.Undo {
+	var out []plan.Undo
+	for _, p := range pendingUndos(entries) {
+		out = append(out, p.undo)
 	}
 	return out
 }
@@ -137,12 +153,16 @@ func applyUndo(dataDir string, chosen []journalEntry, p plan.Plan, yes bool, std
 		outcomes, runErr = engine.Run(ctx, p, stdout)
 		recordApply(dataDir, outcomes, viaUndo)
 	}
-	left, saveErr := markProgress(dataDir, chosen, revertedBy(p, outcomes, runErr))
+	left, acked, saveErr := markProgress(dataDir, chosen, revertedBy(chosen, p, outcomes, runErr))
 	if err := errors.Join(runErr, saveErr); err != nil {
 		return err
 	}
-	if left > 0 {
+	switch {
+	case left > 0:
 		fmt.Fprintf(stdout, "%d change(s) must be put back by hand; the entry stays open\n", left)
+		return errManualOnly
+	case acked > 0:
+		fmt.Fprintf(stdout, "%d change(s) cannot be undone and are left to you; the entry is closed\n", acked)
 		return errManualOnly
 	}
 	if len(p.Executable()) > 0 {
@@ -151,27 +171,41 @@ func applyUndo(dataDir string, chosen []journalEntry, p plan.Plan, yes bool, std
 	return nil
 }
 
-// revertedBy says whether an undo was put back by the run of p: after a clean
-// run every undo p did not leave to a person was, after a failed one only
-// those with a successful outcome.
-func revertedBy(p plan.Plan, outcomes []engine.Outcome, runErr error) func(plan.Undo) bool {
+// revertedBy says whether the undo at index i of entry id was put back by the
+// run of p. Revert gives each undo at most one action and keeps their order,
+// so the undos of one target and resource take that resource's outcomes (and
+// MANUAL lines) in turn. After a clean run an undo with no outcome was left
+// to a person; after a failed one only those with a successful outcome count.
+func revertedBy(chosen []journalEntry, p plan.Plan, outcomes []engine.Outcome, runErr error) func(id string, i int) bool {
 	key := func(target, resource string) string { return target + "\x00" + resource }
-	manual, done := map[string]bool{}, map[string]bool{}
+	manual, done := map[string]int{}, map[string][]bool{}
 	for _, a := range p.Manual() {
-		manual[key(a.Target, a.Resource)] = true
+		manual[key(a.Target, a.Resource)]++
 	}
 	for _, o := range outcomes {
-		if o.Err == nil {
-			done[key(o.Target, o.Resource)] = true
-		}
+		k := key(o.Target, o.Resource)
+		done[k] = append(done[k], o.Err == nil)
 	}
-	return func(u plan.Undo) bool {
-		k := key(u.Target, u.Resource)
-		if runErr == nil {
-			return !manual[k]
+	result := map[string]bool{}
+	for _, pu := range pendingUndos(chosen) {
+		if pu.undo.Nothing() {
+			continue
 		}
-		return done[k]
+		k := key(pu.undo.Target, pu.undo.Resource)
+		ok := false
+		switch {
+		case pu.undo.Reason != "":
+			manual[k]--
+		case len(done[k]) > 0:
+			ok, done[k] = done[k][0], done[k][1:]
+		case manual[k] > 0:
+			manual[k]--
+		default:
+			ok = runErr == nil
+		}
+		result[fmt.Sprintf("%s#%d", pu.entry, pu.index)] = ok
 	}
+	return func(id string, i int) bool { return result[fmt.Sprintf("%s#%d", id, i)] }
 }
 
 func writeJournal(w io.Writer, entries []journalEntry) error {

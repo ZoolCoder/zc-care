@@ -21,7 +21,7 @@ public enum Fix: Equatable, Sendable {
 
     /// The line the doctor's table gives Touch ID for sudo: one `sh -c`
     /// body that uncomments pam_tid.so or appends it. Tests use it.
-    static let touchIDLine = #"sudo /bin/sh -c 'f=/etc/pam.d/sudo_local; if grep -q pam_tid.so $f 2>/dev/null; then sed -i "" "s/^#[[:space:]]*\(auth[[:space:]].*pam_tid\.so\)/\1/" $f; else printf "auth       sufficient     pam_tid.so\n" >> $f; fi'"#
+    static let touchIDLine = #"sudo /bin/sh -c 'f=/etc/pam.d/sudo_local; if grep -q "^#*[[:space:]]*auth.*pam_tid\.so" $f 2>/dev/null; then sed -i "" "s/^#[[:space:]]*\(auth[[:space:]].*pam_tid\.so\)/\1/" $f; else [ -s $f ] && [ -n "$(tail -c1 $f)" ] && echo >> $f; printf "auth       sufficient     pam_tid.so\n" >> $f; fi'"#
 
     /// The `sh -c` lines the doctor's table holds, in full: the only shell
     /// bodies that may run as root, since a body is otherwise free text.

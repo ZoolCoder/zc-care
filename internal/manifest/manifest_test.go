@@ -24,6 +24,18 @@ func brewKey(l string) (string, bool) {
 	return kind + ":" + strings.Trim(name, `"`), ok
 }
 
+func TestDropRemovesContinuationLinesToo(t *testing.T) {
+	key := func(l string) (string, bool) {
+		kind, name, _ := strings.Cut(l, " ")
+		return kind + ":" + strings.Trim(name, `",`), kind == "brew"
+	}
+	data := "brew \"a\"\nbrew \"x\", # why\n  args: [\"with-foo\"],\n  link: true\nbrew \"b\"\n"
+	got, ok := Drop([]byte(data), key, "brew:x")
+	if want := "brew \"a\"\nbrew \"b\"\n"; !ok || string(got) != want {
+		t.Fatalf("got %q ok %v, want %q", got, ok, want)
+	}
+}
+
 func TestNotesReadSectionsAndWhy(t *testing.T) {
 	n := Notes([]byte(brewfile), brewKey)
 	if got := n["cask:ghostty"]; !reflect.DeepEqual(got, Note{Section: "Terminal", Why: "fast native terminal"}) {

@@ -141,6 +141,15 @@ func TestStuckCommandTimesOut(t *testing.T) {
 	}
 }
 
+func TestCancelledParentIsNotATimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := output(ctx, &stuck{}, time.Minute, "fdesetup", "status")
+	if !errors.Is(err, context.Canceled) || errors.Is(err, errTimeout) {
+		t.Fatalf("err %v, want context.Canceled", err)
+	}
+}
+
 func TestListeningIgnoresLoopback(t *testing.T) {
 	cases := map[string]bool{
 		"tcp4  0  0  *.22  *.*  LISTEN":                          true,
@@ -256,6 +265,17 @@ func TestFileSharingFixDisablesAndStops(t *testing.T) {
 	}
 }
 
+func TestTouchIDFixIsOneSingleQuotedSudoLine(t *testing.T) {
+	argv := fixes["Touch ID for sudo"][0]
+	if strings.Contains(argv[3], "'") {
+		t.Fatalf("body has a single quote: %s", argv[3])
+	}
+	line := Line(argv)
+	if !strings.HasPrefix(line, "sudo /bin/sh -c '") || !strings.HasSuffix(line, "'") || strings.Count(line, "'") != 2 {
+		t.Fatalf("line %s", line)
+	}
+}
+
 func TestTouchIDFixKeepsOtherLines(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS sed")
@@ -265,6 +285,8 @@ func TestTouchIDFixKeepsOtherLines(t *testing.T) {
 		"auth optional pam_reattach.so\n":                                        "auth optional pam_reattach.so\nauth       sufficient     pam_tid.so\n",
 		"auth sufficient pam_tid.so\n":                                           "auth sufficient pam_tid.so\n",
 		"":                                                                       "auth       sufficient     pam_tid.so\n",
+		"# pam_tid.so enables Touch ID\nauth optional pam_reattach.so\n": "# pam_tid.so enables Touch ID\nauth optional pam_reattach.so\nauth       sufficient     pam_tid.so\n",
+		"auth optional pam_reattach.so":                                  "auth optional pam_reattach.so\nauth       sufficient     pam_tid.so\n",
 	}
 	for before, want := range cases {
 		file := filepath.Join(t.TempDir(), "sudo_local")

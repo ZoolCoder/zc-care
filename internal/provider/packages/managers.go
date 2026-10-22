@@ -102,11 +102,14 @@ func brewEntry(line string) (kind, name, opts string, ok bool) {
 // parseBrewfile reads the tap, brew, cask and mas entries of a Brewfile. Any
 // other line (vscode, go, cargo, whalebrew, cask_args, if/end) is returned as
 // unsupported rather than failing the whole file. An entry whose line ends in
-// a comma goes on in the next line, so the two are read as one.
+// a comma goes on in the next line, so the two are read as one. Whether an
+// if or unless block holds on this machine is not known here, so every line
+// inside one is left to a person rather than installed unconditionally.
 func parseBrewfile(data []byte) ([]item, []string, error) {
 	var taps, rest []item
 	var unsupported []string
 	sc := bufio.NewScanner(bytes.NewReader(data))
+	depth := 0
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -114,6 +117,19 @@ func parseBrewfile(data []byte) ([]item, []string, error) {
 		}
 		for strings.HasSuffix(line, ",") && sc.Scan() {
 			line += " " + strings.TrimSpace(sc.Text())
+		}
+		switch {
+		case opensBlock(line):
+			depth++
+			unsupported = append(unsupported, line)
+			continue
+		case line == "end" && depth > 0:
+			depth--
+			unsupported = append(unsupported, line)
+			continue
+		case depth > 0:
+			unsupported = append(unsupported, line+" (inside a conditional block, which is not evaluated)")
+			continue
 		}
 		kind, name, opts, ok := brewEntry(line)
 		if !ok {
@@ -140,6 +156,10 @@ func parseBrewfile(data []byte) ([]item, []string, error) {
 	}
 	// Taps first, so apply adds a tap before installing from it.
 	return append(taps, rest...), unsupported, sc.Err()
+}
+
+func opensBlock(line string) bool {
+	return strings.HasPrefix(line, "if ") || strings.HasPrefix(line, "unless ")
 }
 
 func brewInstalled(ctx context.Context, r sh.Runner, items []item) (map[string]set, map[string]string, error) {

@@ -120,17 +120,21 @@ func loadJournal(dataDir string, warn io.Writer) ([]journalEntry, error) {
 }
 
 // markProgress records which of the entries' undos reverted says were put
-// back, marks an entry undone when all its changes are, and returns how many
-// changes are still to do.
-func markProgress(dataDir string, entries []journalEntry, reverted func(plan.Undo) bool) (int, error) {
+// back, marks an entry undone when none is left to do, and returns how many
+// changes are still to do. An undo that can never be reversed is shown to the
+// person once, in the run that reports it, and counts as acknowledged: it is
+// recorded as handled so the entry can close, and acked says how many.
+func markProgress(dataDir string, entries []journalEntry, reverted func(id string, i int) bool) (left, acked int, err error) {
 	var errs []error
-	left := 0
 	for _, e := range entries {
 		remaining := 0
 		for i, u := range e.Undos {
 			switch {
 			case u.Nothing() || slices.Contains(e.Reverted, i):
-			case reverted(u):
+			case u.Reason != "":
+				e.Reverted = append(e.Reverted, i)
+				acked++
+			case reverted(e.ID, i):
 				e.Reverted = append(e.Reverted, i)
 			default:
 				remaining++
@@ -140,5 +144,5 @@ func markProgress(dataDir string, entries []journalEntry, reverted func(plan.Und
 		left += remaining
 		errs = append(errs, e.write(journalDir(dataDir)))
 	}
-	return left, errors.Join(errs...)
+	return left, acked, errors.Join(errs...)
 }
