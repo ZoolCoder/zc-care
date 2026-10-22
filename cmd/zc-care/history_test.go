@@ -36,7 +36,7 @@ func TestApplyIsRecordedInHistory(t *testing.T) {
 
 func TestPartialFailureIsRecordedPerTarget(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	recordApply([]engine.Outcome{
+	recordApply("", []engine.Outcome{
 		{Target: "pkgs", Resource: "jq"},
 		{Target: "pkgs", Resource: "wget", Err: errors.New("no bottle")},
 		{Target: "dots", Resource: ".zshrc"},

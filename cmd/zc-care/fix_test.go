@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -72,9 +73,9 @@ func TestDoctorFixRefusesJSON(t *testing.T) {
 }
 
 func TestADoctorFixIsNotJournaled(t *testing.T) {
-	before, _ := loadJournal("")
-	recordApply([]engine.Outcome{{Target: "security", Resource: "firewall"}}, viaDoctor)
-	if after, _ := loadJournal(""); len(after) != len(before) {
+	before, _ := loadJournal("", io.Discard)
+	recordApply("", []engine.Outcome{{Target: "security", Resource: "firewall"}}, viaDoctor)
+	if after, _ := loadJournal("", io.Discard); len(after) != len(before) {
 		t.Fatalf("journaled %+v", after)
 	}
 }

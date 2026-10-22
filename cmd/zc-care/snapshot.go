@@ -58,7 +58,7 @@ func (i snapItem) value() string {
 		parts = append(parts, i.Version)
 	}
 	if i.Hash != "" {
-		parts = append(parts, "sha256:"+i.Hash[:8])
+		parts = append(parts, "sha256:"+i.Hash[:min(len(i.Hash), 8)])
 	}
 	if len(parts) == 0 {
 		return i.State

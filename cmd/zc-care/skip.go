@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"slices"
@@ -23,9 +22,7 @@ func init() {
 // that is missing is left out of plan, apply and drift; one already
 // installed is untouched.
 func runSkip(args []string, _ io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("skip", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
+	flags := newFlags("skip", stderr)
 	undo := flags.Bool("undo", false, "take the items off the list")
 	asJSON := flags.Bool("json", false, "machine-readable output")
 	if err := flags.Parse(args); err != nil {

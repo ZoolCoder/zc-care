@@ -65,7 +65,7 @@ func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, ye
 	}
 	fmt.Fprintln(stdout)
 	outcomes, err := engine.Run(ctx, p, stdout)
-	recordApply(outcomes, viaDoctor)
+	recordApply("", outcomes, viaDoctor)
 	if err = errors.Join(err, stillFailing(ctx, p, r)); err == nil {
 		_, err = fmt.Fprintln(stdout, "fixed and verified")
 	}
@@ -81,7 +81,7 @@ func stillFailing(ctx context.Context, fixed plan.Plan, r sh.Runner) error {
 	}
 	var left []string
 	for _, res := range security.New(r).Run(ctx) {
-		if repaired[res.Name] && !res.OK {
+		if repaired[res.Name] && !res.OK && !res.Unknown {
 			left = append(left, res.Name)
 		}
 	}

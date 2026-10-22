@@ -55,11 +55,14 @@ Usage:
   ` + name + ` validate [flags]        check the config offline
   ` + name + ` doctor   [-json] [-fix] health: system, config, programs, targets; -fix plans
                                  the fixes it can make
-  ` + name + ` undo     [-n N] [-plan] revert the last apply, from what it replaced
+  ` + name + ` undo     [-n N | -id id] [-list] [-plan] [-json] [-yes] [-data d]
+                                revert the last apply, from what it replaced
   ` + name + ` upgrade  [flags]        save what is outdated, then upgrade it
-  ` + name + ` history  [-n 20] [-json] what was applied, newest first
-  ` + name + ` drift    [-last] [-json] count what differs from the config, and save it;
-                                 -plist prints a launchd agent that runs it daily
+  ` + name + ` history  [-n 20] [-json] [-data d]
+                                what was applied, newest first
+  ` + name + ` drift    [-config f] [-json] [-last] [-plist [-hour h]]
+                                count what differs from the config, and save it; exit 1 when
+                                it cannot plan; -plist prints a launchd agent that runs it daily
 `
 
 const usageTail = `  ` + name + ` version
@@ -76,23 +79,35 @@ Flags:
   -target value    limit to this target; repeat for several
   -yes             skip the confirmation prompt for deletions, overwrites of outside
                    edits and scripts
-  -exit-code       plan: exit 2 for changes, 3 for manual-only
+  -exit-code       plan: exit 2 for changes, 3 for manual-only; diff: exit 2 when the
+                   snapshots differ
   -upgrade         plan and apply: also upgrade outdated packages and runtimes
   -only value      plan and apply: only the change to this resource, such as
                    brew:tmux; repeat for several
   -remove item     plan and apply: only uninstall this item, kind:name, and drop it
                    from -target's manifest
-  -json            plan, status and list: machine-readable
+  -json            plan, status, list, apply, validate, diff, doctor, history, drift
+                   and init: machine-readable; undo: the plan as JSON, changes nothing;
+                   capture does not take it
   -out string      plan: save the plan, to apply exactly what you reviewed;
                    capture: write the manifest to this file, not stdout
-  -force           capture: overwrite the -out file
+  -force           capture and export: overwrite the output file
+  -o file          export: write the snapshot to this file, not stdout
   -state list      list: only these states, comma-separated (missing,outdated,...)
   -kind list       list: only these kinds, comma-separated (brew,cask,dotfile,...)
   -adoc            list: the declared packages and runtimes, with why each is
                    there, as an AsciiDoc page
   -fix             doctor: plan the fixes it can make, and apply them after a yes
-  -n N             undo: revert the last N applies (default 1); -id picks one by
-                   the id -list shows; -plan shows the reverts and changes nothing
+  -n N             undo: revert the last N applies (default 1); history: show N
+                   entries (default 20)
+  -id id           undo: revert this journal entry, as -list shows it; not with -n
+  -list            undo: list what can be undone; init: show the profiles
+  -plan            undo: show the reverts and change nothing
+  -data dir        undo and history: the folder of the activity log and undo journal
+  -item kind:name  add and remove: the item, instead of the first argument
+  -last            drift: print the last saved drift, without planning
+  -plist           drift: print a launchd agent that runs drift every morning
+  -hour N          drift -plist: the hour to run at, 0 to 23 (default 9)
 `
 
 func usage() string {
@@ -112,16 +127,25 @@ func main() {
 		os.Exit(1)
 	}
 	err := runCLI(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
+	code := exitCode(err)
+	if code == 1 {
+		fmt.Fprintln(os.Stderr, "error:", err)
+	}
+	os.Exit(code)
+}
+
+// exitCode maps what a command returned to the process's exit code: the
+// -exit-code signals get their own, anything else that failed is 1.
+func exitCode(err error) int {
 	switch {
 	case err == nil:
+		return 0
 	case errors.Is(err, errDrift):
-		os.Exit(2)
+		return 2
 	case errors.Is(err, errManualOnly):
-		os.Exit(3)
-	default:
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		return 3
 	}
+	return 1
 }
 
 type targetList []string
@@ -134,9 +158,21 @@ func (t *targetList) Set(v string) error {
 
 // runCLI is main without the process, so tests drive the CLI as a shell would.
 func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	err := dispatch(args, stdin, stdout, stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	return err
+}
+
+func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := "plan"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		cmd, args = args[0], args[1:]
+	}
+	if cmd == "mcp" && wantsHelp(args) {
+		fmt.Fprint(stderr, usage())
+		return nil
 	}
 	switch cmd {
 	case "version":
@@ -163,6 +199,10 @@ func runCLI(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	fmt.Fprint(stderr, usage())
 	return fmt.Errorf("unknown command %q", cmd)
+}
+
+func wantsHelp(args []string) bool {
+	return len(args) > 0 && slices.Contains([]string{"-h", "-help", "--help"}, args[0])
 }
 
 // cliFlags is every flag the config-driven commands take.
@@ -208,15 +248,14 @@ func runConfigured(cmd string, args []string, stdin io.Reader, stdout, stderr io
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(f.path, stdin)
-	if err != nil {
-		return err
+	if cmd == "capture" && f.asJSON {
+		return errors.New("capture writes a manifest, not JSON; drop -json")
 	}
+	cfg, err := config.Load(f.path, stdin)
 	if cmd == "validate" {
-		if err := validateManifests(cfg); err != nil {
-			return err
-		}
-		_, err := fmt.Fprintf(stdout, "%s: %d target(s), valid\n", f.path, len(cfg.Targets))
+		return runValidate(f, cfg, err, stdout)
+	}
+	if err != nil {
 		return err
 	}
 
@@ -260,7 +299,7 @@ func runConfigured(cmd string, args []string, stdin io.Reader, stdout, stderr io
 		s.Upgrade, s.Only, s.Remove = f.upgrade, f.only, f.remove
 		return runPlan(p, s, f.out, f.asJSON, f.exitCode, stdout, stderr)
 	}
-	return runApply(ctx, eng, p, saved, f, stdin, stdout)
+	return runApply(ctx, eng, p, saved, f, stdin, stdout, stderr)
 }
 
 // adoptSavedPlan reads the plan file and takes its targets, -only selection
@@ -292,31 +331,36 @@ func (f *cliFlags) adoptSavedPlan() (*plan.Saved, error) {
 }
 
 // runApply shows p, asks before deleting anything, applies it and records
-// the run.
-func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.Saved, f cliFlags, stdin io.Reader, stdout io.Writer) error {
+// the run. With -json, stdout carries only the result; the plan and the
+// progress go to stderr.
+func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.Saved, f cliFlags, stdin io.Reader, stdout, stderr io.Writer) error {
 	if saved != nil {
 		if err := saved.Matches(p); err != nil {
 			return err
 		}
 	}
-	if err := p.Write(stdout); err != nil {
+	log := stdout
+	if f.asJSON {
+		log = stderr
+	}
+	if err := p.Write(log); err != nil {
 		return err
 	}
 	if len(p.Executable()) == 0 {
-		return nil
+		return f.writeApplied(stdout, p, nil, nil)
 	}
 	if p.Destructive() && !f.yes {
 		if f.path == "-" {
 			return errors.New("this plan deletes things, overwrites outside edits or runs scripts, and the config came from stdin; pass -yes to confirm")
 		}
-		if !confirm(stdin, stdout, destructiveWhy) {
+		if !confirm(stdin, log, destructiveWhy) {
 			return errCancelled
 		}
 	}
-	fmt.Fprintln(stdout)
-	outcomes, err := eng.Apply(ctx, p, stdout)
-	recordApply(outcomes, f.via)
-	return err
+	fmt.Fprintln(log)
+	outcomes, err := eng.Apply(ctx, p, log)
+	recordApply("", outcomes, f.via)
+	return errors.Join(f.writeApplied(stdout, p, outcomes, err), err)
 }
 
 // planFor is the plan for the config, or with remove set, the one change that
@@ -332,12 +376,19 @@ func planFor(ctx context.Context, eng *engine.Engine, remove string) (plan.Plan,
 	return eng.PlanRemove(kind, name)
 }
 
+// flagsHeading starts the per-command flag list that -h prints after the usage.
+const flagsHeading = "Flags of "
+
 // newFlags is a flag set for a command that reports its errors and usage on
 // stderr.
 func newFlags(cmd string, stderr io.Writer) *flag.FlagSet {
 	flags := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
+	flags.Usage = func() {
+		fmt.Fprint(stderr, usage())
+		fmt.Fprintf(stderr, "\n%s%s:\n", flagsHeading, cmd)
+		flags.PrintDefaults()
+	}
 	return flags
 }
 

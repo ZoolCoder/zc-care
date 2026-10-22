@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -35,9 +34,7 @@ type initDone struct {
 // sections on the skip list, and saves this Mac's profiles. It installs
 // nothing: plan and apply come next.
 func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("init", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
+	flags := newFlags("init", stderr)
 	profile := flags.String("profile", "", "who this Mac is for, comma-separated")
 	role := flags.String("role", "", "what this Mac is for, such as work or personal")
 	dir := flags.String("dir", "", "where to write the config; default ~/.config/"+name)
@@ -62,6 +59,11 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return fmt.Errorf("role %q must be kebab-case, such as %s", *role, strings.Join(starter.Roles, " or "))
 	}
 	profiles := splitList(*profile)
+	for _, p := range profiles {
+		if !config.IsProfile(p) {
+			return fmt.Errorf("profile %q must be kebab-case, such as developer or work", p)
+		}
+	}
 	var captured []byte
 	if *fromMac {
 		var err error
@@ -132,9 +134,7 @@ func writeProfiles(w io.Writer, asJSON bool) error {
 // target with profiles applies only on a Mac with one of them; a Mac
 // without profiles gets every target.
 func runProfile(args []string, _ io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("profile", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() { fmt.Fprint(stderr, usage()) }
+	flags := newFlags("profile", stderr)
 	asJSON := flags.Bool("json", false, "machine-readable output")
 	clear := flags.Bool("clear", false, "drop every profile, so every target applies")
 	if err := flags.Parse(args); err != nil {

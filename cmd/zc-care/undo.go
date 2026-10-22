@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -25,13 +26,16 @@ func runUndo(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	id := flags.String("id", "", "undo this journal entry, as `undo -list` shows it")
 	list := flags.Bool("list", false, "list what can be undone")
 	planOnly := flags.Bool("plan", false, "show what undo would do and change nothing")
-	asJSON := flags.Bool("json", false, "machine-readable plan; changes nothing")
+	asJSON := flags.Bool("json", false, "the plan as JSON, whether or not -plan is given; changes nothing")
 	yes := flags.Bool("yes", false, "skip the confirmation prompt")
-	data := flags.String("data", "", "directory of the activity log")
+	data := flags.String("data", "", "folder of the activity log and the undo journal")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	entries, err := loadJournal(*data)
+	if *id != "" && flagGiven(flags, "n") {
+		return errors.New("-id picks one entry and -n a number of them; give one of the two")
+	}
+	entries, err := loadJournal(*data, stderr)
 	if err != nil {
 		return err
 	}
@@ -55,6 +59,12 @@ func runUndo(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return writeUndoPlan(stdout, chosen, p)
 	}
 	return applyUndo(*data, chosen, p, *yes, stdin, stdout)
+}
+
+func flagGiven(flags *flag.FlagSet, name string) bool {
+	given := false
+	flags.Visit(func(f *flag.Flag) { given = given || f.Name == name })
+	return given
 }
 
 // chooseEntries is the entry with this id, or the newest n that are not
@@ -87,8 +97,10 @@ func chooseEntries(entries []journalEntry, id string, n int) ([]journalEntry, er
 func revertOrder(entries []journalEntry) []plan.Undo {
 	var out []plan.Undo
 	for _, e := range entries {
-		for _, u := range slices.Backward(e.Undos) {
-			out = append(out, u)
+		for i, u := range slices.Backward(e.Undos) {
+			if !slices.Contains(e.Reverted, i) {
+				out = append(out, u)
+			}
 		}
 	}
 	return out
@@ -106,10 +118,15 @@ func writeUndoPlan(w io.Writer, chosen []journalEntry, p plan.Plan) error {
 	return p.Write(w)
 }
 
+// applyUndo runs the reverts of p and records which undos it put back, so a
+// retry after a failure skips them. An entry is undone only when every one of
+// its changes is; one with changes that need a person stays open and exits 3.
 func applyUndo(dataDir string, chosen []journalEntry, p plan.Plan, yes bool, stdin io.Reader, stdout io.Writer) error {
 	if err := writeUndoPlan(stdout, chosen, p); err != nil {
 		return err
 	}
+	var outcomes []engine.Outcome
+	var runErr error
 	if len(p.Executable()) > 0 {
 		if p.Destructive() && !yes && !confirm(stdin, stdout, destructiveWhy) {
 			return errCancelled
@@ -117,14 +134,44 @@ func applyUndo(dataDir string, chosen []journalEntry, p plan.Plan, yes bool, std
 		fmt.Fprintln(stdout)
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		outcomes, err := engine.Run(ctx, p, stdout)
-		recordApply(outcomes, viaUndo)
-		if err != nil {
-			return err
-		}
+		outcomes, runErr = engine.Run(ctx, p, stdout)
+		recordApply(dataDir, outcomes, viaUndo)
+	}
+	left, saveErr := markProgress(dataDir, chosen, revertedBy(p, outcomes, runErr))
+	if err := errors.Join(runErr, saveErr); err != nil {
+		return err
+	}
+	if left > 0 {
+		fmt.Fprintf(stdout, "%d change(s) must be put back by hand; the entry stays open\n", left)
+		return errManualOnly
+	}
+	if len(p.Executable()) > 0 {
 		fmt.Fprintln(stdout, "undone")
 	}
-	return markUndone(dataDir, chosen)
+	return nil
+}
+
+// revertedBy says whether an undo was put back by the run of p: after a clean
+// run every undo p did not leave to a person was, after a failed one only
+// those with a successful outcome.
+func revertedBy(p plan.Plan, outcomes []engine.Outcome, runErr error) func(plan.Undo) bool {
+	key := func(target, resource string) string { return target + "\x00" + resource }
+	manual, done := map[string]bool{}, map[string]bool{}
+	for _, a := range p.Manual() {
+		manual[key(a.Target, a.Resource)] = true
+	}
+	for _, o := range outcomes {
+		if o.Err == nil {
+			done[key(o.Target, o.Resource)] = true
+		}
+	}
+	return func(u plan.Undo) bool {
+		k := key(u.Target, u.Resource)
+		if runErr == nil {
+			return !manual[k]
+		}
+		return done[k]
+	}
 }
 
 func writeJournal(w io.Writer, entries []journalEntry) error {

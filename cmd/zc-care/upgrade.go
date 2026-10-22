@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,8 +17,7 @@ import (
 // runUpgrade saves what is outdated, then applies the upgrades. The snapshot
 // is what the review skill reads to tell what each tool moved from and to.
 func runUpgrade(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("upgrade", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags := newFlags("upgrade", stderr)
 	path := flags.String("config", "", "config file")
 	yes := flags.Bool("yes", false, "skip the deletion prompt")
 	var targets, only targetList
@@ -63,13 +62,27 @@ func snapshotOutdated(scope []string, stdin io.Reader, stderr io.Writer) (string
 	if err := runCLI(args, stdin, &out, stderr); err != nil {
 		return "", err
 	}
+	return saveOutdated(out.Bytes())
+}
+
+// saveOutdated saves the list when something is outdated. A target whose
+// state could not be read fails it: its packages might be outdated, and
+// "nothing is outdated" would be a guess.
+func saveOutdated(list []byte) (string, error) {
 	var rows []engine.TargetItems
-	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+	if err := json.Unmarshal(list, &rows); err != nil {
 		return "", fmt.Errorf("read outdated list: %w", err)
 	}
 	n := 0
+	var errs []error
 	for _, r := range rows {
 		n += len(r.Items)
+		if r.Error != "" {
+			errs = append(errs, fmt.Errorf("%s: cannot tell what is outdated: %s", r.Target, r.Error))
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return "", err
 	}
 	if n == 0 {
 		return "", nil
@@ -80,5 +93,5 @@ func snapshotOutdated(scope []string, stdin io.Reader, stderr io.Writer) (string
 	}
 	// The time in the name sorts the files, so the newest is the last update.
 	file := filepath.Join(dir, time.Now().Format("2006-01-02T150405")+".json")
-	return file, os.WriteFile(file, out.Bytes(), 0o600)
+	return file, os.WriteFile(file, list, 0o600)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -21,9 +22,9 @@ func init() {
 	optional["export"] = runExport
 	optional["diff"] = runDiff
 	optionalUsage = append(optionalUsage,
-		"  "+name+" export   [-o file] [-config f] [-target t]\n"+
+		"  "+name+" export   [-o file [-force]] [-config f] [-target t]\n"+
 			"                                save what this Mac has, per target, as JSON\n"+
-			"  "+name+" diff     [-json] a.json [b.json]\n"+
+			"  "+name+" diff     [-json] [-exit-code] [-config f] a.json [b.json]\n"+
 			"                                what differs between two exports, or one and this Mac\n")
 }
 
@@ -52,6 +53,7 @@ func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := newFlags("export", stderr)
 	path := flags.String("config", "", "config file")
 	out := flags.String("o", "", "write the snapshot to this file")
+	force := flags.Bool("force", false, "overwrite the -o file")
 	var targets targetList
 	flags.Var(&targets, "target", "limit to this target")
 	if err := flags.Parse(args); err != nil {
@@ -66,12 +68,11 @@ func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if *out == "" {
 		return writeJSON(stdout, snap)
 	}
-	// 0600: a snapshot names every package and file on the Mac.
-	f, err := os.OpenFile(*out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
-		return fmt.Errorf("export: %w", err)
+	var buf bytes.Buffer
+	if err := writeJSON(&buf, snap); err != nil {
+		return err
 	}
-	if err := errors.Join(writeJSON(f, snap), f.Close()); err != nil {
+	if err := writeFile(*out, buf.Bytes(), *force); err != nil {
 		return fmt.Errorf("export: %w", err)
 	}
 	_, err = fmt.Fprintf(stdout, "exported %d target(s) to %s\n", len(snap.Targets), *out)
@@ -83,6 +84,7 @@ func runDiff(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := newFlags("diff", stderr)
 	path := flags.String("config", "", "config file, for the live side")
 	asJSON := flags.Bool("json", false, "machine-readable output")
+	exitCode := flags.Bool("exit-code", false, "exit 2 when the snapshots differ")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -108,14 +110,23 @@ func runDiff(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	diffs := diffSnapshots(a, b)
+	write := func() error { return writeDiff(stdout, a.label("A "+files[0]), b.label("B "+bName), diffs) }
 	if *asJSON {
-		return writeJSON(stdout, struct {
-			A       snapshot     `json:"a"`
-			B       snapshot     `json:"b"`
-			Targets []targetDiff `json:"targets"`
-		}{a, b, append([]targetDiff{}, diffs...)})
+		write = func() error {
+			return writeJSON(stdout, struct {
+				A       snapshot     `json:"a"`
+				B       snapshot     `json:"b"`
+				Targets []targetDiff `json:"targets"`
+			}{a, b, append([]targetDiff{}, diffs...)})
+		}
 	}
-	return writeDiff(stdout, a.label("A "+files[0]), b.label("B "+bName), diffs)
+	if err := write(); err != nil {
+		return err
+	}
+	if *exitCode && len(diffs) > 0 {
+		return errDrift
+	}
+	return nil
 }
 
 func readSnapshot(path string) (snapshot, error) {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -38,8 +37,7 @@ func driftFile() string { return filepath.Join(mcp.StateDir(name), "drift.json")
 // runDrift plans, saves the count of outstanding changes, and logs a change
 // in that count to history. It applies nothing.
 func runDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	flags := flag.NewFlagSet("drift", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags := newFlags("drift", stderr)
 	path := flags.String("config", "", "config file")
 	last := flags.Bool("last", false, "print the last saved drift, without planning")
 	asJSON := flags.Bool("json", false, "machine-readable output")
@@ -49,6 +47,12 @@ func runDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	if *plist {
+		if *path == "-" {
+			return errors.New("the launchd agent runs later, with no standard input; give -config a file")
+		}
+		if *at < 0 || *at > 23 {
+			return fmt.Errorf("-hour %d must be 0 to 23", *at)
+		}
 		return writePlist(stdout, findConfig(*path), *at)
 	}
 
@@ -71,10 +75,16 @@ func runDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		}
 	}
 	if *asJSON {
-		return writeJSON(stdout, d)
+		if err := writeJSON(stdout, d); err != nil {
+			return err
+		}
+	} else if _, err := fmt.Fprintln(stdout, d.summary()); err != nil {
+		return err
 	}
-	_, err := fmt.Fprintln(stdout, d.summary())
-	return err
+	if !*last && d.Error != "" {
+		return errors.New(d.Error)
+	}
+	return nil
 }
 
 func measureDrift(path string, stdin io.Reader, stderr io.Writer) Drift {
