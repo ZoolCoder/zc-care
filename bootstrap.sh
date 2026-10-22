@@ -50,11 +50,12 @@ main() {
 
   if ! command -v brew >/dev/null && [[ ! -x /opt/homebrew/bin/brew && ! -x /usr/local/bin/brew ]]; then
     step "Installing Homebrew (asks for your password; also installs the Xcode command line tools)"
+    # Installer pinned to a commit; bump with: git ls-remote https://github.com/Homebrew/install.git HEAD
     # The installer asks questions: give it the terminal, not the piped script.
     if have_tty; then
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/tty
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/a2fe82ef3a9ec7a5c72a559c09676256d6f354f6/install.sh)" </dev/tty
     else
-      NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+      NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/a2fe82ef3a9ec7a5c72a559c09676256d6f354f6/install.sh)" </dev/null
     fi
   fi
   load_brew
@@ -81,6 +82,9 @@ main() {
     if [[ -d $dir/.git ]]; then
       step "Updating $dir"
       update_clone "$dir"
+    elif [[ -e $dir ]]; then
+      echo "$dir exists but is not a git clone; move it away and run bootstrap again." >&2
+      exit 1
     else
       step "Cloning $from"
       git clone --quiet "$from" "$dir" </dev/null

@@ -225,6 +225,20 @@ here with what to edit.
 
 ### Release and CI
 
+- A re-run of the release workflow on an existing release takes the cask
+  checksum from the asset already published, so the cask pull request matches
+  the zip users download, and the cask step opens a pull request when the
+  cask file is new on develop instead of calling it already present.
+- The release workflow comment states which permissions the build job holds
+  and why, and the prerelease flag reaches the script through the environment.
+- The bootstrap script installs Homebrew from a pinned installer commit and
+  stops with a clear message when a target folder exists but is not a clone.
+- `make lint` fails when the installed golangci-lint is not the version CI
+  pins (2.15.0); the CI lint job runs `make lint` after installing that
+  version, and the full test job runs the hook test too.
+- The docs build writes Antora logs as JSON, fails when the log is not JSON,
+  and verifies the UI bundle's sha256 before Antora uses it.
+- `make build` uses the release flags: `-trimpath`, `-s -w` and `CGO_ENABLED=0`.
 - The release workflow builds with read-only credentials and publishes in a
   separate job; it checks the tag is semver and on `main`, marks
   pre-releases, and re-runs safely.

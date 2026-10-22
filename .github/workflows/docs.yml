@@ -60,8 +60,15 @@ jobs:
         # with a broken link. A docs site whose navigation silently rots is not
         # worth publishing, so treat any warning as a build failure.
         run: |
-          npm run docs 2>&1 | tee build.log
+          # The UI bundle is fetched by release tag; antora has no checksum
+          # option for it, so it is verified here and handed over as a file.
+          mkdir -p build
+          curl -fsSL -o build/ui-bundle.zip https://github.com/zoolcoder/zc-supplemental-ui/releases/download/v0.3.0/ui-bundle.zip
+          echo 'f0584f160913e1c2faf4de78e7d01c01aa05f71f103214b4a8b3d1e058e67288  build/ui-bundle.zip' | shasum -a 256 -c -
+          npm run docs -- --ui-bundle-url build/ui-bundle.zip 2>&1 | tee build.log
           test "${PIPESTATUS[0]}" -eq 0
+          # The warn gate reads JSON log lines; fail if the log is not JSON.
+          grep -q '"level":' build.log || { echo "::error::Antora log is not JSON"; exit 1; }
           if grep -q '"level":"warn"' build.log; then
             echo "::error::Antora emitted warnings; see the log above."
             grep '"level":"warn"' build.log

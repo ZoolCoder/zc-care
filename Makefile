@@ -5,13 +5,17 @@ BIN := bin/zc-care
 # local builds carry the git version with a -dev suffix
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//')-dev
 LDFLAGS := -X main.version=$(VERSION)
+# CI pins the same version in ci.yml and release.yml.
+GOLANGCI_LINT_VERSION := 2.15.0
+# The release build, as release.yml makes it.
+BUILD_FLAGS := -trimpath -ldflags "-s -w $(LDFLAGS)"
 
 .PHONY: all build run test hook-test test-unit race cover lint fmt install app app-icon app-test app-install evals docs-gen docs docs-serve clean vuln verify
 
 all: lint test build
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/zc-care
+	CGO_ENABLED=0 go build $(BUILD_FLAGS) -o $(BIN) ./cmd/zc-care
 
 run: build
 	$(BIN) $(ARGS)
@@ -38,7 +42,9 @@ cover:
 lint: hook-test
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; echo "not gofmt-clean"; exit 1; }
 	go vet ./...
-	@if command -v golangci-lint >/dev/null 2>&1; then golangci-lint run; else echo "golangci-lint not installed: brew install golangci-lint (CI pins v2.14.0)" >&2; exit 1; fi
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not installed: brew install golangci-lint (CI pins $(GOLANGCI_LINT_VERSION))" >&2; exit 1; }
+	@golangci-lint version 2>&1 | grep -q '$(GOLANGCI_LINT_VERSION)' || { echo "golangci-lint $$(golangci-lint version --short 2>/dev/null || echo unknown) found, CI pins $(GOLANGCI_LINT_VERSION)" >&2; exit 1; }
+	golangci-lint run
 
 fmt:
 	gofmt -w .

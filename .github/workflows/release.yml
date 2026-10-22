@@ -13,7 +13,8 @@ permissions: {}
 jobs:
   build:
     # ZC Care, with the zc-care CLI inside: a universal .app, attested, handed
-    # to the publish job as an artifact. This job never holds a write token.
+    # to the publish job as an artifact. It holds no repository write token;
+    # id-token and attestations write are for the attest step only.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
     timeout-minutes: 45
@@ -49,7 +50,7 @@ jobs:
       # Installs the linter only: make lint runs it once, with gofmt, vet and the hook test.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.14.0
+          version: v2.15.0
           install-only: true
       - run: make lint
       - run: go test ./...
@@ -98,13 +99,21 @@ jobs:
           name: release
           path: dist
       - name: Release
+        env:
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
         run: |
           # Idempotent: a re-run after a later step failed keeps the release.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME exists, keeping it"
+            # This run rebuilt the zip, and zip bytes differ between builds. The
+            # asset on the release is the one users download and the first run
+            # attested, so the cask takes its checksum from that asset, not from
+            # this run's rebuild (whose attestation does not match the release).
+            gh release download "$GITHUB_REF_NAME" -p "ZCCare_${VERSION}.zip" -D dist --clobber
+            app/cask.sh "$VERSION" "$(shasum -a 256 "dist/ZCCare_${VERSION}.zip" | cut -d' ' -f1)" > dist/zc-care.rb
           else
             flags=()
-            [[ ${{ needs.build.outputs.prerelease }} == true ]] && flags+=(--prerelease)
+            [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
             gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "${flags[@]}" "dist/ZCCare_${VERSION}.zip"
           fi
       - name: Open the cask pull request
@@ -117,7 +126,7 @@ jobs:
           mkdir -p Casks
           cp dist/zc-care.rb Casks/zc-care.rb
           # A re-run after the cask landed on develop has nothing to open.
-          if git diff --quiet -- Casks/zc-care.rb; then
+          if [[ -z $(git status --porcelain -- Casks/zc-care.rb) ]]; then
             echo "cask for ${GITHUB_REF_NAME} is already on develop"
             exit 0
           fi

@@ -65,6 +65,7 @@ jobs:
         # gofmt exits 0 even when it has complaints, so the output is the signal.
         run: test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::not gofmt-clean"; exit 1; }
       - run: go vet ./...
+      - run: make hook-test
       # No credentials are configured here on purpose: no test touches a
       # network, so a pull request from a fork needs access to nothing.
       # -count=1 defeats the test cache, so a green run means the tests executed.
@@ -105,7 +106,9 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.14.0
+          version: v2.15.0
+          install-only: true
+      - run: make lint
 
   plugin:
     if: github.base_ref == 'main' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
