@@ -47,6 +47,8 @@ final class Store {
     /// The target whose items the overview shows, and what they are.
     var expanded: String?
     var targetItems: [String: [Item]] = [:]
+    var targetErrors: [String: String] = [:]
+    private var refreshAgain = false
     /// Every declared item, and the apply log; nil until My Workstation
     /// reads them.
     var inventory: [Item]?
@@ -290,20 +292,40 @@ final class Store {
         careCLI = CareCLI(binary: binary, config: config, env: env)
     }
 
+    /// A read asked for while another runs is queued, so a change made in
+    /// between is never left showing the old data.
     func refresh() async {
-        guard let careCLI, !refreshing else { return }
+        guard careCLI != nil else { return }
+        if refreshing { refreshAgain = true; return }
         refreshing = true
+        defer { refreshing = false }
+        repeat {
+            refreshAgain = false
+            await readOnce()
+        } while refreshAgain
+    }
+
+    private func readOnce() async {
+        guard let careCLI else { return }
         let old = snapshot
         let new = await careCLI.snapshot()
         snapshot = new
         refreshedAt = .now
         jobs = await readJobs(new.services)
-        targetItems = [:]
+        targetItems = targetItems.filter { $0.key == expanded }
         if let expanded { await loadItems(expanded) }
-        refreshing = false
         // The first read has nothing to compare with: what is already
         // outstanding at launch is the badge's to show.
         if notifies, let old { notifier.post(new.alerts(since: old, ignoring: ignored)) }
+    }
+
+    /// A remove or an adopt changed the config: what the lists and the
+    /// inventory showed is out of date.
+    func configChanged() async {
+        targetItems = [:]
+        targetErrors = [:]
+        if inventory != nil { await loadWorkstation() }
+        await refresh()
     }
 
     /// Opening the menu reads again once the last read is a few minutes old.
@@ -337,10 +359,11 @@ final class Store {
     /// Writes the starter config for who the Mac is for, then reads the
     /// Mac with it. Nothing is installed yet.
     func createConfig(profiles: [String], role: String?, fromMac: Bool) async throws -> InitResult {
-        await connected()
-        guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
+        guard busy == nil else { throw CLIError(message: "Another change is still running.") }
         busy = "Writing your config"
         defer { busy = nil }
+        await connected()
+        guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
         let result = try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac)
         UserDefaults.standard.set(result.config, forKey: Keys.config)
         await connect()
@@ -399,10 +422,12 @@ final class Store {
 
     func loadItems(_ target: String) async {
         guard let careCLI else { return }
+        targetErrors[target] = nil
         do {
             targetItems[target] = try await careCLI.items(targets: [target], states: ["missing", "differs", "manual"])
         } catch {
-            message = Message(text: error.localizedDescription, failed: true)
+            targetItems[target] = nil
+            targetErrors[target] = error.localizedDescription
         }
     }
 
@@ -447,7 +472,7 @@ final class Store {
 
     /// Shows what apply would change, without changing anything.
     func showPlan() async {
-        guard let careCLI else { return }
+        guard let careCLI, busy == nil else { return }
         busy = "Planning"
         defer { busy = nil }
         do {
@@ -518,13 +543,16 @@ final class Store {
     /// again off it, then installs the rest. True when the apply went through.
     func install(_ choice: AppChoice) async -> Bool {
         guard let careCLI, busy == nil else { return false }
+        busy = "Installing apps"
         do {
             try await careCLI.skip(choice.toSkip)
             try await careCLI.skip(choice.toUnskip, undo: true)
         } catch {
+            busy = nil
             message = Message(text: error.localizedDescription, failed: true)
             return false
         }
+        busy = nil
         let targets = packageTargets
         message = nil
         await change("Installing apps", confirm: false) {

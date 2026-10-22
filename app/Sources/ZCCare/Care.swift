@@ -52,6 +52,11 @@ final class Care {
     let store: Store
     var module: Module = .smartCare
     var scanning = false
+    /// Files came back from the Trash while a scan ran, which may not have seen them.
+    private var rescanAfterScan = false
+    /// Held from the first check to the end of a removal that asks first, so
+    /// a second click cannot start the same flow while the first checks.
+    private var removing = false
     var scannedAt: Date?
     var largeFiles: [LargeFile] = []
     var duplicates: [DuplicateGroup] = []
@@ -123,8 +128,8 @@ final class Care {
         store.ignoreListChanged = { [weak self] in self?.applyIgnoreList() }
         // Files back from the Trash belong in the lists again.
         store.putBackDone = { [weak self] in
-            guard let self, !scanning else { return }
-            Task { await self.scan() }
+            guard let self else { return }
+            if scanning { rescanAfterScan = true } else { Task { await self.scan() } }
         }
     }
 
@@ -211,7 +216,13 @@ final class Care {
     func scan() async {
         guard !scanning else { return }
         scanning = true
-        defer { scanning = false }
+        defer {
+            scanning = false
+            if rescanAfterScan {
+                rescanAfterScan = false
+                Task { await scan() }
+            }
+        }
         await store.connected()
         async let junk: Void = monitor.scan()
         async let state: Void = store.refresh()
@@ -328,11 +339,20 @@ final class Care {
         async let old = Task.detached { OldDownloads.files(in: downloads) }.value
         async let images = Task.detached { DiskImages.files(in: installers) }.value
         (largeFiles, oldDownloads, diskImages) = await (large, old, images)
+        // Something trashed while the scan ran must not come back.
+        let exists = { (file: LargeFile) in FileManager.default.fileExists(atPath: file.url.path) }
+        largeFiles = largeFiles.filter(exists)
+        oldDownloads = oldDownloads.filter(exists)
+        diskImages = diskImages.filter(exists)
         applyIgnoreList()
         scanningFiles = false
         findingDuplicates = true
         defer { findingDuplicates = false }
-        duplicates = store.ignoreList.keep(await same.value)
+        duplicates = store.ignoreList.keep(await same.value).compactMap { group in
+            var group = group
+            group.files.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
+            return group.files.count > 1 ? group : nil
+        }
     }
 
     /// The paths Spotlight finds; nil, with why in a message, when mdfind fails.
@@ -370,7 +390,9 @@ final class Care {
     }
 
     func trash(_ file: LargeFile) async {
-        guard store.busy == nil, allowed([file.url]) else { return }
+        guard store.busy == nil, !removing, allowed([file.url]) else { return }
+        removing = true
+        defer { removing = false }
         guard await !openInApp([file.url]) else { return }
         // A folder from Space Lens: a project with a server or a shell in it.
         if (try? file.url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
@@ -429,7 +451,10 @@ final class Care {
     /// Moves every image but the best of a group to the Trash.
     func trashOthers(_ group: SimilarGroup) async {
         let others = group.others
-        guard store.busy == nil, allowed(others.map(\.url)), await !openInApp(others.map(\.url)), Alerts.confirm(store.removeQuestion(Store.counted(others.count, "similar image")),
+        guard store.busy == nil, !removing else { return }
+        removing = true
+        defer { removing = false }
+        guard allowed(others.map(\.url)), await !openInApp(others.map(\.url)), Alerts.confirm(store.removeQuestion(Store.counted(others.count, "similar image")),
                                                 "\(Store.bytes(group.wasted)). \(group.best.name) stays.",
                                                 button: store.removeButton) else { return }
         store.busy = "Removing similar images"
@@ -584,7 +609,9 @@ final class Care {
     }
 
     func trashDependencies(_ folders: [LargeFile]) async {
-        guard store.busy == nil, !folders.isEmpty, allowed(folders.map(\.url)) else { return }
+        guard store.busy == nil, !removing, !folders.isEmpty, allowed(folders.map(\.url)) else { return }
+        removing = true
+        defer { removing = false }
         // A project may have started since the scan, or have a shell open in it.
         guard let cwds = await workingDirectories() else { return }
         let running = ProjectDependencies.running(folders, commands: await Monitor.commands())
@@ -724,6 +751,7 @@ final class Care {
 
     /// Lists the apps, then fills in sizes and last use as each is read.
     func loadApps() async {
+        guard !loadingApps else { return }
         loadingApps = true
         defer { loadingApps = false }
         await store.connected()
@@ -820,6 +848,7 @@ final class Care {
         }
         if removed {
             apps.removeAll { $0.id == app.id }
+            await store.configChanged()
             // Only an app that went to the Trash comes back whole; a
             // Homebrew or zc-care removal has nothing there to restore.
             store.record(.apps, app.name, freed: app.size ?? 0, trashed: trashed.isEmpty ? nil : trashed)
@@ -916,8 +945,10 @@ final class Care {
     }
 
     func trashOrphans(_ picked: [Orphan]) async {
-        guard store.busy == nil, !picked.isEmpty,
+        guard store.busy == nil, !removing, !picked.isEmpty,
               allowed(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
+        removing = true
+        defer { removing = false }
         guard await !openInApp(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
         let total = picked.reduce(0) { $0 + $1.size }
         guard Alerts.confirm(store.removeQuestion("what \(Store.counted(picked.count, "removed app")) left"),
@@ -976,6 +1007,7 @@ final class Care {
             ? Store.Message(text: "\(app.name) is now cask \(token) in \(target).", failed: false)
             : Store.Message(text: "Homebrew adopted \(app.name), but add failed: \(lastLine(add?.stderr) ?? "")", failed: true)
         await loadApps()
+        if add?.status == 0 { await store.configChanged() }
     }
 
     /// Removes by the choice in Settings: to the Trash, or for good.

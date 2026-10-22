@@ -132,6 +132,7 @@ private struct AppFiles: View {
                             Button { NSWorkspace.shared.activateFileViewerSelecting([file.url]) } label: { Image(systemName: "magnifyingglass") }
                                 .buttonStyle(.borderless)
                                 .help("Show in Finder")
+                                .accessibilityLabel("Show in Finder")
                         }
                         .contextMenu { if file.url != app.url { IgnoreMenu(store: care.store, url: file.url) } }
                     }

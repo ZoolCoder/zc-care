@@ -244,7 +244,7 @@ extension Store {
         monitor.readDisk()
         record(.junk, spot.title, freed: max(size - left, 0), trashed: removal.trashed)
         message = Message(text: "\(spot.title): freed \(Self.bytes(max(size - left, 0)))"
-                          + removal.ending, failed: false)
+                          + removal.ending, failed: !removal.failures.isEmpty)
     }
 
     /// Clears every Free Up folder after one question, for Smart Care.
@@ -275,7 +275,7 @@ extension Store {
         }
         monitor.readDisk()
         record(.junk, "System Junk", freed: freed, trashed: removal.trashed)
-        message = Message(text: "Freed \(Self.bytes(freed))" + removal.ending, failed: false)
+        message = Message(text: "Freed \(Self.bytes(freed))" + removal.ending, failed: !removal.failures.isEmpty)
     }
 
     /// The Finder empties the Trash: the app cannot read it without Full

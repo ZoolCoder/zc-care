@@ -17,6 +17,19 @@ here with what to edit.
 - Setup has Back and Retry.
 - Space Lens, Developer and the care views use one shared "newly appeared"
   badge.
+- Notifications no longer repeat after a refresh that partly failed, and a
+  refresh asked for while another runs follows it, so badges show the data
+  after your change.
+- Removing or adopting an app refreshes the lists and the overview; putting
+  a file back during a scan rescans when the scan ends; Large Files no
+  longer brings back a file you trashed during a scan.
+- A second click on Trash, Remove similar images, Dependencies, Leftovers,
+  Plan, Install or Create Config while the first runs does nothing.
+- An overview target that fails to load shows the error and a Retry button,
+  and the open target no longer flashes a spinner on refresh.
+- Cleanup reports a failure when some files could not be removed, Show in
+  Finder buttons have an accessibility label, `zccare://` links are
+  case-insensitive, and Set Up This Mac offers Try Again after any error.
 
 ### CLI
 

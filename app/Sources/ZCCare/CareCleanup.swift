@@ -90,6 +90,7 @@ private struct AIJunkRow: View {
                                 Button { NSWorkspace.shared.activateFileViewerSelecting([url]) } label: { Image(systemName: "magnifyingglass") }
                                     .buttonStyle(.borderless)
                                     .help("Show in Finder")
+                                    .accessibilityLabel("Show in Finder")
                             }
                         }
                         if kind.paths.count > 20 {

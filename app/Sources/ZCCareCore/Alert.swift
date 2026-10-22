@@ -16,7 +16,10 @@ public struct Alert: Sendable, Equatable {
 
 extension Snapshot {
     /// What is new since old: findings, targets that lost ground, updates.
+    /// A partial read is missing whole parts, so comparing with one, or
+    /// against one, would announce the same things again.
     public func alerts(since old: Snapshot, ignoring ignored: Set<String>) -> [Alert] {
+        guard errors.isEmpty, old.errors.isEmpty else { return [] }
         var alerts: [Alert] = []
         let seen = Set(old.findings.map(\.name))
         for c in findings(ignoring: ignored) where !seen.contains(c.name) {

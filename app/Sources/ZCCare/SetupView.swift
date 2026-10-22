@@ -123,7 +123,7 @@ struct SetupView: View {
             Spacer()
             switch step {
             case .who:
-                if catalog == nil, error != nil {
+                if error != nil {
                     Button("Try Again") { Task { error = nil; await load() } }
                 } else if picked.isEmpty, catalog != nil {
                     Text("Pick at least one profile to write a config.").font(.caption).foregroundStyle(.secondary)

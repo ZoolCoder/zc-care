@@ -159,6 +159,16 @@ struct EchoEnvRunner: Runner {
     #expect(now.alerts(since: old, ignoring: ["security Touch ID for sudo"]).count == 2)
 }
 
+@Test func alertsSkipPartialSnapshots() {
+    let firewall = Check(name: "security firewall", status: "warn")
+    let good = Snapshot(targets: [TargetStatus(target: "home", inPlace: 36, declared: 36)], findings: [firewall])
+    let partial = Snapshot(errors: ["doctor failed"])
+    #expect(partial.alerts(since: good, ignoring: []).isEmpty)
+    // The read after a partial one would see everything as new.
+    #expect(good.alerts(since: partial, ignoring: []).isEmpty)
+    #expect(good.alerts(since: Snapshot(), ignoring: []).count == 1)
+}
+
 @Test func launchdScheduleAndState() throws {
     let schedule = Launchd.schedule(plist: ["StartCalendarInterval": ["Weekday": 1, "Hour": 10, "Minute": 0]])
     #expect(schedule.first?.weekday == 2)

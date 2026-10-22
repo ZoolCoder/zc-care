@@ -122,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func open(_ event: NSAppleEventDescriptor, reply: NSAppleEventDescriptor) {
         guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue.flatMap(URL.init(string:)),
-              let host = url.host() else { return }
+              let host = url.host()?.lowercased() else { return }
         let parts = url.pathComponents.filter { $0 != "/" }
         // zccare://care opens the Care window, zccare://care/applications a module.
         if host == "care" {
@@ -153,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if parts.count > 1 {
             if tab == .mac {
                 store.macDetail = Store.MacDetail(rawValue: parts[1])
-            } else if store.expanded != parts[1] {
+            } else if tab == .overview, store.expanded != parts[1] {
                 store.toggle(parts[1])
             }
         }
