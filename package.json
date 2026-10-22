@@ -7,7 +7,7 @@
   },
   "scripts": {
     "docs": "npm run docs:theme && antora --fetch antora-playbook.yml",
-    "docs:theme": "rm -rf build/pdf-theme && mkdir -p build/pdf-theme && curl -fsSL -o build/zc-pdf-theme.zip https://github.com/zoolcoder/zc-supplemental-ui/releases/download/v0.3.0/zc-pdf-theme.zip && unzip -qo build/zc-pdf-theme.zip -d build/pdf-theme",
+    "docs:theme": "rm -rf build/pdf-theme && mkdir -p build/pdf-theme && curl -fsSL -o build/zc-pdf-theme.zip https://github.com/zoolcoder/zc-supplemental-ui/releases/download/v0.3.0/zc-pdf-theme.zip && echo '5f378ca52b404e4edea622447621eb21dd31913e32a0be88388c078ea13cb9a5  build/zc-pdf-theme.zip' | shasum -a 256 -c - && unzip -qo build/zc-pdf-theme.zip -d build/pdf-theme",
     "docs:local": "rm -rf build/pdf-theme && mkdir -p build/pdf-theme && cp ../../Framework/kits/zc-supplemental-ui/pdf/* build/pdf-theme/ && antora --ui-bundle-url ../../Framework/kits/zc-supplemental-ui/build/ui-bundle.zip antora-playbook.yml",
     "docs:serve": "npx --yes http-server build/site -p 8080 -c-1"
   },

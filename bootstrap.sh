@@ -3,85 +3,131 @@
 # carries, clones zc-care and the config repo into ~/Developer/Tools, then applies the config.
 # Usage: bootstrap.sh OWNER/CONFIG-REPO
 #   curl -fsSL https://raw.githubusercontent.com/ZoolCoder/zc-care/main/bootstrap.sh | bash -s -- OWNER/CONFIG-REPO
-# Safe to run again: what is already there is kept, and apply only changes what differs.
+# Safe to run again: what is already there is kept, an existing clone is fast-forwarded, and apply
+# only changes what differs.
 set -euo pipefail
-
-config_repo=${1:-${ZC_CONFIG_REPO:-}}
-[[ -n $config_repo ]] || { echo "usage: bootstrap.sh OWNER/CONFIG-REPO" >&2; exit 1; }
-[[ $(uname -s) == Darwin ]] || { echo "bootstrap.sh is for macOS only." >&2; exit 1; }
-
-tools="$HOME/Developer/Tools"
-tool_dir="$tools/zc-care"
-config_dir="$tools/$(basename "$config_repo")"
-# Clone sources; the VM test points these at mounted copies.
-tool_from=${ZC_TOOL_FROM:-https://github.com/ZoolCoder/zc-care.git}
-config_from=${ZC_CONFIG_FROM:-}
 
 step() { printf '\n\033[1;34m==>\033[0m %s\n' "$1"; }
 
-if ! command -v brew >/dev/null && [[ ! -x /opt/homebrew/bin/brew ]]; then
-  step "Installing Homebrew (asks for your password; also installs the Xcode command line tools)"
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-fi
-eval "$(/opt/homebrew/bin/brew shellenv)"
-
-step "Installing what zc-care needs"
-brew install git gh chezmoi mise
-
-if [[ -z $config_from ]]; then
-  # The config repo is usually private, so git needs a GitHub login first.
-  gh auth status >/dev/null 2>&1 || { step "Logging in to GitHub"; gh auth login --git-protocol https --web; }
-  gh auth setup-git
-  config_from="https://github.com/$config_repo.git"
-fi
-
-mkdir -p "$tools"
-for pair in "$tool_from|$tool_dir" "$config_from|$config_dir"; do
-  from=${pair%%|*} dir=${pair#*|}
-  if [[ -d $dir/.git ]]; then
-    echo "Keeping $dir"
+# Brings a clone up to date; when it cannot fast-forward it says so and keeps the clone.
+update_clone() {
+  local dir=$1
+  if git -C "$dir" pull --ff-only --quiet </dev/null; then
+    echo "Updated $dir"
   else
-    step "Cloning $from"
-    git clone --quiet "$from" "$dir"
+    echo "Could not fast-forward $dir (local changes or a diverged branch); keeping it as it is." >&2
   fi
-done
+}
 
-# ZC Care carries the CLI and its cask puts it on PATH. Before a release has
-# the cask, as in a VM test of a local copy, it is built from the clone.
-step "Installing ZC Care and zc-care"
-if ! { brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care && brew install --cask zc-care; }; then
-  brew install go
-  make -C "$tool_dir" app-install
-fi
-export PATH="$HOME/.local/bin:$PATH"
-export ZC_CARE_CONFIG="$config_dir/zc-care.yaml"
-defaults write dev.zoolcoder.zccare configPath "$ZC_CARE_CONFIG"
-# mise reads only configs you trust; this one is yours.
-[[ -f $config_dir/mise.toml ]] && mise trust --quiet "$config_dir/mise.toml"
+load_brew() {
+  local brew_bin
+  for brew_bin in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    if [[ -x $brew_bin ]]; then
+      eval "$("$brew_bin" shellenv)"
+      return 0
+    fi
+  done
+  echo "Homebrew is not installed where expected (/opt/homebrew or /usr/local)." >&2
+  return 1
+}
 
-# On a terminal, ZC Care asks which of the config's apps this Mac gets; what is
-# left out goes on this Mac's skip list, which the plan below honours.
-if [[ -t 1 && -r /dev/tty && -z ${ZC_NO_PICKER:-} ]]; then
-  step "Choosing apps in ZC Care"
-  open "zccare://apps"
-  read -r -p "Pick your apps in ZC Care, press Install, then press Enter here. " </dev/tty
-fi
+# The whole script is one function called on the last line, so under curl | bash
+# bash has read all of it before anything runs and no command can eat the rest
+# of the script from stdin.
+main() {
+  local config_repo=${1:-${ZC_CONFIG_REPO:-}}
+  [[ -n $config_repo ]] || { echo "usage: bootstrap.sh OWNER/CONFIG-REPO" >&2; exit 1; }
+  [[ $(uname -s) == Darwin ]] || { echo "bootstrap.sh is for macOS only." >&2; exit 1; }
 
-step "Plan"
-zc-care plan
-step "Applying"
-zc-care apply
-# Targets planned before the packages arrived, such as runtimes, are finished by a second pass.
-if ! zc-care plan -exit-code >/dev/null 2>&1; then
-  zc-care apply
-fi
+  local tools="$HOME/Developer/Tools"
+  local tool_dir="$tools/zc-care"
+  local config_dir="$tools/$(basename "$config_repo")"
+  # Clone sources; the VM test points these at mounted copies.
+  local tool_from=${ZC_TOOL_FROM:-https://github.com/ZoolCoder/zc-care.git}
+  local config_from=${ZC_CONFIG_FROM:-}
 
-step "Done"
-zc-care status
-cat <<'MSG'
+  if ! command -v brew >/dev/null && [[ ! -x /opt/homebrew/bin/brew && ! -x /usr/local/bin/brew ]]; then
+    step "Installing Homebrew (asks for your password; also installs the Xcode command line tools)"
+    # The installer asks questions: give it the terminal, not the piped script.
+    if [[ -r /dev/tty ]]; then
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/tty
+    else
+      NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null
+    fi
+  fi
+  load_brew
+
+  step "Installing what zc-care needs"
+  brew install git gh chezmoi mise </dev/null
+
+  if [[ -z $config_from ]]; then
+    # The config repo is usually private, so git needs a GitHub login first.
+    if ! gh auth status >/dev/null 2>&1 </dev/null; then
+      step "Logging in to GitHub"
+      gh auth login --git-protocol https --web </dev/tty
+    fi
+    gh auth setup-git </dev/null
+    config_from="https://github.com/$config_repo.git"
+  fi
+
+  mkdir -p "$tools"
+  local pair from dir
+  for pair in "$tool_from|$tool_dir" "$config_from|$config_dir"; do
+    from=${pair%%|*} dir=${pair#*|}
+    if [[ -d $dir/.git ]]; then
+      step "Updating $dir"
+      update_clone "$dir"
+    else
+      step "Cloning $from"
+      git clone --quiet "$from" "$dir" </dev/null
+    fi
+  done
+
+  # ZC Care carries the CLI and its cask puts it on PATH. Before a release has
+  # the cask, as in a VM test of a local copy, it is built from the clone.
+  step "Installing ZC Care and zc-care"
+  local cask_log
+  cask_log=$(mktemp)
+  if ! { brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care \
+         && brew install --cask zc-care; } >"$cask_log" 2>&1 </dev/null; then
+    echo "The cask install failed, building from source instead. Why:" >&2
+    sed 's/^/  /' "$cask_log" >&2
+    brew install go </dev/null
+    make -C "$tool_dir" app-install </dev/null
+  fi
+  rm -f "$cask_log"
+  export PATH="$HOME/.local/bin:$PATH"
+  export ZC_CARE_CONFIG="$config_dir/zc-care.yaml"
+  defaults write dev.zoolcoder.zccare configPath "$ZC_CARE_CONFIG"
+  # mise reads only configs you trust; this one is yours.
+  if [[ -f $config_dir/mise.toml ]]; then mise trust --quiet "$config_dir/mise.toml" </dev/null; fi
+
+  # On a terminal, ZC Care asks which of the config's apps this Mac gets; what is
+  # left out goes on this Mac's skip list, which the plan below honours.
+  if [[ -t 1 && -r /dev/tty && -z ${ZC_NO_PICKER:-} ]]; then
+    step "Choosing apps in ZC Care"
+    open "zccare://apps" </dev/null
+    read -r -p "Pick your apps in ZC Care, press Install, then press Enter here. " </dev/tty
+  fi
+
+  step "Plan"
+  zc-care plan </dev/null
+  step "Applying"
+  zc-care apply </dev/null
+  # Targets planned before the packages arrived, such as runtimes, are finished by a second pass.
+  if ! zc-care plan -exit-code >/dev/null 2>&1 </dev/null; then
+    zc-care apply </dev/null
+  fi
+
+  step "Done"
+  zc-care status </dev/null
+  cat <<'MSG'
 
 Left for you, once:
   * Log out and back in, then run: zc-care apply   (loads the commit signing key)
   * Pick WebViewScreenSaver in System Settings > Screen Saver
   * Open a new terminal to get the new shell
 MSG
+}
+
+main "$@"

@@ -7,56 +7,122 @@ on:
   # tag push started nothing.
   workflow_dispatch:
 
-permissions:
-  contents: write        # create the release and push the cask branch
-  pull-requests: write   # open the cask pull request into develop
-  id-token: write        # the provenance attestation
-  attestations: write    # store the provenance with GitHub
+# Nothing by default; each job takes only what it needs.
+permissions: {}
 
 jobs:
-  zc-care:
-    # ZC Care, with the zc-care CLI inside: a universal .app on the
-    # release, and a cask for it in a pull request into develop.
+  build:
+    # ZC Care, with the zc-care CLI inside: a universal .app, attested, handed
+    # to the publish job as an artifact. This job never holds a write token.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-latest
+    permissions:
+      contents: read
+      id-token: write        # the provenance attestation
+      attestations: write    # store the provenance with GitHub
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # all branches, for the main check, and the commit count
+          persist-credentials: false
+      - name: Check the tag
+        id: tag
+        run: |
+          # v1.2.3, or a v1.2.3-rc.1 / v1.2.3-beta.1 prerelease.
+          if ! [[ $GITHUB_REF_NAME =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(rc|beta)\.?[0-9]+)?$ ]]; then
+            echo "::error::tag $GITHUB_REF_NAME is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rc.N / -beta.N"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main: tag a commit that is already merged into main"
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          if [[ $GITHUB_REF_NAME == *-* ]]; then echo "prerelease=true" >> "$GITHUB_OUTPUT"; else echo "prerelease=false" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.14.0
+      - run: make lint
       - run: go test ./...
+      - run: make app-test
       - name: Build
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          version=${GITHUB_REF_NAME#v}
-          echo "VERSION=$version" >> "$GITHUB_ENV"
           # The CLI the app carries, for both architectures like the app.
           for arch in arm64 amd64; do
             CGO_ENABLED=0 GOOS=darwin GOARCH=$arch go build -trimpath \
-              -ldflags "-s -w -X main.version=$version" -o "dist/cli-$arch" ./cmd/zc-care
+              -ldflags "-s -w -X main.version=$VERSION" -o "dist/cli-$arch" ./cmd/zc-care
           done
           lipo -create -output dist/zc-care dist/cli-arm64 dist/cli-amd64
-          UNIVERSAL=1 VERSION=$version CLI=dist/zc-care app/package.sh dist/ZCCare.app
-          ditto -c -k --keepParent dist/ZCCare.app "dist/ZCCare_${version}.zip"
-          app/cask.sh "$version" "$(shasum -a 256 "dist/ZCCare_${version}.zip" | cut -d' ' -f1)" > "$RUNNER_TEMP/zc-care.rb"
+          UNIVERSAL=1 VERSION=$VERSION CLI=dist/zc-care app/package.sh dist/ZCCare.app
+          ditto -c -k --keepParent dist/ZCCare.app "dist/ZCCare_${VERSION}.zip"
+          app/cask.sh "$VERSION" "$(shasum -a 256 "dist/ZCCare_${VERSION}.zip" | cut -d' ' -f1)" > dist/zc-care.rb
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/ZCCare_*.zip
-      - name: Release and open the cask pull request
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: |
+            dist/ZCCare_*.zip
+            dist/zc-care.rb
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the release and push the cask branch
+      pull-requests: write   # open the cask pull request into develop
+      actions: write         # dispatch ci.yml on the cask branch
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0   # the cask branch starts from origin/develop and pushes with this token
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+      - name: Release
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "dist/ZCCare_${VERSION}.zip"
+          # Idempotent: a re-run after a later step failed keeps the release.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists, keeping it"
+          else
+            flags=()
+            [[ ${{ needs.build.outputs.prerelease }} == true ]] && flags+=(--prerelease)
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "${flags[@]}" "dist/ZCCare_${VERSION}.zip"
+          fi
+      - name: Open the cask pull request
+        # A prerelease never reaches the cask.
+        if: needs.build.outputs.prerelease != 'true'
+        run: |
           branch="chore/zc-care-cask-${VERSION}"
-          git switch -c "$branch" origin/develop
+          git fetch origin "$branch" 2>/dev/null || true
+          git switch -C "$branch" origin/develop
           mkdir -p Casks
-          cp "$RUNNER_TEMP/zc-care.rb" Casks/zc-care.rb
+          cp dist/zc-care.rb Casks/zc-care.rb
           git config user.name github-actions
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add Casks/zc-care.rb
-          git commit -m "chore(brew): zc-care cask for ${GITHUB_REF_NAME}"
-          git push origin "$branch"
-          gh pr create --base develop --head "$branch" \
-            --title "chore(brew): zc-care cask for ${GITHUB_REF_NAME}" \
-            --body "The ZC Care cask for ${GITHUB_REF_NAME}, from the release workflow."
+          git commit -m "chore(brew): zc-care cask for ${GITHUB_REF_NAME}" || echo "cask already up to date on develop"
+          git push --force-with-lease origin "$branch"
+          if [[ -z $(gh pr list --head "$branch" --state open --json number --jq '.[].number') ]]; then
+            gh pr create --base develop --head "$branch" \
+              --title "chore(brew): zc-care cask for ${GITHUB_REF_NAME}" \
+              --body "The ZC Care cask for ${GITHUB_REF_NAME}, from the release workflow."
+          fi
+          # Pull requests opened with GITHUB_TOKEN start no pull_request run, and
+          # develop requires the quick check: dispatch it on the branch head.
+          gh workflow run ci.yml --ref "$branch" \
+            || echo "::warning::could not dispatch ci.yml on $branch; run it by hand so the quick check lands on the pull request"

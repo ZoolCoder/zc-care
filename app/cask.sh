@@ -23,6 +23,14 @@ cask "zc-care" do
   app "ZCCare.app"
   binary "#{appdir}/ZCCare.app/Contents/MacOS/zc-care"
 
+  # INTERIM until a Developer ID release: the app is signed ad hoc, so the
+  # quarantine flag brew's download sets makes Gatekeeper kill the CLI (exit
+  # 137). Clear it. Remove this block once the app is signed and notarised.
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/ZCCare.app"]
+  end
+
   uninstall quit: "dev.zoolcoder.zccare"
 
   zap trash: [
@@ -34,8 +42,9 @@ cask "zc-care" do
   ]
 
   caveats <<~EOS
-    ZC Care is signed ad hoc until it is notarised, so macOS blocks the first
-    start. Open it once from Finder with Control-click, Open, or run:
+    ZC Care is signed ad hoc until a Developer ID release, so it is not
+    notarised. This cask clears the quarantine flag when it installs. If macOS
+    still blocks the first start, Control-click the app and choose Open, or run:
       xattr -dr com.apple.quarantine "#{appdir}/ZCCare.app"
   EOS
 end
