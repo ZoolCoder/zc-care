@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/zoolcoder/zc-care/internal/config"
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/provider"
 	"github.com/zoolcoder/zc-care/internal/sh"
@@ -247,13 +248,8 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 	case provider.Differs:
 		actions = append(actions, plan.Action{Op: plan.OpUpdate, Target: t.Name, Resource: "screensaver",
 			Detail: "show " + filepath.Base(t.Screensaver) + " in WebViewScreenSaver; pick it once in System Settings, Screen Saver",
-			Do: func(ctx context.Context) error {
-				if err := p.setSaverPage(ctx, infoPlist(l.saver), l.page); err != nil {
-					return err
-				}
-				// Editing Info.plist breaks the bundle's seal; sign it again, ad hoc as built.
-				return p.r.Run(ctx, "codesign", "--force", "--sign", "-", l.saver)
-			}})
+			Digest: provider.Digest([]byte(l.page)),
+			Do:     func(ctx context.Context) error { return p.pointSaver(ctx, l.saver, l.page) }})
 	}
 	if l.accent.state == provider.Differs {
 		a := accents[t.Accent]
@@ -267,6 +263,32 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 			}})
 	}
 	return actions, nil
+}
+
+// pointSaver sets the saver's page and signs the bundle again. Editing
+// Info.plist breaks the bundle's seal; the signature is ad hoc, as built. If
+// signing fails the plist goes back as it was, so the next plan still sees the
+// page as not set and tries again.
+func (p Provider) pointSaver(ctx context.Context, saver, page string) error {
+	plist := infoPlist(saver)
+	orig, err := os.ReadFile(plist)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(plist)
+	if err != nil {
+		return err
+	}
+	if err := p.setSaverPage(ctx, plist, page); err != nil {
+		return err
+	}
+	if err := p.r.Run(ctx, "codesign", "--force", "--sign", "-", saver); err != nil {
+		if rerr := manifest.WriteFile(plist, orig, info.Mode().Perm()); rerr != nil {
+			return errors.Join(err, fmt.Errorf("put back %s: %w", plist, rerr))
+		}
+		return err
+	}
+	return nil
 }
 
 // setSaverPage puts page into the plist. The page is a whole HTML file as a
@@ -292,7 +314,21 @@ func (p Provider) setSaverPage(ctx context.Context, plist, page string) error {
 	if err := errors.Join(werr, tmp.Close()); err != nil {
 		return err
 	}
-	return p.r.Run(ctx, "plutil", "-convert", "xml1", "-o", plist, tmp.Name())
+	// plutil rewrites its output in place; point it at a file beside the
+	// plist and rename, so a failure leaves the plist whole.
+	info, err := os.Stat(plist)
+	if err != nil {
+		return err
+	}
+	converted := filepath.Join(filepath.Dir(plist), fmt.Sprintf(".Info.plist.zc-care-%d", os.Getpid()))
+	defer func() { _ = os.Remove(converted) }()
+	if err := p.r.Run(ctx, "plutil", "-convert", "xml1", "-o", converted, tmp.Name()); err != nil {
+		return err
+	}
+	if err := os.Chmod(converted, info.Mode().Perm()); err != nil {
+		return err
+	}
+	return os.Rename(converted, plist)
 }
 
 var plistEnd = regexp.MustCompile(`\n?</dict>\s*</plist>\s*$`)
@@ -305,7 +341,7 @@ func withPlistString(doc, key, value string) (string, error) {
 		return "", err
 	}
 	entry := "<key>" + key + "</key>\n\t<string>" + escaped.String() + "</string>"
-	existing := regexp.MustCompile(`<key>` + regexp.QuoteMeta(key) + `</key>\s*<string>[^<]*</string>`)
+	existing := regexp.MustCompile(`<key>` + regexp.QuoteMeta(key) + `</key>\s*(?:<string/>|<string>[^<]*</string>)`)
 	if existing.MatchString(doc) {
 		return existing.ReplaceAllLiteralString(doc, entry), nil
 	}

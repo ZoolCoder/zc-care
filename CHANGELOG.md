@@ -76,6 +76,20 @@ here with what to edit.
 - `plan` warns when the Mac has no profile set but targets are restricted
   to profiles, since every one of them then runs.
 - `init -from-mac` reads single-quoted Brewfile entries.
+- Local-directory targets write through a temp file and a rename, keep an
+  existing file's mode (new files are 0600), and their prune and update can
+  be undone.
+- An agent client's rules file refuses to overwrite an edit made after the
+  plan, its config and rules writes can be undone, and skill copies keep the
+  source file's mode, so scripts stay executable.
+- A failed `codesign` puts the screen saver's Info.plist back, so the next
+  plan retries it, and the plist is replaced in one rename.
+- A Brewfile entry whose line ends in a comment before its `id:` is read as
+  one entry, and comment lines inside a multi-line entry are skipped.
+- Settings reads run eight at a time in the C locale, and overwriting an
+  array or dictionary setting, which undo cannot put back, asks first.
+- Saved plans refuse to apply when a dotfile, local file, rules file, skill
+  or screen saver page changed since the plan.
 
 ### Security checks
 

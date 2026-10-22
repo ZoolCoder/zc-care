@@ -111,12 +111,14 @@ func parseBrewfile(data []byte) ([]item, []string, error) {
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	depth := 0
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
+		line := withoutComment(sc.Text())
+		if line == "" {
 			continue
 		}
 		for strings.HasSuffix(line, ",") && sc.Scan() {
-			line += " " + strings.TrimSpace(sc.Text())
+			if next := withoutComment(sc.Text()); next != "" {
+				line += " " + next
+			}
 		}
 		switch {
 		case opensBlock(line):
@@ -156,6 +158,24 @@ func parseBrewfile(data []byte) ([]item, []string, error) {
 	}
 	// Taps first, so apply adds a tap before installing from it.
 	return append(taps, rest...), unsupported, sc.Err()
+}
+
+// withoutComment trims line and cuts a # comment, unless the # is inside quotes.
+func withoutComment(line string) string {
+	var quote rune
+	for i, r := range line {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '"' || r == '\'':
+			quote = r
+		case r == '#':
+			return strings.TrimSpace(line[:i])
+		}
+	}
+	return strings.TrimSpace(line)
 }
 
 func opensBlock(line string) bool {

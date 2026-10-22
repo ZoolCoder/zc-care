@@ -43,11 +43,14 @@ func New(r sh.Runner) Provider {
 type key struct {
 	domain, name string
 	want         any
-	have         string
+	have, typ    string
 	state        string
 }
 
 func (k key) resource() string { return k.domain + " " + k.name }
+
+// maxReads bounds the defaults processes running at once.
+const maxReads = 8
 
 // read asks defaults for every key at once: each read is its own process. A
 // key that is not set is Missing; any other failure, such as a cancelled
@@ -61,8 +64,13 @@ func (p Provider) read(ctx context.Context, t config.Target) ([]key, error) {
 	}
 	errs := make([]error, len(keys))
 	var wg sync.WaitGroup
+	slots := make(chan struct{}, maxReads)
 	for i := range keys {
-		wg.Go(func() { errs[i] = p.readKey(ctx, &keys[i]) })
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			errs[i] = p.readKey(ctx, &keys[i])
+		})
 	}
 	wg.Wait()
 	return keys, errors.Join(errs...)
@@ -74,7 +82,7 @@ func (p Provider) readKey(ctx context.Context, k *key) error {
 	if err != nil || !present {
 		return err
 	}
-	k.have = have
+	k.have, k.typ = have, typ
 	k.state = provider.Differs
 	if same(k.want, have, typ) {
 		k.state = provider.InPlace
@@ -85,18 +93,24 @@ func (p Provider) readKey(ctx context.Context, k *key) error {
 // current is the value defaults holds for a key and its type as read-type
 // words it; present is false for a key that is not set.
 func (p Provider) current(ctx context.Context, domain, name string) (have, typ string, present bool, err error) {
-	out, err := p.r.Output(ctx, "defaults", "read", domain, name)
+	out, err := p.defaults(ctx, "read", domain, name)
 	if err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			return "", "", false, nil
 		}
 		return "", "", false, err
 	}
-	kind, err := p.r.Output(ctx, "defaults", "read-type", domain, name)
+	kind, err := p.defaults(ctx, "read-type", domain, name)
 	if err != nil {
 		return "", "", false, err
 	}
 	return strings.TrimSpace(string(out)), strings.TrimSpace(string(kind)), true, nil
+}
+
+// defaults runs a read-only defaults command in the C locale: "does not exist"
+// and the type words are matched in English.
+func (p Provider) defaults(ctx context.Context, args ...string) ([]byte, error) {
+	return p.r.Output(ctx, "env", append([]string{"LC_ALL=C", "defaults"}, args...)...)
 }
 
 // expand turns a leading ~/ in a string value into the home directory, for
@@ -160,8 +174,9 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		}
 		args := writeArgs(k.domain, k.name, k.want)
 		actions = append(actions, plan.Action{Op: op, Target: t.Name, Resource: k.resource(), Detail: detail,
-			Before: func(ctx context.Context) (plan.Undo, error) { return p.before(ctx, k.domain, k.name) },
-			Do:     func(ctx context.Context) error { return p.r.Run(ctx, "defaults", args...) }})
+			Destructive: overwritesUnrecordable(k),
+			Before:      func(ctx context.Context) (plan.Undo, error) { return p.before(ctx, k.domain, k.name) },
+			Do:          func(ctx context.Context) error { return p.r.Run(ctx, "defaults", args...) }})
 		if proc, ok := restarts[k.domain]; ok {
 			restart[proc] = true
 		}
@@ -170,6 +185,16 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		actions = append(actions, p.restartAction(t.Name, proc))
 	}
 	return actions, nil
+}
+
+// overwritesUnrecordable reports whether the write replaces a value undo
+// cannot put back, such as an array or dictionary.
+func overwritesUnrecordable(k key) bool {
+	if k.state != provider.Differs {
+		return false
+	}
+	_, err := restoreArgs(map[string]string{"domain": k.domain, "key": k.name, "type": k.typ, "value": k.have})
+	return err != nil
 }
 
 func (p Provider) restartAction(target, proc string) plan.Action {

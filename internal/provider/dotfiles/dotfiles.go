@@ -117,6 +117,7 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		actions = append(actions, plan.Action{
 			Op: c.op, Target: t.Name, Resource: c.path, Detail: detail,
 			Destructive: c.outside || c.script,
+			Digest:      p.digest(ctx, t, filepath.Join(dest, c.path)),
 			Before: func(context.Context) (plan.Undo, error) {
 				return before(filepath.Join(dest, c.path), c.script)
 			},
@@ -128,6 +129,23 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		})
 	}
 	return actions, nil
+}
+
+// digest fingerprints what apply would write to file: chezmoi's diff, else
+// the source file's bytes. Empty when neither can be read.
+func (p Provider) digest(ctx context.Context, t config.Target, file string) string {
+	if out, err := p.r.Output(ctx, "chezmoi", args(t, "diff", "--recursive=false", file)...); err == nil && len(out) > 0 {
+		return provider.Digest(out)
+	}
+	src, err := p.r.Output(ctx, "chezmoi", args(t, "source-path", file)...)
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(strings.TrimSpace(string(src)))
+	if err != nil {
+		return ""
+	}
+	return provider.Digest(b)
 }
 
 // managed lists the files and symlinks the source manages, as relative paths.

@@ -72,7 +72,8 @@ func compact(m map[string]any) map[string]any {
 }
 
 // server compares one declared server with the client's config.
-func (p Provider) server(target, clientName string, c client, name string, s Server, secret bool) (change, error) {
+func (p Provider) server(target, clientName string, c client, name string, s, template Server) (change, error) {
+	secret := hasRef(template)
 	path := filepath.Join(p.home, c.servers)
 	resource := name + " (" + clientName + ")"
 	ch := change{item: item(name, "mcp server", clientName, provider.InPlace)}
@@ -104,6 +105,8 @@ func (p Provider) server(target, clientName string, c client, name string, s Ser
 		ch.item.State = provider.Differs
 	}
 	ch.action = plan.Action{Op: op, Target: target, Resource: resource, Detail: "write to ~/" + c.servers,
+		Digest: serverDigest(clientName, name, template),
+		Before: func(context.Context) (plan.Undo, error) { return provider.FileBefore(providerName, path) },
 		Do: func(context.Context) error {
 			// Read again: the agent may have written the file since the plan.
 			now, seen, err := readStamped(path)
@@ -123,6 +126,13 @@ func (p Provider) server(target, clientName string, c client, name string, s Ser
 			return writeFile(path, next, secret)
 		}}
 	return ch, nil
+}
+
+// serverDigest fingerprints the declared server as written in the manifest,
+// keychain references unresolved, so no secret is ever hashed.
+func serverDigest(client, name string, template Server) string {
+	b, _ := json.Marshal(template)
+	return provider.Digest([]byte(client), []byte(name), b)
 }
 
 // readStamped reads path and notes its mtime and size; a missing file reads

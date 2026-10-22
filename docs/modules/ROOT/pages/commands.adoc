@@ -246,16 +246,17 @@ it and runs it through the same engine.
 
 * A setting goes back to its old value and type, or is deleted if it was not
   set before.
-* A dotfile is restored from a private copy (mode `0600`, never in the
-  history), or removed if the apply created it.
+* A dotfile, a local-directory file, an agent client's config or rules file
+  is restored from a private copy (mode `0600`, never in the history), or
+  removed if the apply created it.
 * A package the apply installed is uninstalled; one it removed is reinstalled.
   Undo does not edit the manifest: after an uninstall the next `plan` installs
   the package again, and a reinstalled one needs its line added back.
 
 Some changes are listed as `MANUAL` with the reason, because there is no safe
 way back: upgrades and runtime installs (no downgrades), dotfile scripts, and
-settings that hold an array or a dictionary. Uninstalling and overwriting a
-file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
+settings that hold an array or a dictionary, which is why `apply` asks before
+overwriting one. Uninstalling and overwriting a file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
 `history` as from `undo`, but it cannot be undone, and neither can
 `doctor -fix`. The MCP server does not offer `undo`.
 

@@ -111,8 +111,41 @@ func read(dir string) (map[string][]byte, error) {
 	return files, err
 }
 
+const providerName = "localdir"
+
+// Revert puts back each file apply replaced or deleted, and removes each it
+// created.
+func (Provider) Revert(undos []plan.Undo) []plan.Action { return provider.RevertFiles(undos) }
+
+// before records the file name holds now, read through root so a symlink
+// cannot lead out of the directory.
+func before(t config.Target, name string) (plan.Undo, error) {
+	root, err := os.OpenRoot(t.Path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return provider.NewFileUndo(providerName, filepath.Join(t.Path, name)), nil
+	}
+	if err != nil {
+		return plan.Undo{}, err
+	}
+	defer func() { _ = root.Close() }()
+	file := filepath.Join(t.Path, name)
+	info, err := root.Stat(name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return provider.NewFileUndo(providerName, file), nil
+	}
+	if err != nil {
+		return plan.Undo{}, err
+	}
+	content, err := root.ReadFile(name)
+	if err != nil {
+		return plan.Undo{}, err
+	}
+	return provider.SavedFileUndo(providerName, file, content, info.Mode()), nil
+}
+
 func write(t config.Target, name string, content []byte, op plan.Op, detail string) plan.Action {
-	return plan.Action{Op: op, Target: t.Name, Resource: name, Detail: detail,
+	return plan.Action{Op: op, Target: t.Name, Resource: name, Detail: detail, Digest: provider.Digest(content),
+		Before: func(context.Context) (plan.Undo, error) { return before(t, name) },
 		Do: func(context.Context) error {
 			if err := os.MkdirAll(t.Path, 0o755); err != nil {
 				return err
@@ -125,12 +158,45 @@ func write(t config.Target, name string, content []byte, op plan.Op, detail stri
 			if err := root.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 				return err
 			}
-			return root.WriteFile(name, content, 0o644)
+			return replaceFile(root, name, content)
 		}}
+}
+
+// replaceFile writes name through a temporary file and one rename, so a
+// failure leaves the old file whole. The file keeps its mode, or is private
+// to the user when new.
+func replaceFile(root *os.Root, name string, content []byte) error {
+	mode := fs.FileMode(0o600)
+	if info, err := root.Stat(name); err == nil {
+		mode = info.Mode().Perm()
+	}
+	tmpName := filepath.Join(filepath.Dir(name), fmt.Sprintf(".zc-care-%d.tmp", os.Getpid()))
+	_ = root.Remove(tmpName)
+	tmp, err := root.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(content)
+	if err := errors.Join(werr, tmp.Chmod(mode), tmp.Close()); err != nil {
+		_ = root.Remove(tmpName)
+		return err
+	}
+	if err := root.Rename(tmpName, name); err != nil {
+		_ = root.Remove(tmpName)
+		return err
+	}
+	return nil
 }
 
 func remove(t config.Target, name string) plan.Action {
 	return plan.Action{Op: plan.OpDelete, Target: t.Name, Resource: name, Detail: "not in the config",
+		Before: func(context.Context) (plan.Undo, error) {
+			u, err := before(t, name)
+			if u.Verb == "remove" {
+				return plan.NoUndo(), err // already gone: nothing to put back
+			}
+			return u, err
+		},
 		Do: func(context.Context) error {
 			root, err := os.OpenRoot(t.Path)
 			if err != nil {

@@ -104,3 +104,16 @@ func TestHomeApplicationsCountsAsAnAdoptionFolder(t *testing.T) {
 		t.Fatalf("dirs %q", applicationsDirs)
 	}
 }
+
+func TestBrewfileCommentsDoNotBreakContinuations(t *testing.T) {
+	for name, data := range map[string]string{
+		"trailing comment": "mas \"X\", # note\n  id: 123\n",
+		"comment inside":   "mas \"X\",\n  # why\n  id: 123\n",
+		"hash in quotes":   "mas \"X#1\", id: 123 # note\n",
+	} {
+		items, unsupported, err := parseBrewfile([]byte(data))
+		if err != nil || len(unsupported) != 0 || len(items) != 1 || items[0].ID != "123" {
+			t.Errorf("%s: items %+v unsupported %q err %v", name, items, unsupported, err)
+		}
+	}
+}

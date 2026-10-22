@@ -52,6 +52,8 @@ type Server struct {
 	Headers map[string]string `yaml:"headers"`
 }
 
+const providerName = "agents"
+
 type Provider struct {
 	r    sh.Runner
 	home string
@@ -129,7 +131,7 @@ func (p Provider) changes(ctx context.Context, t config.Target) ([]change, error
 	for _, name := range m.Clients {
 		c := clients[name]
 		for _, s := range slices.Sorted(maps.Keys(servers)) {
-			ch, err := p.server(t.Name, name, c, s, servers[s], hasRef(m.Servers[s]))
+			ch, err := p.server(t.Name, name, c, s, servers[s], m.Servers[s])
 			if err != nil {
 				return nil, err
 			}
@@ -211,6 +213,9 @@ func (p Provider) Measure(ctx context.Context, t config.Target) (provider.Live, 
 	return m, nil
 }
 
+// Revert puts back the config and rules files apply changed.
+func (Provider) Revert(undos []plan.Undo) []plan.Action { return provider.RevertFiles(undos) }
+
 // Programs lists ollama when the manifest asks for models.
 func (p Provider) Programs(t config.Target) []string {
 	if m, err := Load(t.File); err == nil && len(m.Models) > 0 {
@@ -245,7 +250,18 @@ func (p Provider) rules(target, client string, c client, src string) (change, er
 	}
 	ch.item.State, ch.action = provider.Missing, plan.Action{Op: plan.OpUpdate, Target: target,
 		Resource: "rules (" + client + ")", Detail: "write " + filepath.Base(src) + " into ~/" + c.rules,
-		Do: func(context.Context) error { return writeFile(path, []byte(next), false) }}
+		Digest: provider.Digest([]byte(next)),
+		Before: func(context.Context) (plan.Undo, error) { return provider.FileBefore(providerName, path) },
+		Do: func(context.Context) error {
+			now, _, err := readStamped(path)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(now, have) {
+				return fmt.Errorf("%s changed since the plan; re-run", path)
+			}
+			return writeFile(path, []byte(next), false)
+		}}
 	if len(have) == 0 {
 		ch.action.Op = plan.OpCreate
 	}
@@ -266,8 +282,8 @@ func (p Provider) skill(target, client string, c client, src string) (change, er
 		return change{}, fmt.Errorf("read installed skill %s: %w", name, err)
 	}
 	var stale []string
-	for f, b := range want {
-		if !bytes.Equal(have[f], b) {
+	for f, w := range want {
+		if h, ok := have[f]; !ok || h.mode != w.mode || !bytes.Equal(h.data, w.data) {
 			stale = append(stale, f)
 		}
 	}
@@ -282,15 +298,25 @@ func (p Provider) skill(target, client string, c client, src string) (change, er
 	}
 	ch.item.State, ch.action = state, plan.Action{Op: op, Target: target, Resource: resource,
 		Detail: fmt.Sprintf("copy %d file(s) to ~/%s", len(stale), filepath.Join(c.skills, name)),
+		Digest: skillDigest(stale, want),
 		Do: func(context.Context) error {
 			for _, f := range stale {
-				if err := writeFile(filepath.Join(dst, f), want[f], false); err != nil {
+				if err := writeFileMode(filepath.Join(dst, f), want[f].data, want[f].mode); err != nil {
 					return err
 				}
 			}
 			return nil
 		}}
 	return ch, nil
+}
+
+// skillDigest fingerprints the files a skill copy writes, in name order.
+func skillDigest(names []string, files map[string]treeFile) string {
+	var parts [][]byte
+	for _, n := range names {
+		parts = append(parts, []byte(n), []byte(files[n].mode.String()), files[n].data)
+	}
+	return provider.Digest(parts...)
 }
 
 // models pulls the Ollama models that are not on this machine.
@@ -353,15 +379,25 @@ func realPath(p string) string {
 	return p
 }
 
+type treeFile struct {
+	data []byte
+	mode fs.FileMode
+}
+
 // tree reads every regular file under dir, by slash path.
-func tree(dir string) (map[string][]byte, error) {
-	files := map[string][]byte{}
+func tree(dir string) (map[string]treeFile, error) {
+	files := map[string]treeFile{}
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || !d.Type().IsRegular() {
 			return err
 		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
 		rel, _ := filepath.Rel(dir, path)
-		files[filepath.ToSlash(rel)], err = os.ReadFile(path)
+		files[filepath.ToSlash(rel)] = treeFile{data: data, mode: info.Mode().Perm()}
 		return err
 	})
 	return files, err
@@ -380,6 +416,14 @@ func writeFile(path string, b []byte, private bool) error {
 	}
 	if private {
 		mode &^= 0o077
+	}
+	return manifest.WriteFile(path, b, mode)
+}
+
+// writeFileMode writes path, and its folder if missing, with exactly mode.
+func writeFileMode(path string, b []byte, mode fs.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
 	return manifest.WriteFile(path, b, mode)
 }
