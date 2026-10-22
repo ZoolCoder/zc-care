@@ -20,6 +20,7 @@ jobs:
     # the scan starts once the repository is public.
     if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       security-events: write
@@ -36,6 +37,7 @@ jobs:
 
   vulncheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -46,13 +48,13 @@ jobs:
       - run: go mod verify
       # govulncheck reports only vulnerabilities on a code path this binary
       # actually reaches, so a finding here is a real one rather than a
-      # dependency-tree advisory to triage.
-      # TODO: pin through a go.mod tool directive (go get -tool
-      # golang.org/x/vuln/cmd/govulncheck) and run go tool govulncheck ./...
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      # dependency-tree advisory to triage. It is pinned by the tool directive
+      # in go.mod, so Dependabot bumps it like any other module.
+      - run: make vuln
 
   gitleaks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -64,6 +66,7 @@ jobs:
 
   osv-scanner:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -73,3 +76,4 @@ jobs:
           scan-args: |-
             --lockfile=go.sum
             --lockfile=package-lock.json
+            --lockfile=Gemfile.lock

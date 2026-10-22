@@ -104,7 +104,10 @@ here with what to edit.
   identifier.
 - Security workflow runs on pull requests, verifies `go.sum`, and pins
   gitleaks and osv-scanner by commit.
-- `make vuln` runs govulncheck and `make verify` checks the module sums.
+- `make vuln` runs govulncheck, pinned by a `tool` directive in `go.mod` so
+  Dependabot bumps it, and `make verify` checks the module sums.
+- Every CI job has a timeout, the quick check on a pull request into
+  `develop` also runs the hook test, and osv-scanner reads `Gemfile.lock`.
 
 ## v0.2.0 — 2026-10-21
 

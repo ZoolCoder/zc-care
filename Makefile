@@ -90,9 +90,9 @@ docs-serve: docs
 clean:
 	rm -rf bin dist build coverage.out
 
-# govulncheck, pinned like CI; swap for go tool once the tool directive is in go.mod.
+# govulncheck, pinned by the tool directive in go.mod, like CI.
 vuln:
-	go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+	go tool govulncheck ./...
 
 verify:
 	go mod verify
