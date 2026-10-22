@@ -4,6 +4,13 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
+## Unreleased
+
+### Release and CI
+
+- The security workflow scans `go.mod` with osv-scanner; the scanner has no
+  extractor for `go.sum` and failed every run.
+
 ## v0.3.0 — 2026-10-23
 
 Undo that refuses to overwrite a later edit, saved plans checked against the
