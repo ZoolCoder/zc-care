@@ -140,7 +140,10 @@ public enum AIModels {
         guard let files = FileManager.default.enumerator(at: root.appendingPathComponent("manifests"), includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
         var read: [(url: URL, manifest: Manifest)] = []
         var users: [String: Int] = [:]
+        let base = root.appendingPathComponent("manifests").resolvingSymlinksInPath().pathComponents.count
         for case let url as URL in files where (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true {
+            // Only registry/namespace/model/tag files are manifests: a .DS_Store is not one.
+            guard !url.lastPathComponent.hasPrefix("."), url.resolvingSymlinksInPath().pathComponents.count == base + 4 else { continue }
             // A manifest that does not decode may share any blob, so no blob is safe to remove.
             guard let data = try? Data(contentsOf: url), let m = try? JSONDecoder().decode(Manifest.self, from: data) else { return [] }
             for d in Set(m.all.map(\.digest)) { users[d, default: 0] += 1 }

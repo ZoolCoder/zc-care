@@ -105,6 +105,8 @@ final class Care {
     var space: SpaceScan?
     var scanningSpace = false
     var apps: [InstalledApp] = []
+    /// Ids of Setapp and other-volume apps, read once per scan.
+    var externalIDs: Set<String> = []
     var loadingApps = false
     var icons: [String: NSImage] = [:]
     var agents: [LaunchAgent] = []
@@ -765,6 +767,7 @@ final class Care {
         if casks.isEmpty { casks = await Task.detached { Self.readCaskIndex() }.value }
         let folder = URL(fileURLWithPath: "/Applications")
         let found = await Task.detached { AppCatalog.apps(in: folder, caskApps: caskApps, items: items) }.value
+        externalIDs = await Task.detached { Leftovers.externalAppIDs() }.value
         let old = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         apps = found.map { app in
             var app = app
@@ -792,7 +795,8 @@ final class Care {
         }
     }
 
-    var installedIDs: Set<String> { Set(apps.compactMap(\.bundleID)) }
+    /// Apps in /Applications plus Setapp's and other volumes': a sibling there keeps its agents.
+    var installedIDs: Set<String> { Set(apps.compactMap(\.bundleID)).union(externalIDs) }
 
     /// Removes the app and what it left in the Library. A Brewfile app goes
     /// through zc-care remove, which drops it from the manifest too;
@@ -931,6 +935,8 @@ final class Care {
         defer { loadingOrphans = false }
         let home = NSHomeDirectory()
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let external = await Task.detached { Leftovers.externalAppIDs() }.value
+        externalIDs = external
         orphans = await Task.detached(priority: .utility) {
             let folders = [home + "/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons"]
             let inUse = running.union(LaunchAgent.read(folders: folders).map(\.label))
@@ -938,7 +944,6 @@ final class Care {
                 ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }
                     .map { folder + "/" + $0 }
             }
-            let external = Leftovers.externalAppIDs()
             let vendors = Set(apps.compactMap { Bundle(path: $0)?.bundleIdentifier }.map(Leftovers.vendor))
                 .union(external.map(Leftovers.vendor))
             return Leftovers.orphans(home: home, vendors: vendors) {

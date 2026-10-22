@@ -87,6 +87,10 @@ public struct Trashed: Codable, Sendable, Equatable {
 /// Everything ZC Care did, kept on disk, newest last.
 public struct ActivityLog: Codable, Sendable, Equatable {
     public var entries: [ActivityEntry] = []
+    /// Set when a corrupt file could not be moved aside: saving would overwrite it.
+    public private(set) var readOnly = false
+
+    private enum CodingKeys: String, CodingKey { case entries }
 
     public init(entries: [ActivityEntry] = []) {
         self.entries = entries
@@ -136,11 +140,17 @@ public struct ActivityLog: Codable, Sendable, Equatable {
         if let log = try? JSONDecoder().decode(ActivityLog.self, from: data) { return log }
         // The next save would overwrite what Put Back still needs: keep the file.
         let stamp = Int(Date.now.timeIntervalSince1970)
-        try? FileManager.default.moveItem(at: url, to: url.appendingPathExtension("broken-\(stamp)"))
-        return ActivityLog()
+        var log = ActivityLog()
+        do {
+            try FileManager.default.moveItem(at: url, to: url.appendingPathExtension("broken-\(stamp)"))
+        } catch {
+            log.readOnly = true
+        }
+        return log
     }
 
     public func save(to url: URL) throws {
+        guard !readOnly else { throw CocoaError(.fileWriteNoPermission) }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONEncoder().encode(self).write(to: url, options: .atomic)
     }

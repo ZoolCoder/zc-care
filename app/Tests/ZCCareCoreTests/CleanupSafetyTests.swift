@@ -147,3 +147,59 @@ private func age(_ url: URL, days: Double) throws {
     #expect(!scan.growers().isEmpty)
     #expect(scan.growers(under: "/nowhere").isEmpty)
 }
+
+@Test func ollamaIgnoresDSStoreNextToManifest() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let digest = "sha256:" + String(repeating: "a", count: 64)
+    try write(root.appendingPathComponent("manifests/registry.ollama.ai/library/llama/latest"),
+              #"{"layers":[{"digest":"\#(digest)","size":5}]}"#)
+    try write(root.appendingPathComponent("manifests/.DS_Store"), "junk")
+    try write(root.appendingPathComponent("manifests/registry.ollama.ai/.DS_Store"), "junk")
+    #expect(AIModels.ollama(root: root).map(\.name) == ["llama:latest"])
+}
+
+@Test func ollamaStillStopsOnBrokenManifest() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try write(root.appendingPathComponent("manifests/registry.ollama.ai/library/llama/latest"), "not json")
+    #expect(AIModels.ollama(root: root).isEmpty)
+}
+
+@Test func corruptActivityLogMovedAsideThenSaves() throws {
+    let dir = try tempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let file = dir.appendingPathComponent("activity.json")
+    try write(file, "{broken")
+    let log = ActivityLog.load(from: file)
+    #expect(!log.readOnly)
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    try log.save(to: file)
+    #expect(FileManager.default.fileExists(atPath: file.path))
+}
+
+@Test func unmovableCorruptActivityLogRefusesSave() throws {
+    let dir = try tempDir()
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+        try? FileManager.default.removeItem(at: dir)
+    }
+    let file = dir.appendingPathComponent("activity.json")
+    try write(file, "{broken")
+    try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+    let log = ActivityLog.load(from: file)
+    #expect(log.readOnly)
+    #expect(throws: (any Error).self) { try log.save(to: file) }
+    #expect((try? String(contentsOf: file, encoding: .utf8)) == "{broken")
+}
+
+@Test func deepUntouchedTreatsHugeFolderAsTouched() throws {
+    let dir = try tempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    for i in 0...ProjectDependencies.touchedEntryCap {
+        try write(dir.appendingPathComponent("f\(i)"))
+    }
+    try age(dir, days: 10)
+    for i in 0...ProjectDependencies.touchedEntryCap { try age(dir.appendingPathComponent("f\(i)"), days: 10) }
+    #expect(!AIClutter.untouched(dir, for: 1, now: .now, deep: true))
+}

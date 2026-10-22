@@ -108,11 +108,15 @@ public enum AIClutter {
 
     /// With `deep`, the newest change anywhere inside counts: a session that
     /// keeps writing deep in its folder leaves the folder's own date alone.
+    /// A folder too big to read within `ProjectDependencies.touchedEntryCap` entries counts as touched.
     static func untouched(_ url: URL, for days: Double, now: Date, deep: Bool = false) -> Bool {
         let key = URLResourceKey.contentModificationDateKey
         var newest = (try? url.resourceValues(forKeys: [key]))?.contentModificationDate ?? .distantPast
         if deep, let walk = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [key]) {
+            var seen = 0
             for case let inner as URL in walk {
+                seen += 1
+                if seen > ProjectDependencies.touchedEntryCap || Task.isCancelled { return false }
                 if let date = (try? inner.resourceValues(forKeys: [key]))?.contentModificationDate { newest = max(newest, date) }
             }
         }
