@@ -58,8 +58,10 @@ here with what to edit.
 - Fix All as Administrator runs exactly the fixes the preview listed. If a
   refresh changed which checks fail, nothing runs and the app asks you to
   review again.
-- Cancel now works while installing, applying or updating, and stops the
-  running zc-care process.
+- Cancel now works while installing, applying or updating. It interrupts the
+  running zc-care process and waits up to ten seconds for it to exit, so the
+  actions that already ran keep their undo record and History entry; the
+  message then says so.
 - The app picker shows the error when it cannot read this Mac's profiles,
   instead of an empty list.
 - Free Up and Clean Up wait for a running scan to finish, so the confirmed
@@ -84,7 +86,8 @@ here with what to edit.
   warns that the next apply recreates it.
 - Leftover file lists no longer show results of an older scan after a newer
   one started. The Junk folder picker no longer clears everything while its
-  list is loading, and reopening it quickly no longer mixes lists. The
+  list is loading, can be collapsed while its scan runs, and reopening it
+  quickly no longer mixes lists. The
   Developer view keeps its selection count in step with the list after
   Rescan. Quitting a running app from the Mac tab waits while another job is
   busy.

@@ -198,9 +198,9 @@ private struct JunkRow: View {
     }
 
     private func toggle() {
-        guard entries != nil || !open else { return }
         open.toggle()
         loading?.cancel()
+        picked = []
         guard open else { return }
         entries = nil
         picked = []

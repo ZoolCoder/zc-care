@@ -516,7 +516,8 @@ final class Store {
                 ? Message(text: "\(label): done and verified.", failed: false, log: log)
                 : Message(text: lastLine(of: result) ?? "\(label) failed.", failed: true, log: log)
         } catch is CancellationError {
-            message = Message(text: "\(label): cancelled.", failed: true)
+            plan = nil
+            message = Message(text: "\(label): cancelled; what already ran is in History.", failed: true)
         } catch {
             message = Message(text: error.localizedDescription, failed: true)
         }
