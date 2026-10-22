@@ -102,7 +102,7 @@ It has these modules:
 | Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin snapshots, reindex Spotlight. |
 | Applications | Uninstalls apps with their leftovers. *Adopt* moves an app installed by hand to Homebrew. |
 | My Clutter, Space Lens | Find large and duplicate files, old downloads and installers, and map what fills your disk. Space Lens keeps the previous scan, marks folders that grew and links them to the module that can clean them. |
-| Cloud Cleanup | Lists the files iCloud Drive, Google Drive, OneDrive and Dropbox keep on the Mac. *Remove Download* frees the space and keeps the file in the cloud. |
+| Cloud Cleanup | Lists the files iCloud Drive keeps downloaded on the Mac. *Remove Download* frees the space and keeps the file in iCloud. Google Drive, OneDrive and Dropbox are counted, and their folders open in Finder. |
 | Developer | Finds `node_modules` and virtualenvs of projects idle for 90 days, and local AI models. Shows what Docker keeps, with Prune Build Cache and Prune Dangling Images (permanent), and Xcode's DerivedData, Archives, DeviceSupport and simulator caches. |
 | My Workstation | What your config declares and what is in place: coverage, each target with *Apply*, every item to search, and what was applied. *Choose Apps…* opens the app picker. |
 | My Tools, My Activity | Give every tool in one grid, Mac health, and what ZC Care has freed so far. |
@@ -331,7 +331,7 @@ The script:
 5. Installs ZC Care, which carries the CLI.
 6. Trusts your `mise.toml`.
 7. Opens **Choose Apps** in ZC Care, so you pick what this Mac
-   gets. `ZC_NO_PICKER=1` skips it and installs everything.
+   gets. `ZC_NO_PICKER=1` skips the picker; apply then plans everything and asks once.
 8. Plans and applies until nothing is left.
 
 It is safe to run again. The manual's

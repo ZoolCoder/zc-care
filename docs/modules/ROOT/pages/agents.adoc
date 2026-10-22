@@ -7,16 +7,16 @@
 
 [cols="1,3"]
 |===
-| `status` | Live state per target. Read-only.
-| `list` | Every declared item with its state, version, newer version and app, then what is installed but not declared. Takes `state` and `kind` filters. Read-only.
+| `status` | Live state per target. Takes `targets`. Read-only.
+| `list` | Every declared item with its state, version, newer version and app, then what is installed but not declared. Takes `targets`, `state` and `kind` filters. Read-only.
 | `add` | Declare a package or runtime in one target's manifest now, with its why and section. Takes no config argument; it always edits the default config. Returns `{file,item,section}`. Fails without `section` when the manifest has sections, and names them.
 | `remove` | Plan the uninstall of a package and the drop of its manifest line. Changes nothing and returns no plan_id: `{appliable:false, command, plan}`. The user runs `command` at a terminal.
 | `capture` | The manifest one target would declare to match this machine. Writes nothing. Read-only.
 | `validate` | Check the config offline. Read-only.
-| `plan` | Plan and save it. Returns a `plan_id`. Changes nothing.
+| `plan` | Plan and save it. Takes `targets`. Returns a `plan_id`. Changes nothing.
 | `apply` | Apply a saved plan by `plan_id`. Refuses a plan older than 10 minutes, a plan that deletes, overwrites an outside edit or runs a script, and a plan whose live state moved. Ends with a one-line digest. A settings change that replaces an array, dictionary, data or date value, which undo cannot restore, counts as an overwrite and is applied at a terminal.
 | `doctor` | Install health, security settings and AI agent configs. Read-only.
-| `history` | What was applied, newest first, and from where. Read-only.
+| `history` | What was applied, newest first, and from where. Takes `n`, how many entries, 20 by default. Read-only.
 | `drift` | What the last daily drift check found. Read-only.
 |===
 
@@ -72,11 +72,11 @@ $ claude plugin install zc-care
   `/zc-care:review`.
 * The `PreToolUse` hook fails closed. It allows only the read-only
   subcommands (`plan`, `status`, `list`, `history`, `drift`, `capture`,
-  `diff`, `validate`, `doctor`, `version`) in a plain command, and
+  `diff`, `validate`, `doctor`, `version`, `help`) in a plain command, and
   asks before everything else: every `apply` (a saved plan file does not
   count, the MCP `apply` with a plan id is the reviewed path), `undo`,
   `upgrade`, `remove`, `export` (it writes a file), `init`, `add`, `skip`,
-  `profile`, `mcp`, `-yes` and `-fix`, an unlisted subcommand or a flag
+  `profile`, `mcp`, `-y`, `-yes` and `-fix`, an unlisted subcommand or a flag
   value that hides one, and any `zc-care` command that uses quotes, `$`,
   backticks, `;` or other syntax it cannot read. It also asks for `eval`,
   for anything piped or fed into a shell or interpreter, for a command that

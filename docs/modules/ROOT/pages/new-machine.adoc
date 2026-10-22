@@ -99,12 +99,22 @@ It:
   Mac's skip list (`~/.config/zc-care/skip`, kept by
   `zc-care skip`), so plan, apply and drift stop asking for it, and
   your other Macs still get it. Settings > Choose Apps opens the picker again.
+  The script waits for you to press Enter before it goes on.
 . shows the plan, applies it, and applies again if anything is left, such as
   runtimes planned before mise arrived
 
 It is safe to run again. `ZC_TOOL_FROM` and `ZC_CONFIG_FROM` clone from
 somewhere else, such as a local copy in a VM test. Without a terminal, or
-with `ZC_NO_PICKER` set, it skips the picker and installs everything.
+with `ZC_NO_PICKER` set, it skips the picker, so the plan covers everything the
+config declares. Without a terminal the script also stops after the plan and
+prints `Run zc-care apply at a terminal to review and confirm.`; apply asks
+before it deletes, so it needs a terminal to answer on.
+
+When it finishes, it lists what is left for you, once:
+
+* Log out and back in, then run `zc-care apply` to load the commit signing key.
+* Pick WebViewScreenSaver in System Settings > Screen Saver.
+* Open a new terminal to get the new shell.
 
 == Keeping Macs in step
 

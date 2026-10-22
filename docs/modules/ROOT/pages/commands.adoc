@@ -48,11 +48,15 @@
 | `-fix` | `doctor`: plan and apply the fixes, after a yes. Cannot be combined with `-json`.
 | `-n N` | `history`: how many entries to show, 20 by default. `undo`: how many applies to revert.
 | `-id ID`, `-list`, `-plan` | `undo`: which entry to revert, list them, or show the reverse and change nothing.
-| `-yes` | `apply`, `remove`, `undo`, `doctor -fix`: skip the confirmation prompt.
+| `-yes` | `apply`, `remove`, `undo`, `upgrade`, `doctor -fix`: skip the confirmation prompt.
+| `-remove ITEM` | `plan`, `apply`: only uninstall this item, as `kind:name`. `remove` uses it.
+| `-via WHO` | `apply`: who asked, for the history; `the terminal` by default. Agents and ZC Care set it; you do not need to.
 | `-data DIR` | `undo`, `history`: the folder of the activity log, instead of the default data folder (`undo` also keeps its `undo/` journal there).
 | `-last`, `-plist`, `-hour N` | `drift`: print the saved count, print the launchd agent, and the hour it runs at (9 by default, 0 to 23).
 | `-o FILE` | `export`: write the snapshot to `FILE`, mode 0600, instead of standard output. Refuses an existing file without `-force`.
 |===
+
+`-h` after any subcommand prints that subcommand's flags.
 
 == Init, profile and skip
 

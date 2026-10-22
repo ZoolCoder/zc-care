@@ -9,7 +9,7 @@ compatibility: Needs zc-care on PATH. If `zc-care doctor` fails, use the setup s
 
 Plan, show, wait for a yes to that plan, apply that plan.
 
-No MCP? Same steps with `zc-care plan -out plan.json` then `zc-care apply plan.json`. The rules below hold there too: apply only the plan file from your last plan call in this turn, within 10 minutes; a plan file works once; any other plan needs a new plan and a new yes.
+No MCP? Same steps with `zc-care plan -out plan.json` then `zc-care apply plan.json`. The rules below hold there too: apply only the plan file from your last plan call in this turn; any other plan needs a new plan and a new yes. `zc-care apply plan.json` refuses a file whose content digests no longer match the live state, and applies a file again if they still match.
 
 ## 1. Plan
 
