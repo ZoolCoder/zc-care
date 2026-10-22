@@ -78,6 +78,38 @@ func ok(_ json: String) -> CommandResult { CommandResult(status: 0, stdout: Data
     #expect(Fix(for: Check(name: "program brew", status: "fail", detail: "not on PATH")) == .info("not on PATH"))
 }
 
+@Test func everyRootLineTheDoctorRendersRunsAndAdviceStaysAdvice() {
+    // Byte-equal to security.Line of the doctor's fix table.
+    let lines = [
+        "security firewall": "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on",
+        "security firewall stealth mode": "sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setstealthmode on",
+        "security Gatekeeper": "sudo spctl --global-enable",
+        "security automatic update checks": "sudo softwareupdate --schedule on",
+        "security File Sharing off": "sudo /bin/sh -c 'launchctl disable system/com.apple.smbd; launchctl bootout system/com.apple.smbd 2>/dev/null; true'",
+        "security automatic login off": "sudo /bin/sh -c 'rm -f /etc/kcpassword; defaults delete /Library/Preferences/com.apple.loginwindow autoLoginUser'",
+        "security Guest account off": "sudo sysadminctl -guestAccount off",
+        "security Touch ID for sudo": Fix.touchIDLine,
+    ]
+    #expect(Set(lines.keys) == Fix.rootFixable)
+    for (name, line) in lines {
+        guard case .command(let command) = Fix(for: Check(name: name, status: "warn", detail: line)) else {
+            Issue.record("\(name) lost its fix"); continue
+        }
+        #expect("sudo " + command == line)
+    }
+    #expect(Fix.touchIDLine.contains("auth[[:space:]]+sufficient[[:space:]]+pam_tid"))
+    for (name, detail) in [
+        ("security automatic login off", "System Settings, Users & Groups: set Automatically log in as to Off"),
+        ("security AirDrop not open to everyone", "System Settings, General, AirDrop & Handoff: set AirDrop to Contacts Only"),
+        ("security security updates install on their own",
+         "System Settings, General, Software Update, Automatic updates: turn on downloads, security responses and macOS installs; macOS then installs updates and restarts on its own (off: ConfigDataInstall)"),
+    ] {
+        guard case .settings = Fix(for: Check(name: name, status: "warn", detail: detail)) else {
+            Issue.record("\(name) is advice"); continue
+        }
+    }
+}
+
 @Test func onlyTheDoctorsOwnCommandsRunAsRoot() {
     // Any local process picks its own name, and lsof reports it.
     let exposed = Check(name: "security servers on every network interface", status: "warn",

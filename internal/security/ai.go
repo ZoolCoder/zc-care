@@ -25,11 +25,62 @@ var mcpConfigs = []string{
 var claudeSettings = []string{".claude/settings.json", ".claude/settings.local.json"}
 
 type mcpServer struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args"`
-	URL     string            `json:"url"`
-	Env     map[string]string `json:"env"`
-	Headers map[string]string `json:"headers"`
+	Command string
+	Args    []string
+	URL     string
+	Env     map[string]string
+	Headers map[string]string
+}
+
+// UnmarshalJSON reads a server field by field, turning a number or boolean
+// into its text, so one value of the wrong type (a numeric PORT) cannot make
+// the whole config unreadable and let its keys go unchecked.
+func (s *mcpServer) UnmarshalJSON(b []byte) error {
+	var raw map[string]json.RawMessage
+	if json.Unmarshal(b, &raw) != nil {
+		return nil
+	}
+	s.Command, s.URL = text(raw["command"]), text(raw["url"])
+	s.Args, s.Env, s.Headers = texts(raw["args"]), textMap(raw["env"]), textMap(raw["headers"])
+	return nil
+}
+
+// text is a JSON string, or the written form of a number or boolean; null,
+// an object and an array have none.
+func text(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	t := strings.TrimSpace(string(raw))
+	if t == "null" || strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") {
+		return ""
+	}
+	return t
+}
+
+func texts(raw json.RawMessage) []string {
+	var list []json.RawMessage
+	if json.Unmarshal(raw, &list) != nil {
+		return nil
+	}
+	out := make([]string, len(list))
+	for i, item := range list {
+		out[i] = text(item)
+	}
+	return out
+}
+
+func textMap(raw json.RawMessage) map[string]string {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = text(v)
+	}
+	return out
 }
 
 var (
@@ -37,7 +88,7 @@ var (
 	// secretWord is a whole word in a name, so AUTHOR and MONKEY pass.
 	secretWord = regexp.MustCompile(`(^|[^a-z])(api[-_]?key|key|token|secret|password|passwd|o?auth|authorization|credentials?)s?([^a-z]|$)`)
 	// tomlSecret is a secret-named key set to a literal in Codex's TOML.
-	tomlSecret = regexp.MustCompile(`(?im)^\s*"?([a-z0-9_]*(?:key|token|secret|password)[a-z0-9_]*)"?\s*=\s*"[^"$]{8,}"`)
+	tomlSecret = regexp.MustCompile(`(?im)^\s*"?([a-z0-9_]*(?:key|token|secret|password)[a-z0-9_]*)"?\s*=\s*"[^"$]+"`)
 	// argSecret is a flag with its value attached, such as --api-key=abc.
 	argSecret = regexp.MustCompile(`^--?([\w-]+)=(.+)$`)
 	// urlSecret is a query parameter, such as ?key=abc.
@@ -144,8 +195,9 @@ func (s mcpServer) literalSecrets() []string {
 	return found
 }
 
-// literal is a value written out, not a reference to the environment. An
-// Authorization header keeps its scheme in front of the secret.
+// literal is a value written out, not a reference to the environment, of any
+// length: a short secret is still a secret. An Authorization header keeps
+// its scheme in front of the secret.
 func literal(v string) bool {
 	for _, scheme := range []string{"Bearer ", "Basic "} {
 		if len(v) >= len(scheme) && strings.EqualFold(v[:len(scheme)], scheme) {
@@ -153,7 +205,7 @@ func literal(v string) bool {
 			break
 		}
 	}
-	return len(v) >= 8 && !strings.HasPrefix(v, "$") && !strings.Contains(v, "${") && !strings.Contains(v, "{{")
+	return v != "" && !strings.HasPrefix(v, "$") && !strings.Contains(v, "${") && !strings.Contains(v, "{{")
 }
 
 // unpinned names MCP servers started through npx, bunx or uvx without an
@@ -191,6 +243,15 @@ func exactVersion(spec string) bool {
 	return at > 0 && npmVersion.MatchString(spec[at+1:])
 }
 
+// switches take no value, so the argument after one may be the package. Any
+// other --flag written without = is taken to have a value, which is not a
+// package and may be a secret.
+var switches = []string{
+	"--yes", "--no", "--quiet", "--silent", "--verbose", "--help", "--version", "--force", "--offline",
+	"--no-install", "--no-cache", "--no-progress", "--no-fund", "--no-audit", "--no-update-notifier",
+	"--ignore-existing", "--prefer-offline", "--isolated", "--refresh", "--no-sync", "--no-config",
+}
+
 // valueFlags take the next argument as their value, which is not a package.
 var valueFlags = []string{
 	"-c", "--call", "--registry", "--prefix", "--cache", "--node-options", "--userconfig",
@@ -215,6 +276,8 @@ func packages(runner string, args []string) []string {
 			if !attached {
 				i++
 			}
+		case strings.HasPrefix(a, "--") && a != "--" && !attached && !slices.Contains(switches, flag):
+			i++
 		case strings.HasPrefix(a, "-"):
 		case len(named) > 0:
 			return named
@@ -225,18 +288,41 @@ func packages(runner string, args []string) []string {
 	return named
 }
 
-// floating returns the first package a runner starts without an exact version.
+// packageSpec is [@scope/]name with an optional version or specifier: all
+// that is safe to print. Any other argument could be a secret.
+var packageSpec = regexp.MustCompile(`^(@[\w.-]+/)?[\w.-]+([@=<>~!^*][\w.=<>~!^*+,@-]*)?$`)
+
+// floating returns the first package a runner starts without an exact
+// version, as a name fit to print.
 func floating(s mcpServer) (string, bool) {
-	runner := path.Base(filepath.ToSlash(s.Command))
-	if !slices.Contains([]string{"npx", "bunx", "uvx", "pnpx"}, runner) {
+	runner, args := runnerOf(s)
+	if runner == "" {
 		return "", false
 	}
-	for _, pkg := range packages(runner, s.Args) {
+	for _, pkg := range packages(runner, args) {
 		if !exactVersion(pkg) {
+			if !packageSpec.MatchString(pkg) {
+				pkg = "unrecognised spec"
+			}
 			return pkg, true
 		}
 	}
 	return "", false
+}
+
+// runnerOf names the package runner a server starts and the arguments after
+// it: npx, bunx, uvx and pnpx, or the same through npm exec, pnpm dlx,
+// yarn dlx and bun x. It is empty for any other command.
+func runnerOf(s mcpServer) (string, []string) {
+	command := path.Base(filepath.ToSlash(s.Command))
+	if slices.Contains([]string{"npx", "bunx", "uvx", "pnpx"}, command) {
+		return command, s.Args
+	}
+	subcommands := map[string][]string{"npm": {"exec", "x"}, "pnpm": {"dlx", "exec"}, "yarn": {"dlx"}, "bun": {"x"}}
+	if len(s.Args) > 0 && slices.Contains(subcommands[command], s.Args[0]) {
+		return "npx", s.Args[1:]
+	}
+	return "", nil
 }
 
 func (u User) broadPermissions() Result {

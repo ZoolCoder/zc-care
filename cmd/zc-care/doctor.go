@@ -22,7 +22,7 @@ import (
 )
 
 // runDoctor checks the install: the binary on PATH, the config, and that
-// every target's live state can be read. On a Mac it also checks security.
+// every target's live state can be read. It also checks security.
 func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	flags.SetOutput(stderr)

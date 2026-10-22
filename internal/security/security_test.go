@@ -212,7 +212,7 @@ func TestSecurityUpdatesReadEachKey(t *testing.T) {
 	}
 	out[updatesCmd()] = "CriticalUpdateInstall=1\nConfigDataInstall=0\nAutomaticDownload=\nAutomaticallyInstallMacOSUpdates=0\n"
 	r = results(t, out, "")["security updates install on their own"]
-	if r.OK || !strings.Contains(r.Detail, "(off: ConfigDataInstall, AutomaticallyInstallMacOSUpdates)") || len(r.Fix) != len(updateKeys) {
+	if r.OK || !strings.Contains(r.Detail, "(off: ConfigDataInstall, AutomaticallyInstallMacOSUpdates)") || len(r.Fix) != 0 || !strings.Contains(r.Detail, "restarts") {
 		t.Errorf("off keys: %+v", r)
 	}
 }
@@ -240,16 +240,102 @@ func TestSudoFixesAreTheAppsRootFixable(t *testing.T) {
 	out["netstat -an -p tcp"] = "tcp4  0  0  *.445  *.*  LISTEN\n"
 	out[guestCmd] = "1\n"
 	out["/bin/sh -c defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null; true"] = "me\n"
+	out["/bin/sh -c defaults read com.apple.sharingd DiscoverableMode 2>/dev/null; true"] = "Everyone\n"
 	out[updatesCmd()] = "CriticalUpdateInstall=0\n"
-	want := []string{"firewall", "firewall stealth mode", "Gatekeeper", "automatic update checks", "File Sharing off", "Guest account off", "Touch ID for sudo"}
+	want := []string{"File Sharing off", "Gatekeeper", "Guest account off", "Touch ID for sudo", "automatic login off", "automatic update checks", "firewall", "firewall stealth mode"}
 	var got []string
 	for _, r := range checker(t, out, "").Run(context.Background()) {
-		if strings.Contains(r.Detail, "sudo ") && r.Name != "servers on every network interface" {
-			got = append(got, r.Name)
+		if len(r.Fix) == 0 {
+			continue
+		}
+		got = append(got, r.Name)
+		if len(r.Fix) != 1 || !Root(r.Fix[0]) || r.Detail != Line(r.Fix[0]) {
+			t.Errorf("%s: fix %+v must be one sudo line and the Detail: %q", r.Name, r.Fix, r.Detail)
 		}
 	}
+	slices.Sort(got)
 	if !slices.Equal(got, want) {
-		t.Errorf("sudo fixes = %q, want %q", got, want)
+		t.Errorf("fixes = %q, want %q", got, want)
+	}
+	for _, name := range []string{"AirDrop not open to everyone", "security updates install on their own"} {
+		if len(fixes[name]) != 0 {
+			t.Errorf("%s has advice for Detail, so it has no fix", name)
+		}
+	}
+}
+
+// answering is a command that ran, printed out and failed with err.
+type answering struct {
+	sh.Fake
+	out string
+	err error
+}
+
+func (a *answering) Output(context.Context, string, ...string) ([]byte, error) {
+	return []byte(a.out), a.err
+}
+
+// exitStatus is the error of a real command that exited with code.
+func exitStatus(t *testing.T, code string) error {
+	t.Helper()
+	err := exec.Command("/bin/sh", "-c", "exit "+code).Run()
+	if err == nil {
+		t.Fatal("exit " + code + " did not fail")
+	}
+	return err
+}
+
+func TestGatekeeperReadsTheTextOfAFailedStatus(t *testing.T) {
+	failed := exitStatus(t, "1")
+	cases := []struct {
+		out     string
+		err     error
+		ok, unk bool
+	}{
+		{"assessments enabled\n", nil, true, false},
+		{"assessments disabled\n", failed, false, false},
+		{"assessments disabled\n", nil, false, false},
+		{"", failed, false, true},
+		{"what?\n", nil, false, true},
+	}
+	for _, c := range cases {
+		r := Checker{r: &answering{out: c.out, err: c.err}}.gatekeeper(context.Background())
+		if r.OK != c.ok || r.Unknown != c.unk || (!c.ok && !c.unk && len(r.Fix) != 1) {
+			t.Errorf("%q %v: %+v", c.out, c.err, r)
+		}
+	}
+}
+
+func TestExposedNeedsAnAnswerFromLsof(t *testing.T) {
+	cases := []struct {
+		out  string
+		err  error
+		want string // ok, warn or unknown
+	}{
+		{"", exitStatus(t, "1"), "ok"},
+		{"", exitStatus(t, "2"), "unknown"},
+		{"", errors.New("lsof: not found"), "unknown"},
+		{"p1\ncnode\nn192.168.1.5:3000\n", exitStatus(t, "1"), "warn"},
+		{"p1\ncnode\nn[fe80::1]:3000\n", nil, "warn"},
+		{"p1\ncnode\nn127.0.0.2:3000\nn[::1]:3001\nnlocalhost:3002\nn127.0.0.1:3003\n", nil, "ok"},
+		{"p1\ncnode\nn*:3000\n", nil, "warn"},
+	}
+	for _, c := range cases {
+		r := Checker{r: &answering{out: c.out, err: c.err}}.exposed(context.Background())
+		got := map[bool]string{true: "ok"}[r.OK]
+		switch {
+		case r.Unknown:
+			got = "unknown"
+		case r.Warn:
+			got = "warn"
+		}
+		if got != c.want {
+			t.Errorf("%q %v: %s, want %s (%+v)", c.out, c.err, got, c.want, r)
+		}
+	}
+	r := Checker{r: &answering{out: "p1\ncnode\nn192.168.1.5:3000\n"}}.exposed(context.Background())
+	if !strings.HasPrefix(r.Detail, "node:3000;") {
+		t.Errorf("detail %q", r.Detail)
 	}
 }
 
@@ -260,8 +346,12 @@ func TestFileSharingFixDisablesAndStops(t *testing.T) {
 			t.Errorf("%s lacks %q", line, part)
 		}
 	}
-	if !strings.Contains(strings.Join(fixes["automatic login off"][0], " "), "rm -f /etc/kcpassword") {
+	login := fixes["automatic login off"][0]
+	if !strings.Contains(strings.Join(login, " "), "rm -f /etc/kcpassword") {
 		t.Error("automatic login fix leaves /etc/kcpassword")
+	}
+	if got := fixLine("automatic login off"); !strings.HasPrefix(got, "sudo /bin/sh -c '") || strings.Count(got, "'") != 2 {
+		t.Errorf("automatic login line %s", got)
 	}
 }
 
@@ -284,6 +374,8 @@ func TestTouchIDFixKeepsOtherLines(t *testing.T) {
 		"auth optional pam_reattach.so\n#auth       sufficient     pam_tid.so\n": "auth optional pam_reattach.so\nauth       sufficient     pam_tid.so\n",
 		"auth optional pam_reattach.so\n":                                        "auth optional pam_reattach.so\nauth       sufficient     pam_tid.so\n",
 		"auth sufficient pam_tid.so\n":                                           "auth sufficient pam_tid.so\n",
+		"auth optional pam_tid.so\n":                                             "auth optional pam_tid.so\nauth       sufficient     pam_tid.so\n",
+		"#auth optional pam_tid.so\n":                                            "#auth optional pam_tid.so\nauth       sufficient     pam_tid.so\n",
 		"":                                                                       "auth       sufficient     pam_tid.so\n",
 		"# pam_tid.so enables Touch ID\nauth optional pam_reattach.so\n": "# pam_tid.so enables Touch ID\nauth optional pam_reattach.so\nauth       sufficient     pam_tid.so\n",
 		"auth optional pam_reattach.so":                                  "auth optional pam_reattach.so\nauth       sufficient     pam_tid.so\n",

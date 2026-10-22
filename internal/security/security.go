@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -60,12 +62,20 @@ func listens(port string) func(string) bool {
 				continue
 			}
 			addr, ok := strings.CutSuffix(f[3], "."+port)
-			if ok && addr != "::1" && addr != "localhost" && !strings.HasPrefix(addr, "127.") {
+			if ok && !loopback(addr) {
 				return true
 			}
 		}
 		return false
 	}
+}
+
+// loopback is an address only this machine can reach.
+func loopback(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
 }
 
 func not(f func(string) bool) func(string) bool {
@@ -81,8 +91,6 @@ var checks = []check{
 		[]string{firewall, "--getglobalstate"}, contains("is enabled")},
 	{"firewall stealth mode", "sudo " + firewall + " --setstealthmode on",
 		[]string{firewall, "--getstealthmode"}, contains("mode is on")},
-	{"Gatekeeper", "sudo spctl --global-enable",
-		[]string{"spctl", "--status"}, contains("assessments enabled")},
 	{"System Integrity Protection", "start up in Recovery and run csrutil enable",
 		[]string{"csrutil", "status"}, contains("status: enabled")},
 	{"automatic update checks", "sudo softwareupdate --schedule on",
@@ -94,7 +102,7 @@ var checks = []check{
 		netstat, not(listens("5900"))},
 	// Each reads a key that is absent on a safe Mac, so the shell forgives
 	// the error and an empty answer passes.
-	{"automatic login off", "System Settings, Users & Groups: set Automatically log in as to Off",
+	{"automatic login off", fixLine("automatic login off"),
 		[]string{"/bin/sh", "-c", "defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null; true"},
 		func(out string) bool { return strings.TrimSpace(out) == "" }},
 	{"Guest account off", fixLine("Guest account off"),
@@ -133,6 +141,7 @@ func (c Checker) Run(ctx context.Context) []Result {
 		}
 		results = append(results, result(ch.name, ch.pass(out), ch.fix))
 	}
+	results = append(results, c.gatekeeper(ctx))
 	results = append(results, c.screenLock(ctx)...)
 	results = append(results, c.securityUpdates(ctx))
 	pam, _ := os.ReadFile(c.pam)
@@ -158,6 +167,15 @@ func output(ctx context.Context, r sh.Runner, limit time.Duration, argv ...strin
 	return string(out), err
 }
 
+// exitCode is the status of a command that ran and failed, or -1.
+func exitCode(err error) int {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return -1
+}
+
 func unknown(name string, err error) Result {
 	return Result{Name: name, Unknown: true, Detail: "could not read: " + err.Error()}
 }
@@ -167,6 +185,22 @@ func result(name string, ok bool, fix string) Result {
 		return Result{Name: name, OK: true}
 	}
 	return Result{Name: name, Detail: fix, Fix: fixes[name]}
+}
+
+// gatekeeper reads spctl, which exits non-zero when assessments are off, so
+// the answer is the text, not the status.
+func (c Checker) gatekeeper(ctx context.Context) Result {
+	const name = "Gatekeeper"
+	out, err := output(ctx, c.r, readTimeout, "spctl", "--status")
+	switch {
+	case strings.Contains(out, "assessments enabled"):
+		return Result{Name: name, OK: true}
+	case strings.Contains(out, "assessments disabled"):
+		return result(name, false, fixLine(name))
+	case err != nil:
+		return unknown(name, err)
+	}
+	return unknown(name, fmt.Errorf("unexpected answer %q", strings.TrimSpace(out)))
 }
 
 var lockDelay = regexp.MustCompile(`delay is (\d+) second`)
@@ -237,7 +271,7 @@ func (c Checker) securityUpdates(ctx context.Context) Result {
 		}
 	}
 	if len(off) > 0 {
-		r := result(name, false, "System Settings, General, Software Update, Automatic updates: turn on security responses")
+		r := result(name, false, "System Settings, General, Software Update, Automatic updates: turn on downloads, security responses and macOS installs; macOS then installs updates and restarts on its own")
 		r.Detail += " (off: " + strings.Join(off, ", ") + ")"
 		return r
 	}
@@ -248,16 +282,26 @@ func (c Checker) securityUpdates(ctx context.Context) Result {
 	return r
 }
 
-// exposed lists servers listening on every network interface, which any
+// lastColon splits a listening address at the port. An address with an arrow
+// is a connection, not a listener.
+func lastColon(addr string) (host, port string, ok bool) {
+	i := strings.LastIndex(addr, ":")
+	if i < 0 || strings.Contains(addr, "->") {
+		return "", "", false
+	}
+	return addr[:i], addr[i+1:], true
+}
+
+// exposed lists servers listening on a wildcard or LAN address, which any
 // network you join can reach; a dev server is safer on 127.0.0.1. rapportd is
 // macOS's own Continuity service.
 func (c Checker) exposed(ctx context.Context) Result {
 	const name = "servers on every network interface"
-	// lsof exits 1 when nothing listens, so only a timeout is an error. Field
-	// output, one field a line, keeps whole names with spaces; +c 0 stops it
-	// cutting them at 9.
+	// lsof exits 1 when nothing listens, so exit 1 is an answer; any other
+	// failure is not. Field output, one field a line, keeps whole names with
+	// spaces; +c 0 stops it cutting them at 9.
 	out, err := output(ctx, c.r, readTimeout, "lsof", "-nP", "+c", "0", "-iTCP", "-sTCP:LISTEN", "-Fcn")
-	if errors.Is(err, errTimeout) {
+	if err != nil && exitCode(err) != 1 {
 		return unknown(name, err)
 	}
 	var commands []string
@@ -267,11 +311,15 @@ func (c Checker) exposed(ctx context.Context) Result {
 		switch {
 		case strings.HasPrefix(line, "c"):
 			command = line[1:]
-		case strings.HasPrefix(line, "n*:") && command != "rapportd":
+		case strings.HasPrefix(line, "n") && command != "rapportd":
+			host, port, ok := lastColon(line[1:])
+			if !ok || loopback(strings.Trim(host, "[]")) {
+				continue
+			}
 			if !slices.Contains(commands, command) {
 				commands = append(commands, command)
 			}
-			if port := line[3:]; !slices.Contains(ports[command], port) {
+			if !slices.Contains(ports[command], port) {
 				ports[command] = append(ports[command], port)
 			}
 		}

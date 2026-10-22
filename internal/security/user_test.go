@@ -60,6 +60,53 @@ func byName(results []Result) map[string]Result {
 
 const gitleaksScan = "--no-banner --redact --report-format json --report-path - --exit-code 0"
 
+const gitSigning = "git config --global --includes --get-regexp " + signingSettings
+
+func TestCommitSigningNeedsSSHFormatAndAnExistingKey(t *testing.T) {
+	cases := map[string]struct {
+		out  string
+		want string // the Detail, or "" for a pass
+	}{
+		"all set":      {"gpg.format ssh\nuser.signingkey /k/id.pub\ncommit.gpgsign true\n", ""},
+		"literal key":  {"gpg.format ssh\nuser.signingkey key::ssh-ed25519 AAAA\ncommit.gpgsign true\n", ""},
+		"gpgsign only": {"commit.gpgsign true\n", "git config --global gpg.format ssh; git config --global user.signingkey <path to your .pub key>"},
+		"gpg format":   {"gpg.format openpgp\nuser.signingkey ABCD\ncommit.gpgsign true\n", "git config --global gpg.format ssh; user.signingkey names ABCD, which does not exist; point it at your .pub key"},
+		"key missing":  {"gpg.format ssh\nuser.signingkey ~/gone.pub\ncommit.gpgsign true\n", "user.signingkey names ~/gone.pub, which does not exist; point it at your .pub key"},
+		"not signing":  {"gpg.format ssh\nuser.signingkey /k/id.pub\ncommit.gpgsign false\n", "git config --global commit.gpgsign true"},
+	}
+	for name, c := range cases {
+		u := User{r: &answering{out: c.out}, home: "/h", fileExists: func(p string) bool { return p == "/k/id.pub" }}
+		r := u.commitSigning(context.Background())
+		if (c.want == "") != r.OK || r.Detail != c.want || r.Unknown {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+	none := User{r: &answering{err: exitStatus(t, "1")}}.commitSigning(context.Background())
+	if none.OK || none.Unknown || !none.Warn {
+		t.Errorf("nothing set: %+v", none)
+	}
+	broken := User{r: &answering{err: exitStatus(t, "128")}}.commitSigning(context.Background())
+	if !broken.Unknown {
+		t.Errorf("git failed: %+v", broken)
+	}
+}
+
+func TestKeyThatDoesNotParseIsUnknownNotProtected(t *testing.T) {
+	bad := pem("OPENSSH", "!!!not base64!!!\n")
+	truncated := pem("OPENSSH", base64.StdEncoding.EncodeToString([]byte("openssh-key-v1\x00\x00\x00"))+"\n")
+	for name, body := range map[string]string{"base64": bad, "truncated": truncated} {
+		dir := home(t, map[string]string{".ssh/id_x": body})
+		r := User{home: dir}.sshKeys()
+		if !r.Unknown || r.OK || r.Warn || r.Detail != "could not parse id_x" {
+			t.Errorf("%s: %+v", name, r)
+		}
+	}
+	dir := home(t, map[string]string{".ssh/id_x": bad, ".ssh/open": opensshKey("none", "ssh-ed25519")})
+	if r := (User{home: dir}).sshKeys(); !r.Warn || !strings.Contains(r.Detail, "could not parse id_x") {
+		t.Errorf("open and unreadable: %+v", r)
+	}
+}
+
 func TestAccountChecks(t *testing.T) {
 	dir := home(t, map[string]string{
 		".ssh/id_ed25519":     opensshKey("none", "ssh-ed25519"),
@@ -71,7 +118,7 @@ func TestAccountChecks(t *testing.T) {
 		".zsh_history":        "export TOKEN=x\n",
 	})
 	f := &sh.Fake{Programs: []string{"gitleaks"}, Out: map[string]string{
-		"git config --global --includes --get commit.gpgsign":                     "false\n",
+		gitSigning: "commit.gpgsign false\n",
 		"gitleaks dir " + filepath.Join(dir, ".zsh_history") + " " + gitleaksScan: `[{"RuleID":"github-pat","Secret":"REDACTED"},{"RuleID":"github-pat"}]`,
 	}}
 	got := byName(User{r: f, home: dir}.Account(context.Background()))
@@ -179,6 +226,11 @@ func TestFloatingNeedsAnExactVersion(t *testing.T) {
 		{"npx", []string{"-y", "@scope/pkg@1.2.3"}, ""},
 		{"npx", []string{"-y", "pkg@1.2.3-beta.1"}, ""},
 		{"npx", []string{"pkg"}, "pkg"},
+		{"npx", []string{"--token", "ghp_abcdefgh", "pkg"}, "pkg"},
+		{"npx", []string{"--yes", "pkg"}, "pkg"},
+		{"npx", []string{"pkg@^1.2"}, "pkg@^1.2"},
+		{"npx", []string{"--token=ghp_abcdefgh", "pkg@1.0.0"}, ""},
+		{"npx", []string{"https://user:ghp_abcdefgh@host/p.tgz"}, "unrecognised spec"},
 		{"npx", []string{"pkg@latest"}, "pkg@latest"},
 		{"npx", []string{"pkg@beta"}, "pkg@beta"},
 		{"npx", []string{"pkg@next"}, "pkg@next"},
@@ -210,6 +262,44 @@ func TestFloatingNeedsAnExactVersion(t *testing.T) {
 	}
 }
 
+func TestPackageRunnersThroughAPackageManager(t *testing.T) {
+	cases := []struct {
+		command string
+		args    []string
+		want    string
+	}{
+		{"npm", []string{"exec", "--", "pkg"}, "pkg"},
+		{"npm", []string{"exec", "pkg@1.0.0"}, ""},
+		{"pnpm", []string{"dlx", "pkg@latest"}, "pkg@latest"},
+		{"yarn", []string{"dlx", "pkg"}, "pkg"},
+		{"bun", []string{"x", "pkg"}, "pkg"},
+		{"npm", []string{"run", "pkg"}, ""},
+		{"pnpm", []string{}, ""},
+	}
+	for _, c := range cases {
+		if got, _ := floating(mcpServer{Command: c.command, Args: c.args}); got != c.want {
+			t.Errorf("%s %v: %q, want %q", c.command, c.args, got, c.want)
+		}
+	}
+}
+
+func TestOneWrongTypeDoesNotHideTheRestOfAConfig(t *testing.T) {
+	dir := home(t, map[string]string{
+		".claude.json": `{"mcpServers":{
+			"a":{"command":"npx","args":["--token","ghp_abcdefghijkl","pkg",3000,true],"env":{"PORT":3000,"DEBUG":true,"API_KEY":"abc"}},
+			"b":{"command":"npx","args":"not a list","env":["x"]}}}`,
+	})
+	got := byName(User{home: dir}.AI())
+	keys := got["AI configs hold no plain-text keys"]
+	if !keys.Warn || !strings.HasPrefix(keys.Detail, "~/.claude.json a.API_KEY;") || strings.Contains(keys.Detail, "abc") {
+		t.Errorf("keys: %+v", keys)
+	}
+	pinned := got["MCP servers pinned to a version"]
+	if !pinned.Warn || !strings.HasPrefix(pinned.Detail, "~/.claude.json a (pkg);") || strings.Contains(pinned.Detail, "ghp_") {
+		t.Errorf("pinned: %+v", pinned)
+	}
+}
+
 func TestSecretsInAnyPlaceButReferences(t *testing.T) {
 	s := mcpServer{
 		Args: []string{"--api-key=abcdefghij", "--token=${TOKEN}", "--author=somebodyelse", "https://x.example/mcp?key=abcdefghij&q=1"},
@@ -221,7 +311,9 @@ func TestSecretsInAnyPlaceButReferences(t *testing.T) {
 		},
 		Env: map[string]string{"MONKEY": "bananabanana", "apiKey": "abcdefghijkl", "OAUTH_TOKEN": "$OAUTH"},
 	}
-	want := []string{"X-Api-Key", "apiKey", "--api-key", "url?key", "url?token"}
+	want := []string{"X-Api-Key", "apiKey", "--api-key", "url?key", "url?token", "SECRET"}
+	s.Env["SECRET"] = "ab"
+	s.Env["PASSWORD"] = ""
 	got := s.literalSecrets()
 	slices.Sort(got)
 	slices.Sort(want)

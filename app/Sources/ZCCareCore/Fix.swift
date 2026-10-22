@@ -16,18 +16,19 @@ public enum Fix: Equatable, Sendable {
     static let rootFixable: Set<String> = [
         "security firewall", "security firewall stealth mode", "security Gatekeeper",
         "security automatic update checks", "security File Sharing off", "security Guest account off",
-        "security Touch ID for sudo",
+        "security Touch ID for sudo", "security automatic login off",
     ]
 
     /// The line the doctor's table gives Touch ID for sudo: one `sh -c`
     /// body that uncomments pam_tid.so or appends it. Tests use it.
-    static let touchIDLine = #"sudo /bin/sh -c 'f=/etc/pam.d/sudo_local; if grep -q "^#*[[:space:]]*auth.*pam_tid\.so" $f 2>/dev/null; then sed -i "" "s/^#[[:space:]]*\(auth[[:space:]].*pam_tid\.so\)/\1/" $f; else [ -s $f ] && [ -n "$(tail -c1 $f)" ] && echo >> $f; printf "auth       sufficient     pam_tid.so\n" >> $f; fi'"#
+    static let touchIDLine = #"sudo /bin/sh -c 'f=/etc/pam.d/sudo_local; if grep -Eq "^#*[[:space:]]*auth[[:space:]]+sufficient[[:space:]]+pam_tid\.so" $f 2>/dev/null; then sed -i "" "s/^#[[:space:]]*\(auth[[:space:]][[:space:]]*sufficient[[:space:]][[:space:]]*pam_tid\.so\)/\1/" $f; else [ -s $f ] && [ -n "$(tail -c1 $f)" ] && echo >> $f; printf "auth       sufficient     pam_tid.so\n" >> $f; fi'"#
 
     /// The `sh -c` lines the doctor's table holds, in full: the only shell
     /// bodies that may run as root, since a body is otherwise free text.
     static let rootShellLines: Set<String> = [
         touchIDLine,
         "sudo /bin/sh -c 'launchctl disable system/com.apple.smbd; launchctl bootout system/com.apple.smbd 2>/dev/null; true'",
+        "sudo /bin/sh -c 'rm -f /etc/kcpassword; defaults delete /Library/Preferences/com.apple.loginwindow autoLoginUser'",
     ]
 
     /// The programs a root fix may start, by full path and by name.

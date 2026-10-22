@@ -27,6 +27,9 @@ const scanTimeout = 60 * time.Second
 type User struct {
 	r    sh.Runner
 	home string
+	// fileExists stands in for os.Stat, so tests do not look outside their
+	// own folder.
+	fileExists func(string) bool
 }
 
 func NewUser(r sh.Runner) User {
@@ -44,27 +47,47 @@ func (u User) Account(ctx context.Context) []Result {
 func (u User) sshKeys() Result {
 	const name = "SSH keys have a passphrase"
 	entries, _ := os.ReadDir(filepath.Join(u.home, ".ssh"))
-	var open []string
+	var open, unreadable []string
 	for _, e := range entries {
 		if e.IsDir() || strings.HasSuffix(e.Name(), ".pub") {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(u.home, ".ssh", e.Name()))
-		if err == nil && unprotectedKey(b) {
+		if err != nil {
+			continue
+		}
+		unprotected, err := unprotectedKey(b)
+		switch {
+		case err != nil:
+			unreadable = append(unreadable, e.Name())
+		case unprotected:
 			open = append(open, e.Name())
 		}
 	}
-	if len(open) == 0 {
-		return Result{Name: name, OK: true}
+	var detail []string
+	if len(open) > 0 {
+		detail = append(detail, strings.Join(open, " ")+
+			" open without a passphrase; add one with ssh-keygen -p -f ~/.ssh/<key>, or keep the key in a hardware or password-manager agent")
 	}
-	return Result{Name: name, Warn: true, Detail: strings.Join(open, " ") +
-		" open without a passphrase; add one with ssh-keygen -p -f ~/.ssh/<key>, or keep the key in a hardware or password-manager agent"}
+	if len(unreadable) > 0 {
+		detail = append(detail, "could not parse "+strings.Join(unreadable, " "))
+	}
+	switch {
+	case len(open) > 0:
+		return Result{Name: name, Warn: true, Detail: strings.Join(detail, "; ")}
+	case len(unreadable) > 0:
+		return Result{Name: name, Unknown: true, Detail: strings.Join(detail, "; ")}
+	}
+	return Result{Name: name, OK: true}
 }
+
+var errUnparsedKey = errors.New("could not parse the key")
 
 // unprotectedKey reads a private key's header: an OpenSSH key names its
 // cipher, a PEM key says ENCRYPTED when it has a passphrase. A FIDO key
-// (sk-...) is only a handle to the hardware token, so it holds no secret.
-func unprotectedKey(b []byte) bool {
+// (sk-...) is only a handle to the hardware token, so it holds no secret. A
+// key whose header does not parse is an error, not a pass.
+func unprotectedKey(b []byte) (bool, error) {
 	const openssh = "-----BEGIN OPENSSH PRIVATE KEY-----"
 	switch {
 	case bytes.Contains(b, []byte(openssh)):
@@ -73,7 +96,7 @@ func unprotectedKey(b []byte) bool {
 		raw, err := base64.StdEncoding.DecodeString(strings.Join(strings.Fields(body), ""))
 		magic := "openssh-key-v1\x00"
 		if err != nil || !strings.HasPrefix(string(raw), magic) {
-			return false
+			return false, errUnparsedKey
 		}
 		// cipher, kdf, kdf options, key count, then the public key blob.
 		raw = raw[len(magic):]
@@ -82,18 +105,18 @@ func unprotectedKey(b []byte) bool {
 			_, raw, ok = sshString(raw)
 		}
 		if !ok || len(raw) < 4 {
-			return false
+			return false, errUnparsedKey
 		}
 		blob, _, ok := sshString(raw[4:])
 		keyType, _, _ := sshString(blob)
 		if !ok {
-			return false
+			return false, errUnparsedKey
 		}
-		return string(cipher) == "none" && !strings.HasPrefix(string(keyType), "sk-")
+		return string(cipher) == "none" && !strings.HasPrefix(string(keyType), "sk-"), nil
 	case bytes.Contains(b, []byte("PRIVATE KEY-----")):
-		return !bytes.Contains(b, []byte("ENCRYPTED"))
+		return !bytes.Contains(b, []byte("ENCRYPTED")), nil
 	}
-	return false
+	return false, nil
 }
 
 // sshString reads one length-prefixed field of the OpenSSH key format.
@@ -108,17 +131,56 @@ func sshString(b []byte) (field, rest []byte, ok bool) {
 	return b[4 : 4+n], b[4+n:], true
 }
 
-// commitSigning checks that git signs commits, so a pushed commit provably
-// came from this machine's key.
+// signingSettings are the git settings that make commits carry an SSH signature.
+const signingSettings = `^(commit\.gpgsign|gpg\.format|user\.signingkey)$`
+
+// commitSigning checks that git signs commits with an SSH key that exists,
+// so a pushed commit provably came from this machine's key.
 func (u User) commitSigning(ctx context.Context) Result {
 	const name = "git signs commits"
 	// --global alone skips [include]d files, where dotfiles often keep it.
-	out, _ := u.r.Output(ctx, "git", "config", "--global", "--includes", "--get", "commit.gpgsign")
-	if strings.TrimSpace(string(out)) == "true" {
+	out, err := output(ctx, u.r, readTimeout, "git", "config", "--global", "--includes", "--get-regexp", signingSettings)
+	if err != nil && exitCode(err) != 1 {
+		return unknown(name, err)
+	}
+	set := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		key, value, _ := strings.Cut(strings.TrimSpace(line), " ")
+		set[key] = strings.TrimSpace(value)
+	}
+	var steps []string
+	if set["gpg.format"] != "ssh" {
+		steps = append(steps, "git config --global gpg.format ssh")
+	}
+	switch key := set["user.signingkey"]; {
+	case key == "":
+		steps = append(steps, "git config --global user.signingkey <path to your .pub key>")
+	case !u.keyExists(key):
+		steps = append(steps, "user.signingkey names "+key+", which does not exist; point it at your .pub key")
+	}
+	if set["commit.gpgsign"] != "true" {
+		steps = append(steps, "git config --global commit.gpgsign true")
+	}
+	if len(steps) == 0 {
 		return Result{Name: name, OK: true}
 	}
-	return Result{Name: name, Warn: true, Detail: "git config --global gpg.format ssh; " +
-		"git config --global user.signingkey ~/.ssh/id_ed25519.pub; git config --global commit.gpgsign true"}
+	return Result{Name: name, Warn: true, Detail: strings.Join(steps, "; ")}
+}
+
+// keyExists reports whether the signing key is there. A key written out in
+// the setting (key:: or ssh-...) is not a file, so it counts.
+func (u User) keyExists(key string) bool {
+	if strings.HasPrefix(key, "key::") || strings.HasPrefix(key, "ssh-") || strings.HasPrefix(key, "ecdsa-") || strings.HasPrefix(key, "sk-") {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(key, "~/"); ok {
+		key = filepath.Join(u.home, rest)
+	}
+	if u.fileExists != nil {
+		return u.fileExists(key)
+	}
+	_, err := os.Stat(key)
+	return err == nil
 }
 
 // historySecrets runs gitleaks over the shell histories and atuin's, and
