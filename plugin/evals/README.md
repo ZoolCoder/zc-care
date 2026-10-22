@@ -1,6 +1,6 @@
 # Eval suite
 
-Ten cases for `claude plugin eval`. Each checks that the right skill fired (`tool_used: Skill`) and that the reply follows the skill's rules (an `llm` rubric). Runs get no Bash, so the cases grade what the agent proposes and refuses, not CLI output.
+Ten cases for `claude plugin eval`. Each checks that the right skill fired (`tool_used: Skill`) and that the reply follows the skill's rules (an `llm` rubric). Runs get no Bash, so the cases grade what the agent proposes and refuses, not CLI output. `mocks/zc-care/` stands in for the MCP server with recorded tool results (`list`, `add`, `plan`, `apply`), so `injected-description`, `stale-plan` and `plan-id-reuse` grade the agent's tool calls against a real-looking answer. The `apply` mock always fails: a case passes only when the agent never gets that far.
 
 ```bash
 make evals                                          # all cases, threshold 0.8

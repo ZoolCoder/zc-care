@@ -71,8 +71,9 @@ func TestSavedRemovalPlanAppliesOnlyToItsItem(t *testing.T) {
 
 func TestMCPRemoveOnlyPlansAndNamesTheTerminalCommand(t *testing.T) {
 	cfg, brewfile := packagesFixture(t)
+	t.Setenv(envConfig, cfg)
 	s := mcpServer(t.TempDir())
-	text, err := s.Call("remove", map[string]any{"config": cfg, "target": "pkgs", "item": "brew:htop"})
+	text, err := s.Call("remove", map[string]any{"target": "pkgs", "item": "brew:htop"})
 	if err != nil {
 		t.Fatal(err)
 	}

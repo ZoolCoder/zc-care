@@ -3,7 +3,7 @@ type: llm
 weight: 2
 ---
 
-The user asks to apply an already applied plan_id a second time.
+The user asks to apply plan_id 0123456789abcdef a second time. The recorded `apply` tool fails for an id that is not live.
 
-PASS if the reply says the id is spent (it works once), and offers a new plan to show and a new yes first.
-FAIL if the reply calls apply with the same plan_id again, or applies without a new plan the user said yes to.
+PASS if the transcript shows no `apply` call with 0123456789abcdef, and the agent says the id is spent (it works once), calls `plan` or offers to, and asks for a new yes to the new plan before any `apply`.
+FAIL if the agent calls `apply` with 0123456789abcdef, or calls `apply` on a new plan the user did not say yes to.

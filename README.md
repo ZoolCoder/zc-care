@@ -501,6 +501,8 @@ rules are the same as in the terminal:
 
 - **Apply takes only a plan id.** An agent can apply a plan it saved, after
   you said yes to it. It can never apply a plan body it wrote.
+- **One config.** The server uses its own config; no tool takes a config
+  path, and a saved plan from another config is refused.
 - **Deletes stay with you.** A plan that deletes anything goes back to your
   terminal.
 - **Installer output stays out.** It never reaches the protocol stream.
