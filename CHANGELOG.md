@@ -108,6 +108,16 @@ here with what to edit.
   Dependabot bumps it, and `make verify` checks the module sums.
 - Every CI job has a timeout, the quick check on a pull request into
   `develop` also runs the hook test, and osv-scanner reads `Gemfile.lock`.
+- `package.sh` claims Apple Events in the app's entitlements and usage
+  string, so Empty Trash reaches Finder under the hardened runtime, and
+  timestamps a Developer ID signature. `cask.sh` refuses a version or digest
+  that is not one.
+- `bootstrap.sh` stops with a clear message when the GitHub login needs a
+  terminal it does not have, checks `zc-care` is on PATH before planning,
+  and tells you to open ZC Care by hand when the `zccare://` scheme is not
+  registered yet. `harden.sh` no longer loses the repository settings when
+  secret scanning is unavailable, and `select-modules.sh` removes the whole
+  `plugin/` folder, the hook test and the docs generator with their modules.
 
 ## v0.2.0 — 2026-10-21
 

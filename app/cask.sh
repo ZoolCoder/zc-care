@@ -7,6 +7,9 @@ set -euo pipefail
 
 version=${1:?usage: cask.sh VERSION SHA256}
 sha=${2:?usage: cask.sh VERSION SHA256}
+# Both land in Ruby source: refuse anything but a plain version and a hex digest.
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "cask.sh: bad VERSION '$version'" >&2; exit 1; }
+[[ $sha =~ ^[0-9a-f]{64}$ ]] || { echo "cask.sh: bad SHA256" >&2; exit 1; }
 
 cat <<CASK
 cask "zc-care" do

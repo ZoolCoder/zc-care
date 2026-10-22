@@ -6,12 +6,21 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 for file in cloud/AGENTS.md codex/AGENTS.md copilot/copilot-instructions.md cursor/zc-care.mdc gemini/GEMINI.md; do
 	target=$here/$file
+	trap 'rm -f "$target.new"' EXIT
+	# Exactly one of each marker, start first: a second copy or a swapped pair
+	# would make the sed ranges below drop or double the file's own text.
 	for marker in '<!-- common:start -->' '<!-- common:end -->'; do
-		grep -qF "$marker" "$target" || {
-			echo "gen.sh: $target has no $marker marker" >&2
+		[ "$(grep -cF "$marker" "$target")" = 1 ] || {
+			echo "gen.sh: $target needs exactly one $marker marker" >&2
 			exit 1
 		}
 	done
+	start=$(grep -nF '<!-- common:start -->' "$target" | cut -d: -f1)
+	end=$(grep -nF '<!-- common:end -->' "$target" | cut -d: -f1)
+	[ "$start" -lt "$end" ] || {
+		echo "gen.sh: $target has its end marker before its start marker" >&2
+		exit 1
+	}
 	{
 		sed -n '1,/<!-- common:start -->/p' "$target"
 		cat "$here/COMMON.md"

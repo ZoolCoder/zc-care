@@ -17,6 +17,14 @@ bundle_id=dev.zoolcoder.zccare
 # CFBundleShortVersionString.
 build=${GITHUB_RUN_NUMBER:-$(git -C "$here" rev-list --count HEAD 2>/dev/null || echo 1)}
 
+# A Developer ID signature gets a secure timestamp, so it outlives the
+# certificate; an ad-hoc or development one has nowhere to put it.
+identity=${SIGN_IDENTITY:--}
+case $identity in
+  "Developer ID"*) timestamp=--timestamp ;;
+  *) timestamp=--timestamp=none ;;
+esac
+
 args=(--package-path "$here" -c release)
 if [[ ${UNIVERSAL:-} == 1 ]]; then
   args+=(--arch arm64 --arch x86_64)
@@ -29,7 +37,7 @@ mkdir -p "$out/Contents/MacOS" "$out/Contents/Resources"
 cp "$bin/ZCCare" "$out/Contents/MacOS/ZCCare"
 if [[ -n ${CLI:-} ]]; then
   cp "$CLI" "$out/Contents/MacOS/zc-care"
-  codesign --force --sign "${SIGN_IDENTITY:--}" --timestamp=none --options runtime \
+  codesign --force --sign "$identity" "$timestamp" --options runtime \
     --identifier "$bundle_id.cli" "$out/Contents/MacOS/zc-care"
 fi
 # The icons icon/make-icon.swift draws from the ZoolCoder mark.
@@ -60,15 +68,29 @@ cat >"$out/Contents/Info.plist" <<PLIST
             <key>CFBundleURLSchemes</key><array><string>zccare</string></array>
         </dict>
     </array>
+    <key>NSAppleEventsUsageDescription</key><string>ZC Care asks Finder to empty the Trash.</string>
     <key>NSHumanReadableCopyright</key><string>ZoolCoder</string>
 </dict>
 </plist>
 PLIST
+# The hardened runtime blocks Apple Events unless the app claims them; Empty
+# Trash goes through Finder.
+entitlements=$(mktemp "${TMPDIR:-/tmp}/zccare-entitlements.XXXXXX")
+trap 'rm -f "$entitlements"' EXIT
+cat >"$entitlements" <<'ENTITLEMENTS'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.automation.apple-events</key><true/>
+</dict>
+</plist>
+ENTITLEMENTS
 # Ad-hoc: enough for this Mac, and for the login item to keep its identity.
 # macOS ties folder and media permissions to the signature, so an ad-hoc
 # build asks again after each rebuild; a certificate keeps them.
-codesign --force --sign "${SIGN_IDENTITY:--}" --timestamp=none --options runtime \
-  --identifier "$bundle_id" "$out"
+codesign --force --sign "$identity" "$timestamp" --options runtime \
+  --entitlements "$entitlements" --identifier "$bundle_id" "$out"
 # A broken signature fails the build here, not on a user's Mac.
 codesign --verify --strict --deep "$out"
 echo "built $out ($version, build $build)"

@@ -20,12 +20,20 @@ gh api -X PATCH "repos/$repo" \
 	-f default_branch=develop \
 	-F delete_branch_on_merge=true \
 	-F allow_update_branch=true \
-	-F has_wiki=false \
+	-F has_wiki=false >/dev/null
+echo "set      default branch develop, delete merged branches, wiki off"
+
+# Secret scanning is its own request: GitHub rejects it on a private repository
+# without Advanced Security, which must not undo the settings above.
+if gh api -X PATCH "repos/$repo" \
 	-f 'security_and_analysis[secret_scanning][status]=enabled' \
 	-f 'security_and_analysis[secret_scanning_push_protection][status]=enabled' \
 	-f 'security_and_analysis[secret_scanning_non_provider_patterns][status]=enabled' \
-	-f 'security_and_analysis[secret_scanning_validity_checks][status]=enabled' >/dev/null
-echo "set      default branch develop, delete merged branches, wiki off, secret scanning"
+	-f 'security_and_analysis[secret_scanning_validity_checks][status]=enabled' >/dev/null 2>&1; then
+	echo "enabled  secret scanning, push protection, non-provider patterns, validity checks"
+else
+	echo "skipped  secret scanning: not available on this repository (private without Advanced Security?)" >&2
+fi
 
 gh api -X PUT "repos/$repo/vulnerability-alerts" >/dev/null
 gh api -X PUT "repos/$repo/automated-security-fixes" >/dev/null

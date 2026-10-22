@@ -44,9 +44,9 @@ fmt:
 	gofmt -w .
 
 install: build
-	mkdir -p $(HOME)/.local/bin
-	cp $(BIN) $(HOME)/.local/bin/zc-care.new
-	mv $(HOME)/.local/bin/zc-care.new $(HOME)/.local/bin/zc-care
+	mkdir -p "$(HOME)/.local/bin"
+	cp $(BIN) "$(HOME)/.local/bin/zc-care.new"
+	mv "$(HOME)/.local/bin/zc-care.new" "$(HOME)/.local/bin/zc-care"
 	@echo "installed $(VERSION) to ~/.local/bin/zc-care (add to PATH if needed)"
 
 # The menu bar app, app: a SwiftPM package, macOS only.
@@ -66,11 +66,11 @@ app-test:
 # names is handed to it once; the app's Choose Config changes it later. The
 # CLI the app carries is linked onto PATH, as the cask does.
 app-install: app
-	rm -rf $(HOME)/Applications/ZCCare.app
-	mkdir -p $(HOME)/Applications
-	cp -R $(APP) $(HOME)/Applications/ZCCare.app
-	mkdir -p $(HOME)/.local/bin
-	ln -sf $(HOME)/Applications/ZCCare.app/Contents/MacOS/zc-care $(HOME)/.local/bin/zc-care
+	rm -rf "$(HOME)/Applications/ZCCare.app"
+	mkdir -p "$(HOME)/Applications"
+	cp -R $(APP) "$(HOME)/Applications/ZCCare.app"
+	mkdir -p "$(HOME)/.local/bin"
+	ln -sf "$(HOME)/Applications/ZCCare.app/Contents/MacOS/zc-care" "$(HOME)/.local/bin/zc-care"
 	@if [ -n "$$ZC_CARE_CONFIG" ]; then defaults write dev.zoolcoder.zccare configPath "$$ZC_CARE_CONFIG"; fi
 	@echo "installed ~/Applications/ZCCare.app and linked its CLI to ~/.local/bin; open it once, then tick Open at login"
 

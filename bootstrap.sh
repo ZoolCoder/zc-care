@@ -65,6 +65,8 @@ main() {
   if [[ -z $config_from ]]; then
     # The config repo is usually private, so git needs a GitHub login first.
     if ! gh auth status >/dev/null 2>&1 </dev/null; then
+      # The login opens a browser and waits on the terminal for a code.
+      have_tty || { echo "Run 'gh auth login' first, then run bootstrap again." >&2; exit 1; }
       step "Logging in to GitHub"
       gh auth login --git-protocol https --web </dev/tty
     fi
@@ -90,15 +92,19 @@ main() {
   step "Installing ZC Care and zc-care"
   local cask_log
   cask_log=$(mktemp)
+  trap 'rm -f "$cask_log"' EXIT
   if ! { brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care \
          && brew install --cask zc-care; } >"$cask_log" 2>&1 </dev/null; then
     echo "The cask install failed, building from source instead. Why:" >&2
     sed 's/^/  /' "$cask_log" >&2
+    # A half-installed cask would shadow the build with a broken link on PATH.
+    brew uninstall --cask zc-care >/dev/null 2>&1 </dev/null || true
     brew install go </dev/null
     make -C "$tool_dir" app-install </dev/null
   fi
-  rm -f "$cask_log"
-  export PATH="$HOME/.local/bin:$PATH"
+  # After the cask, brew's link wins; ~/.local/bin only serves the source build.
+  export PATH="$PATH:$HOME/.local/bin"
+  command -v zc-care >/dev/null || { echo "zc-care is not on PATH after the install." >&2; exit 1; }
   export ZC_CARE_CONFIG="$config_dir/zc-care.yaml"
   defaults write dev.zoolcoder.zccare configPath "$ZC_CARE_CONFIG"
   # mise reads only configs you trust; this one is yours.
@@ -108,7 +114,10 @@ main() {
   # left out goes on this Mac's skip list, which the plan below honours.
   if [[ -t 1 && -z ${ZC_NO_PICKER:-} ]] && have_tty; then
     step "Choosing apps in ZC Care"
-    open "zccare://apps" </dev/null
+    # The scheme is registered once the app has been opened; a fresh source
+    # build may not be yet, so the picker is then opened by hand.
+    open "zccare://apps" </dev/null \
+      || echo "Could not open ZC Care: open ~/Applications/ZCCare.app and pick the apps there." >&2
     read -r -p "Pick your apps in ZC Care, press Install, then press Enter here. " </dev/tty
   fi
 
