@@ -8,8 +8,9 @@ ZC Care.
 [#packages]
 == packages
 
-Installs what a manifest declares. *It never uninstalls*: a package you drop
+Installs what a manifest declares. *Apply never uninstalls*: a package you drop
 from the manifest stays installed, because removing software is your call.
+`remove` and `undo` uninstall, after a confirmation at a terminal.
 
 [cols="1,2,2,2"]
 |===
@@ -51,8 +52,9 @@ still list without it.
   out, since the manager pulls them in again.
 
 * Taps are installed before the formulae that need them.
-* Other Brewfile entries, such as `vscode` or `go`, are `MANUAL`: the plan
-  names them, and you install them yourself.
+* Other Brewfile entries, such as `vscode` or `go`, and every line inside an
+  `if` or `unless` block (not evaluated) are `MANUAL`: the plan names them,
+  and you install them yourself. A `mas` line without `id:` is `MANUAL` too.
 * `mas` entries are `MANUAL` until `mas` is installed.
 * If the manager itself is missing, the plan is one `MANUAL` step to install
   it.

@@ -116,7 +116,7 @@ zc-care/
 
 |`packages`: brew and mas
 |Done
-|Installs only, never uninstalls. Read-only status matches the aurora-mac Brewfile: 78 of 80 installed.
+|Apply installs only, never uninstalls; `remove` and `undo` do. Read-only status matches the aurora-mac Brewfile: 78 of 80 installed.
 
 |`dotfiles` through chezmoi
 |Done

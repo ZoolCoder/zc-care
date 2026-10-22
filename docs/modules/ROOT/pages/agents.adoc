@@ -9,12 +9,12 @@
 |===
 | `status` | Live state per target. Read-only.
 | `list` | Every declared item with its state, version, newer version and app, then what is installed but not declared. Takes `state` and `kind` filters. Read-only.
-| `add` | Declare a package or runtime in one target's manifest, with its why and section. Edits the manifest only.
-| `remove` | Plan the uninstall of a package and the drop of its manifest line. Returns a plan_id; the user applies it at a terminal.
+| `add` | Declare a package or runtime in one target's manifest now, with its why and section. Takes no config argument; it always edits the default config. Returns `{file,item,section}`. Fails without `section` when the manifest has sections, and names them.
+| `remove` | Plan the uninstall of a package and the drop of its manifest line. Changes nothing and returns no plan_id: `{appliable:false, command, plan}`. The user runs `command` at a terminal.
 | `capture` | The manifest one target would declare to match this machine. Writes nothing. Read-only.
 | `validate` | Check the config offline. Read-only.
 | `plan` | Plan and save it. Returns a `plan_id`. Changes nothing.
-| `apply` | Apply a saved plan by `plan_id`. Refuses when live state moved.
+| `apply` | Apply a saved plan by `plan_id`. Refuses a plan older than 10 minutes, a plan that deletes, overwrites an outside edit or runs a script, and a plan whose live state moved. Ends with a one-line digest.
 | `doctor` | Install health, security settings and AI agent configs. Read-only.
 | `history` | What was applied, newest first, and from where. Read-only.
 | `drift` | What the last daily drift check found. Read-only.
@@ -24,8 +24,8 @@
 plan that deletes is cancelled and the reply names the terminal command for
 the user to run.
 
-* *Plans expire.* A saved plan older than an hour is refused; the agent plans
-  again and shows the user the new one.
+* *Plans expire.* A saved plan older than 10 minutes is refused, and a
+  successful apply spends it. The agent plans again and shows the user the new plan.
 * *Every call is logged.* Each tool call, its arguments and whether it worked
   go to `~/.local/state/zc-care/mcp-audit.jsonl`. An apply also lands
   in `zc-care history` as applied from an agent.

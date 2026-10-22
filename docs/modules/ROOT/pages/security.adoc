@@ -8,7 +8,8 @@
   dotfiles provider applies only the planned paths.
 * *Deletions need a person.* The CLI and ZC Care ask, and the MCP server
   cancels.
-* *Nothing is uninstalled.* The packages provider only installs.
+* *Nothing is uninstalled unasked.* Apply only installs. `remove` and `undo`
+  uninstall, as a DELETE you confirm at a terminal; agents get only the plan.
 * *Nothing is upgraded unless a target asks.* `upgrade: true` is per target,
   and each upgrade is a planned `UPDATE` you review first.
 * *Capture never replaces a file.* It writes standard output, or a new file;
@@ -20,7 +21,7 @@
 * *The protocol stream stays clean.* Under `mcp`, installers get empty input
   and their output is captured, never written to the protocol stream.
 * *An agent's plan goes stale.* The MCP server refuses a saved plan older
-  than an hour, and writes every tool call to `mcp-audit.jsonl` in its state
+  than 10 minutes, or one already applied, and writes every tool call to `mcp-audit.jsonl` in its state
   folder. Every apply, from the terminal, ZC Care or an agent, lands in
   `zc-care history`.
 
@@ -40,6 +41,9 @@ not listed.
   Sharing, Remote Login, Screen Sharing, automatic login, the Guest account,
   AirDrop open to everyone, Touch ID for `sudo`, and servers listening on
   every interface (loopback-only listeners are ignored).
+* *Tools targets:* when the shell has activated mise, whether every mise
+  command runs from mise. A copy earlier on `PATH`, such as Homebrew's, is a
+  warning that names the first few shadowed commands.
 * A check that could not read its answer, because a tool timed out or
   failed, is reported as `unknown` with the tool's message, never as a pass
   or a fail. `doctor -fix` does not count such a check as still failing.

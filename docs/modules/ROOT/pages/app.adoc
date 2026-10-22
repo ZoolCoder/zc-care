@@ -82,7 +82,7 @@ image::care-cleanup.png[ZC Care's Cleanup module, with System Junk and AI Clutte
 | Cloud Cleanup | Files iCloud Drive, Google Drive, OneDrive and Dropbox keep downloaded on the Mac. *Remove Download* frees the space; the file stays in the cloud and downloads again when opened. macOS asks once before ZC Care may read iCloud Drive.
 | Developer | Dependencies of projects untouched for 90 days, such as `node_modules` and virtualenvs, and local AI models from Ollama, LM Studio and Hugging Face. *Docker*, when its CLI is installed and the daemon answers: what images, containers, volumes and the build cache take, with *Prune Build Cache* and *Prune Dangling Images*; these delete for good, with no Trash. *Xcode*: DerivedData, Archives, iOS DeviceSupport and the simulators' caches, each with its size and a *Trash* button.
 | My Workstation | What the config declares and what is in place: coverage, each target with its items and *Apply*, the drift check, every item to search, and what was applied, from ZC Care, the terminal or an agent. *Choose Apps…* opens the app picker.
-| My Tools | Every tool as a searchable card, including *Screen Cleaning Mode*, which blacks out the screens and locks the keyboard until you click *Done*.
+| My Tools | Every tool as a searchable card, including *Screen Cleaning Mode*, which blacks out the screens and locks the keyboard until you click *Done*, hold Esc for two seconds, or sixty seconds pass.
 | My Activity | Mac health, disk use, the space ZC Care freed by kind, recommendations from the last scan, and recent activity.
 |===
 

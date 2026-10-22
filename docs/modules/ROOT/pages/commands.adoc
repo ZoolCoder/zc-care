@@ -16,10 +16,10 @@
 | `diff A.json [B.json]` | What differs between two snapshots, or between one and this Mac. See <<Compare two Macs>>.
 | `doctor` | Machine health: binary, system, config, the programs targets need, and each target. It also warns about weak security settings, keys without a passphrase, unsigned commits, secrets in the shell history and risky AI agent configs, each with its fix. xref:security.adoc#_what_doctor_checks[Every check].
 | `upgrade` | Save what is outdated to the state folder, then `apply -upgrade`. The review skill reads the snapshot to say what moved from what to what.
-| `doctor -fix` | Run `doctor`, then plan a fix for each failing security check that has one, as `sudo` commands where they need root. It lists the exact commands, asks for a yes, runs them and checks again. A finding with no command, such as FileVault, stays advice.
+| `doctor -fix` | Run `doctor`, then plan a fix for each failing security check that has one, as `sudo` commands where they need root. It lists the exact commands, asks for a yes, runs them and checks again. A finding with no command, such as FileVault, stays advice. After the fixes it reads the fixed checks again and prints `fixed and verified`, `still failing after the fix: NAME` (exit 1), or `could not verify NAME` when a check can no longer be read.
 | `undo` | Put back what the last `apply` replaced, or the last `-n N`, or one entry (`-id`, from `-list`). It plans the reverse, shows it and asks first when it uninstalls or overwrites. `-plan` shows it and changes nothing; `-json` prints it. See xref:#_undo[Undo].
 | `history` | What was applied, newest first: when, which target, from the terminal, ZC Care or an agent, and whether it worked. Drift changes show here too.
-| `drift` | Plan, and save how many changes are outstanding to `~/.local/state/zc-care/drift.json`, which ZC Care shows. `-last` prints the saved one; `-plist` prints a launchd agent that runs it every morning.
+| `drift` | Plan, and save how many changes are outstanding to `~/.local/state/zc-care/drift.json`, which ZC Care shows, with a `manual` count for `MANUAL` items. It exits 1 when it cannot plan. `-last` prints the saved one; `-plist` prints a launchd agent that runs it every morning.
 | `init` | Write a starter config for this Mac and save its profiles. Installs nothing. See xref:getting-started.adoc[Getting started] and <<_init_profile_and_skip,Init, profile and skip>>.
 | `profile [NAME...]` | Show or set who this Mac is for. A target with `profiles` applies only on a Mac with one of them. See xref:configuration.adoc[Writing a config].
 | `skip [KIND:NAME...]` | List or change the packages this Mac does not install. See xref:new-machine.adoc[A new Mac in one command].
@@ -49,7 +49,7 @@
 | `-n N` | `history`: how many entries to show, 20 by default. `undo`: how many applies to revert.
 | `-id ID`, `-list`, `-plan` | `undo`: which entry to revert, list them, or show the reverse and change nothing.
 | `-yes` | `apply`, `remove`, `undo`, `doctor -fix`: skip the confirmation prompt.
-| `-data DIR` | `undo`, `history`: the directory of the activity log, instead of the default state folder.
+| `-data DIR` | `undo`, `history`: the folder of the activity log, instead of the default data folder (`undo` also keeps its `undo/` journal there).
 | `-last`, `-plist`, `-hour N` | `drift`: print the saved count, print the launchd agent, and the hour it runs at (9 by default, 0 to 23).
 | `-o FILE` | `export`: write the snapshot to `FILE`, mode 0600, instead of standard output. Refuses an existing file without `-force`.
 |===
@@ -261,12 +261,22 @@ file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
 
 An undo that fails half way remembers what it already put back: the next
 `undo` of the same entry skips those and retries the rest. Changes that
-cannot be undone are listed once, with exit 3; the entry then closes, so the
-next `undo` moves on. An apply that failed while writing a
+cannot be undone exit 3, in two cases. An entry with changes that need a
+person stays open and prints `N change(s) must be put back by hand; the entry
+stays open`. An entry with only changes that cannot be undone lists them once
+and closes, so the next `undo` moves on. An apply that failed while writing a
 dotfile keeps a partial record, labelled `partial`, so the file's previous
 content can still be restored. Undo refuses to uninstall a cask that adopted
 an app already in `/Applications` or `~/Applications`, since removing it
 would take the app too.
+
+== State and data folders
+
+The state folder, which holds saved plans, `mcp-audit.jsonl`, `drift.json`
+and `upgrades/`, is `$XDG_STATE_HOME/zc-care`, else `~/.local/state/zc-care`.
+The activity log and the `undo/` journal live in `$XDG_DATA_HOME/zc-care`,
+else `~/.local/share/zc-care`. `history -data` and `undo -data` override the
+activity-log location.
 
 == Capture
 
@@ -326,7 +336,7 @@ number, on the menu bar and in SketchyBar's `zccare` item.
 | `0` | Nothing to do, or the apply converged and was verified.
 | `1` | Something failed.
 | `2` | With `-exit-code`: changes are outstanding, or `diff` found a difference.
-| `3` | With `-exit-code`: nothing left but `MANUAL` items. `undo`: the entry had changes that cannot be undone, listed for you.
+| `3` | With `-exit-code`: nothing left but `MANUAL` items. `undo`: the entry had changes that cannot be undone, listed for you. Changes that need a person leave the entry open; an entry with only un-undoable changes closes.
 |===
 
 == JSON

@@ -434,7 +434,7 @@ Useful flags:
 | `-state outdated,"not declared"` | Filters `list` by state. |
 | `-kind cask,brew` | Filters `list` by kind. |
 | `-exit-code` | Makes the exit code report outstanding changes. |
-| `-json` | Gives machine-readable output, on `plan`, `status`, `list`, `doctor`, `diff`, `undo`, `history`, `drift`, `init`, `profile` and `skip`. |
+| `-json` | Gives machine-readable output, on `plan`, `status`, `list`, `apply`, `validate`, `doctor`, `diff`, `undo`, `history`, `drift`, `init`, `profile` and `skip`. |
 
 The full reference is in [Commands](https://zoolcoder.github.io/zc-care/commands.html).
 
@@ -496,7 +496,7 @@ Start at [The toolbox](https://zoolcoder.github.io/zc-care/toolbox/index.html).
 ## AI agents
 
 `zc-care mcp` is an MCP server. It gives an agent `plan`, `apply`,
-`status`, `list`, `add`, `remove`, `capture`, `doctor` and `validate`. The
+`status`, `list`, `add`, `remove`, `capture`, `doctor`, `validate`, `history` and `drift`. The
 rules are the same as in the terminal:
 
 - **Apply takes only a plan id.** An agent can apply a plan it saved, after
