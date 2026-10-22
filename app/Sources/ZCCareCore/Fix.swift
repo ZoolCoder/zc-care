@@ -21,15 +21,37 @@ public enum Fix: Equatable, Sendable {
     /// The one line the doctor's table gives Touch ID for sudo, which pipes.
     static let touchIDLine = #"sed "s/^#auth/auth/" /etc/pam.d/sudo_local.template | sudo tee /etc/pam.d/sudo_local"#
 
-    /// The detail, when it is exactly one `sudo <command>` line with nothing
-    /// a shell would act on: prose around a command, or a second command,
-    /// must not reach the password dialog.
+    /// The programs a root fix may start, by full path and by name.
+    static let rootPrograms: Set<String> = [
+        "/usr/libexec/ApplicationFirewall/socketfilterfw", "socketfilterfw",
+        "/usr/sbin/spctl", "spctl", "/usr/sbin/softwareupdate", "softwareupdate",
+        "/usr/bin/defaults", "defaults", "/bin/launchctl", "launchctl",
+        "/usr/sbin/sysadminctl", "sysadminctl", "/bin/sh", "sh",
+    ]
+
+    /// What a plain argument may hold: no glob, brace, tilde, quote, `$` or
+    /// operator for the shell to act on.
+    private static let plainArgument = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_./:=,@+")
+
+    /// The detail, when it is exactly one `sudo <program> ...` line of a
+    /// listed program with nothing a shell would act on: prose around a
+    /// command, or a second command, must not reach the password dialog.
+    /// `sh -c '<body>'` passes with a single-quoted body, which the outer
+    /// shell leaves alone.
     static func rootCommand(in detail: String) -> String? {
         let line = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         if line == touchIDLine { return line.replacingOccurrences(of: "sudo ", with: "") }
-        let shell = Set(#";&|`$<>()"'\"# + "\n\r")
-        guard line.hasPrefix("sudo "), !line.contains(where: shell.contains) else { return nil }
-        return String(line.dropFirst("sudo ".count))
+        guard line.hasPrefix("sudo "), !line.contains(where: \.isNewline) else { return nil }
+        let command = String(line.dropFirst("sudo ".count))
+        guard let program = command.split(separator: " ").first.map(String.init), rootPrograms.contains(program) else { return nil }
+        if program == "sh" || program == "/bin/sh" { return isQuotedShell(command, program: program) ? command : nil }
+        return command.allSatisfy(plainArgument.contains) ? command : nil
+    }
+
+    private static func isQuotedShell(_ command: String, program: String) -> Bool {
+        let opening = program + " -c '"
+        guard command.hasPrefix(opening), command.hasSuffix("'"), command.count > opening.count else { return false }
+        return !command.dropFirst(opening.count).dropLast().contains("'")
     }
 
     public init(for check: Check) {

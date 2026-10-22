@@ -29,7 +29,7 @@ public enum Maintenance {
                             admin: true),
             MaintenanceTask(id: "snapshots", title: "Thin Time Machine Snapshots",
                             detail: "Deletes local snapshots of the startup disk; backups on the backup disk stay.",
-                            symbol: "clock.arrow.circlepath", steps: [["/usr/bin/tmutil", "deletelocalsnapshots", "/"]], admin: true),
+                            symbol: "clock.arrow.circlepath", steps: [["/usr/bin/tmutil", "thinlocalsnapshots", "/", "9999999999999", "4"]], admin: true),
             MaintenanceTask(id: "spotlight", title: "Reindex Spotlight",
                             detail: "Rebuilds the search index; search is slow for a while after.",
                             symbol: "magnifyingglass", steps: [["/usr/bin/mdutil", "-E", "/"]], admin: true),

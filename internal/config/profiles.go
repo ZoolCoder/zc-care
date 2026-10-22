@@ -1,9 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 )
 
 // EnvProfiles names a profiles file other than the default one.
@@ -29,7 +31,18 @@ func ReadProfiles(path string) ([]string, error) {
 	if path == "" {
 		return nil, nil
 	}
-	return readList(path, "profiles")
+	names, err := readList(path, "profiles")
+	if err != nil {
+		return nil, err
+	}
+	for n, name := range names {
+		names[n] = strings.ToLower(name)
+		if !IsProfile(names[n]) {
+			return nil, fmt.Errorf("profiles file %s: %q must be kebab-case, such as developer or work", path, name)
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names), nil
 }
 
 // WriteProfiles replaces the profiles file with profiles.

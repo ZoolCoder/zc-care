@@ -54,6 +54,7 @@ public enum CloudDrives {
         var total: Int64 = 0
         var files: [LargeFile] = []
         for case let url as URL in walk {
+            if Task.isCancelled { break }
             guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
                   let size = v.totalFileAllocatedSize, size > 0 else { continue }
             total += Int64(size)

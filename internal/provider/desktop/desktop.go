@@ -13,6 +13,8 @@ import (
 	"context"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"mime"
 	"net/url"
@@ -233,8 +235,10 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 				if _, err := p.runStore(ctx, "write", t.Wallpaper); err != nil {
 					return err
 				}
-				// The agent draws from the store only when it starts.
-				return p.r.Run(ctx, "killall", "WallpaperAgent")
+				// The agent draws from the store only when it starts; one that is
+				// not running has nothing to restart.
+				_ = p.r.Run(ctx, "killall", "WallpaperAgent")
+				return nil
 			}})
 	}
 	switch l.screensaver.state {
@@ -244,7 +248,7 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 		actions = append(actions, plan.Action{Op: plan.OpUpdate, Target: t.Name, Resource: "screensaver",
 			Detail: "show " + filepath.Base(t.Screensaver) + " in WebViewScreenSaver; pick it once in System Settings, Screen Saver",
 			Do: func(ctx context.Context) error {
-				if err := p.r.Run(ctx, "plutil", "-replace", defaultURLKey, "-string", l.page, infoPlist(l.saver)); err != nil {
+				if err := p.setSaverPage(ctx, infoPlist(l.saver), l.page); err != nil {
 					return err
 				}
 				// Editing Info.plist breaks the bundle's seal; sign it again, ad hoc as built.
@@ -263,6 +267,35 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 			}})
 	}
 	return actions, nil
+}
+
+// setSaverPage puts page into the plist. The page is a whole HTML file as a
+// data URL, too long for one command-line argument, so the plist goes out as
+// JSON, takes the key, and comes back through a temp file.
+func (p Provider) setSaverPage(ctx context.Context, plist, page string) error {
+	out, err := p.r.Output(ctx, "plutil", "-convert", "json", "-o", "-", plist)
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return fmt.Errorf("read %s: %w", plist, err)
+	}
+	doc[defaultURLKey] = page
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp("", "zc-care-saver-*.json")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	_, werr := tmp.Write(data)
+	if err := errors.Join(werr, tmp.Close()); err != nil {
+		return err
+	}
+	return p.r.Run(ctx, "plutil", "-convert", "xml1", "-o", plist, tmp.Name())
 }
 
 func manual(t config.Target, key string, s state) plan.Action {

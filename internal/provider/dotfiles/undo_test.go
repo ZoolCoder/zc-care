@@ -72,3 +72,29 @@ func TestScriptsCannotBeUndone(t *testing.T) {
 		t.Fatalf("undo %+v, %v", u, err)
 	}
 }
+
+func TestRevertRestoresASymlinkAsALink(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, ".zshrc")
+	// The link dangles: a stat would see no file and record "remove".
+	if err := os.Symlink(filepath.Join(dir, "gone"), file); err != nil {
+		t.Fatal(err)
+	}
+	u, err := before(file, false)
+	if err != nil || u.Verb != "symlink" || !u.KeepOnError {
+		t.Fatalf("undo %+v, %v", u, err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("applied\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	actions := Provider{}.Revert([]plan.Undo{u})
+	if err := actions[0].Do(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(file); err != nil || got != filepath.Join(dir, "gone") {
+		t.Fatalf("link %q, %v", got, err)
+	}
+}

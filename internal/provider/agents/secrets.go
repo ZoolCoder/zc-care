@@ -31,6 +31,16 @@ func wellFormed(v string) bool {
 	return true
 }
 
+// hasRef reports whether any value of s holds a keychain reference.
+func hasRef(s Server) bool {
+	found := false
+	_ = eachValue(&s, func(v string) (string, error) {
+		found = found || anyRef.MatchString(v)
+		return v, nil
+	})
+	return found
+}
+
 // eachValue replaces every string of s that may hold a reference with
 // f's result, stopping at the first error.
 func eachValue(s *Server, f func(string) (string, error)) error {

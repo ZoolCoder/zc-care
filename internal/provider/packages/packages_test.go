@@ -138,10 +138,11 @@ func TestMissingManagerIsOneManualStep(t *testing.T) {
 	}
 }
 
-func TestBadBrewfile(t *testing.T) {
+func TestUnreadableBrewfileLinesAreManual(t *testing.T) {
 	for _, body := range []string{"brew git\n", `mas "Bitwarden"`} {
-		if _, err := New(brewMachine()).Plan(context.Background(), writeManifest(t, "Brewfile", body)); err == nil {
-			t.Errorf("accepted %q", body)
+		actions, err := New(brewMachine()).Plan(context.Background(), writeManifest(t, "Brewfile", body))
+		if err != nil || len(actions) != 1 || actions[0].Op != plan.OpManual {
+			t.Errorf("%q: plan %+v, %v", body, actions, err)
 		}
 	}
 }

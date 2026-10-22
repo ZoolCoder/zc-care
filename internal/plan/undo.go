@@ -15,6 +15,12 @@ type Undo struct {
 	// previous text. The journal stores it in its own 0600 file and keeps the
 	// path in Data["blob"].
 	Blob []byte `json:"-"`
+	// KeepOnError asks apply to keep this record even when the change fails
+	// half way, because the failure may have changed state already.
+	KeepOnError bool `json:"-"`
+	// Partial marks a record kept from a change that failed: the restore
+	// puts back what was there before, which the change may not have touched.
+	Partial bool `json:"partial,omitempty"`
 	// Reason is set when the change cannot be undone, and says why.
 	Reason string `json:"reason,omitempty"`
 }

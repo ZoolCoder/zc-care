@@ -130,7 +130,7 @@ func (p Provider) Plan(ctx context.Context, t config.Target) ([]plan.Action, err
 	for _, i := range s.missing {
 		actions = append(actions, plan.Action{
 			Op: plan.OpCreate, Target: t.Name, Resource: i.resource(),
-			Detail: "install with " + installer(i), Before: beforeInstall(i), Do: brew.install(p.r, i),
+			Detail: "install with " + installer(i), Before: beforeInstall(p.r, i), Do: brew.install(p.r, i),
 		})
 	}
 	if t.Upgrade {

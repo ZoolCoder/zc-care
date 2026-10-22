@@ -53,7 +53,7 @@ func declaredTools(data []byte) map[string]manifest.Note {
 	inTools := false
 	return manifest.Notes(data, func(l string) (string, bool) {
 		if strings.HasPrefix(l, "[") {
-			inTools = l == "[tools]"
+			inTools = isToolsHeader(l)
 			return "", false
 		}
 		k, _, ok := strings.Cut(l, "=")
@@ -68,6 +68,12 @@ func declaredTools(data []byte) map[string]manifest.Note {
 	})
 }
 
+// isToolsHeader matches [tools] with or without a trailing comment.
+func isToolsHeader(line string) bool {
+	head, _, _ := strings.Cut(line, "#")
+	return strings.TrimSpace(head) == "[tools]"
+}
+
 // insertTool puts line after the last line of the [tools] table, or starts
 // the table at the end of the file.
 func insertTool(data []byte, line string) []byte {
@@ -76,7 +82,7 @@ func insertTool(data []byte, line string) []byte {
 	for n, l := range lines {
 		t := strings.TrimSpace(l)
 		switch {
-		case t == "[tools]":
+		case isToolsHeader(t):
 			at = n
 		case strings.HasPrefix(t, "[") && at >= 0:
 			return join(lines, at, line)

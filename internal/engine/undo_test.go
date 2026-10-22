@@ -93,3 +93,37 @@ func TestRevertAsksProvidersAndListsWhatCannotBeUndone(t *testing.T) {
 		t.Fatalf("%v ran %v", err, ran)
 	}
 }
+
+func TestAFailedChangeKeepsItsUndoWhenAsked(t *testing.T) {
+	fail := func(context.Context) error { return errors.New("half done") }
+	p := plan.Plan{}
+	p.Add(plan.Action{Op: plan.OpUpdate, Target: "a", Resource: "keeps",
+		Before: func(context.Context) (plan.Undo, error) {
+			return plan.Undo{Provider: "dotfiles", Verb: "restore", KeepOnError: true}, nil
+		}, Do: fail})
+	p.Add(plan.Action{Op: plan.OpUpdate, Target: "a", Resource: "drops",
+		Before: func(context.Context) (plan.Undo, error) {
+			return plan.Undo{Provider: "packages", Verb: "uninstall"}, nil
+		},
+		Do: fail})
+	outcomes, err := Run(context.Background(), p, &bytes.Buffer{})
+	if err == nil || len(outcomes) != 2 {
+		t.Fatalf("%v %+v", err, outcomes)
+	}
+	if u := outcomes[0].Undo; u == nil || !u.Partial || u.Verb != "restore" {
+		t.Fatalf("undo %+v", u)
+	}
+	if outcomes[1].Undo != nil {
+		t.Fatalf("undo %+v", outcomes[1].Undo)
+	}
+}
+
+func TestPlanReportsEveryTargetError(t *testing.T) {
+	c := cfg(t.TempDir())
+	c.Targets[0].Provider, c.Targets[1].Provider = "nope", "nada"
+	e, _ := New(c, Providers{}, nil)
+	_, err := e.Plan(context.Background())
+	if err == nil || !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), `"nada"`) {
+		t.Fatalf("err %v", err)
+	}
+}

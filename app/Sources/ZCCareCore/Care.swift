@@ -8,6 +8,7 @@ public enum DiskUsage {
         guard let files = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [key],
                                                          errorHandler: { _, _ in true }) else { return total }
         for case let file as URL in files {
+            if Task.isCancelled { break }
             total += Int64((try? file.resourceValues(forKeys: [key]))?.totalFileAllocatedSize ?? 0)
         }
         return total

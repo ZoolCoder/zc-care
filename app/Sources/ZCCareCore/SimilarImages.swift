@@ -48,21 +48,19 @@ public enum SimilarImages {
         .sorted { $0.wasted > $1.wasted }
     }
 
-    /// Indices that chain together under the threshold, in groups of two or
-    /// more, each in the order given.
+    /// Indices in groups of two or more, each in the order given. A group
+    /// is a first image and the unplaced ones close to it: no chaining, so
+    /// a member is never only close to another member.
     static func cluster(count: Int, distance: (Int, Int) -> Float) -> [[Int]] {
-        var parent = Array(0..<count)
-        func root(_ i: Int) -> Int {
-            var i = i
-            while parent[i] != i { parent[i] = parent[parent[i]]; i = parent[i] }
-            return i
+        var placed = Set<Int>()
+        var groups: [[Int]] = []
+        for seed in 0..<count where !placed.contains(seed) {
+            let near = ((seed + 1)..<max(count, seed + 1)).filter { !placed.contains($0) && distance(seed, $0) < threshold }
+            guard !near.isEmpty else { continue }
+            placed.formUnion([seed] + near)
+            groups.append([seed] + near)
         }
-        for i in 0..<count {
-            for j in (i + 1)..<max(count, i + 1) where distance(i, j) < threshold {
-                parent[root(j)] = root(i)
-            }
-        }
-        return Dictionary(grouping: 0..<count, by: root).values.filter { $0.count > 1 }.map { $0.sorted() }.sorted { $0[0] < $1[0] }
+        return groups
     }
 
     /// Most pixels first, then the bigger file, then the newer.

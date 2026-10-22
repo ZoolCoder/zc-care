@@ -3,8 +3,10 @@ package desktop
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -56,8 +58,9 @@ func setup(t *testing.T, saver bool) machine {
 	r := &sh.Fake{Out: map[string]string{
 		store(p, "read", tg.Wallpaper): "1 3\n",
 		readSS:                         "http://www.google.com/\n",
-		sh.Line("defaults", "read", "-g", "AppleAccentColor"): "5\n",
-		store(p, "write", tg.Wallpaper):                       "1 3\n",
+		sh.Line("plutil", "-convert", "json", "-o", "-", filepath.Join(saverDir, "Contents/Info.plist")): "{}",
+		sh.Line("defaults", "read", "-g", "AppleAccentColor"):                                            "5\n",
+		store(p, "write", tg.Wallpaper):                                                                  "1 3\n",
 	}}
 	p.r = r
 	return machine{p, r, tg, saverDir, readSS}
@@ -93,13 +96,60 @@ func TestPlanSetsWallpaperAndPointsTheSaver(t *testing.T) {
 	want := []string{
 		sh.Line("osascript", "-e", "on run argv", "-e", `tell application "System Events" to set picture of every desktop to POSIX file (item 1 of argv)`, "-e", "end run", m.t.Wallpaper),
 		sh.Line("killall", "WallpaperAgent"),
-		sh.Line("plutil", "-replace", defaultURLKey, "-string", page(), filepath.Join(m.saver, "Contents/Info.plist")),
+		sh.Line("plutil", "-convert", "xml1", "-o", filepath.Join(m.saver, "Contents/Info.plist"), "TMP"),
 		sh.Line("codesign", "--force", "--sign", "-", m.saver),
 		sh.Line("defaults", "write", "-g", "AppleAccentColor", "-int", "4"),
 		sh.Line("defaults", "write", "-g", "AppleHighlightColor", "-string", "0.698039 0.843137 1.000000 Blue"),
 	}
-	if strings.Join(m.r.Ran, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("ran\n%s", strings.Join(m.r.Ran, "\n"))
+	ran := strings.Join(m.r.Ran, "\n")
+	if tmp := tempJSON.FindString(ran); tmp != "" {
+		ran = strings.Replace(ran, tmp, "TMP", 1)
+	}
+	if ran != strings.Join(want, "\n") {
+		t.Fatalf("ran\n%s", ran)
+	}
+}
+
+var tempJSON = regexp.MustCompile(`\S*zc-care-saver-\d+\.json`)
+
+func TestSaverPageGoesThroughATempFileNotTheArguments(t *testing.T) {
+	m := setup(t, true)
+	plist := filepath.Join(m.saver, "Contents/Info.plist")
+	m.r.Out[sh.Line("plutil", "-convert", "json", "-o", "-", plist)] = `{"CFBundleName":"x"}`
+	var written string
+	m.r.OnRun = func(line string) {
+		if f := strings.Fields(line); len(f) > 1 && f[1] == "-convert" {
+			b, _ := os.ReadFile(f[len(f)-1])
+			written = string(b)
+		}
+	}
+	if err := m.p.setSaverPage(context.Background(), plist, "data:big"); err != nil {
+		t.Fatal(err)
+	}
+	if written != `{"CFBundleName":"x","`+defaultURLKey+`":"data:big"}` {
+		t.Fatalf("temp file %q", written)
+	}
+	for _, line := range m.r.Ran {
+		if strings.Contains(line, "data:big") {
+			t.Fatalf("page in arguments: %s", line)
+		}
+	}
+}
+
+func TestStoppedWallpaperAgentIsNotAnError(t *testing.T) {
+	m := setup(t, true)
+	m.r.Err = map[string]error{sh.Line("killall", "WallpaperAgent"): errors.New("no process found")}
+	actions, err := m.p.Plan(context.Background(), m.t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range actions {
+		if a.Resource != "wallpaper" {
+			continue
+		}
+		if err := a.Do(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

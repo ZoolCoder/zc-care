@@ -135,10 +135,10 @@ final class Care {
         dependencies = list.keep(dependencies)
         duplicates = list.keep(duplicates)
         similar = similar.map(list.keep)
-        models.removeAll { $0.paths.contains(where: list.covers) }
-        apps.removeAll { list.covers($0.url) }
-        orphans = orphans?.filter { !$0.paths.contains(where: list.covers) }
-        aiJunk.removeAll { $0.paths.allSatisfy(list.covers) }
+        models.removeAll { $0.paths.contains(where: list.touches) }
+        apps.removeAll { list.touches($0.url) }
+        orphans = orphans?.filter { !$0.paths.contains(where: list.touches) }
+        aiJunk.removeAll { $0.paths.contains(where: list.touches) }
         cloud = cloud?.map { scan in
             var scan = scan
             scan.files = list.keep(scan.files)
@@ -148,7 +148,7 @@ final class Care {
 
     /// The last check before a change: nothing on the ignore list goes.
     private func allowed(_ urls: [URL]) -> Bool {
-        guard let hit = urls.first(where: store.ignoreList.covers) else { return true }
+        guard let hit = urls.first(where: store.ignoreList.touches) else { return true }
         store.message = Store.Message(text: "\(hit.lastPathComponent) is on the ignore list, so it stays.", failed: true)
         return false
     }
@@ -301,6 +301,7 @@ final class Care {
     /// Smart Care's Run: cleans up, then updates, each after its question.
     func run() async {
         if junk > 0 { await store.cleanAll() }
+        if ai > 0 { await cleanAI(aiJunk) }
         if !(store.snapshot?.outdated.isEmpty ?? true) { await store.updateAll() }
     }
 
@@ -353,25 +354,36 @@ final class Care {
         return true
     }
 
+    /// The working directory of every process, from lsof. Nil, with a
+    /// message, when lsof fails: what is in use is then unknown, and
+    /// nothing may be taken for unused.
+    private func workingDirectories() async -> String? {
+        let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["-a", "-d", "cwd", "-Fcn"], env: [:])
+        guard let output = r?.output, !output.isEmpty else {
+            store.message = Store.Message(text: "Could not tell which folders are in use (lsof failed). Nothing was removed.", failed: true)
+            return nil
+        }
+        return output
+    }
+
     func trash(_ file: LargeFile) async {
         guard store.busy == nil, allowed([file.url]) else { return }
         guard await !openInApp([file.url]) else { return }
         // A folder from Space Lens: a project with a server or a shell in it.
         if (try? file.url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-            let cwds = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["-a", "-d", "cwd", "-Fcn"], env: [:])
-            let using = OpenFile.workingIn(file.url.path, cwds?.output ?? "")
+            guard let cwds = await workingDirectories() else { return }
+            let using = OpenFile.workingIn(file.url.path, cwds)
             let commands = await Monitor.commands()
             if let app = using.first ?? (AIClutter.used(file.url, by: commands) ? "a running command" : nil) {
                 store.message = Store.Message(text: "\(file.name) is in use by \(app). Stop it first.", failed: true)
                 return
             }
         }
-        guard store.busy == nil, Alerts.confirm("Move \(file.name) to the Trash?",
+        guard store.busy == nil, Alerts.confirm(store.removeQuestion(file.name),
                                                 "\(Store.bytes(file.size)) in \(file.url.deletingLastPathComponent().path).",
-                                                button: "Move to Trash") else { return }
-        do {
-            var binned: NSURL?
-            try FileManager.default.trashItem(at: file.url, resultingItemURL: &binned)
+                                                button: store.removeButton) else { return }
+        let removal = await remove([file.url])
+        if removal.failures.isEmpty {
             largeFiles.removeAll { $0.id == file.id }
             oldDownloads.removeAll { $0.id == file.id }
             diskImages.removeAll { $0.id == file.id }
@@ -387,11 +399,10 @@ final class Care {
                 try? space?.save(to: Self.savedSpace)
             }
             monitor.readDisk()
-            store.record(.files, file.name, freed: file.size,
-                         trashed: (binned as URL?).map { [Trashed(original: file.url, inTrash: $0)] })
-            store.message = Store.Message(text: "\(file.name) is in the Trash.", failed: false)
-        } catch {
-            store.message = Store.Message(text: error.localizedDescription, failed: true)
+            store.record(.files, file.name, freed: file.size, trashed: removal.trashed)
+            store.message = Store.Message(text: "\(file.name) is \(store.removed).", failed: false)
+        } else {
+            store.message = Store.Message(text: "\(file.name): \(removal.summary).", failed: true)
         }
     }
 
@@ -413,22 +424,15 @@ final class Care {
     /// Moves every image but the best of a group to the Trash.
     func trashOthers(_ group: SimilarGroup) async {
         let others = group.others
-        guard store.busy == nil, allowed(others.map(\.url)), await !openInApp(others.map(\.url)), Alerts.confirm("Move \(Store.counted(others.count, "similar image")) to the Trash?",
+        guard store.busy == nil, allowed(others.map(\.url)), await !openInApp(others.map(\.url)), Alerts.confirm(store.removeQuestion(Store.counted(others.count, "similar image")),
                                                 "\(Store.bytes(group.wasted)). \(group.best.name) stays.",
-                                                button: "Move to Trash") else { return }
-        var moved: [LargeFile] = []
-        var trashed: [Trashed] = []
-        for file in others {
-            var binned: NSURL?
-            guard (try? FileManager.default.trashItem(at: file.url, resultingItemURL: &binned)) != nil else { continue }
-            moved.append(file)
-            if let binned { trashed.append(Trashed(original: file.url, inTrash: binned as URL)) }
-        }
+                                                button: store.removeButton) else { return }
+        let (moved, trashed) = await removeEach(others)
         drop(Set(moved.map(\.id)))
         monitor.readDisk()
         let freed = moved.reduce(0) { $0 + $1.size }
         store.record(.files, "Similar to \(group.best.name)", freed: freed, trashed: trashed)
-        store.message = Store.Message(text: "\(moved.count) of \(Store.counted(others.count, "image")) in the Trash.", failed: moved.count < others.count)
+        store.message = Store.Message(text: "\(moved.count) of \(Store.counted(others.count, "image")) \(store.removed).", failed: moved.count < others.count)
     }
 
     func keepOldest(_ group: DuplicateGroup) async {
@@ -440,10 +444,10 @@ final class Care {
             return
         }
         guard allowed(others.map(\.url)), await !openInApp(others.map(\.url)),
-              Alerts.confirm("Move \(Store.counted(others.count, "copy", "copies")) of \(keeper.name) to the Trash?",
+              Alerts.confirm(store.removeQuestion("\(Store.counted(others.count, "copy", "copies")) of \(keeper.name)"),
                              "\(Store.bytes(group.size * Int64(others.count))). \((keeper.url.path as NSString).abbreviatingWithTildeInPath) stays.\n\n"
                                  + Alerts.lines(others.map { ($0.url.path as NSString).abbreviatingWithTildeInPath }),
-                             button: "Move to Trash") else { return }
+                             button: store.removeButton) else { return }
         // Again: a copy may have changed while the alert was up.
         let confirmed = Set(others.map(\.id))
         let unchanged = await stillSame(group).filter { confirmed.contains($0.id) }
@@ -451,14 +455,7 @@ final class Care {
             store.message = Store.Message(text: "The copies of \(keeper.name) changed while you decided; Rescan to compare them again.", failed: true)
             return
         }
-        var moved: [LargeFile] = []
-        var trashed: [Trashed] = []
-        for file in others {
-            var binned: NSURL?
-            guard (try? FileManager.default.trashItem(at: file.url, resultingItemURL: &binned)) != nil else { continue }
-            moved.append(file)
-            if let binned { trashed.append(Trashed(original: file.url, inTrash: binned as URL)) }
-        }
+        let (moved, trashed) = await removeEach(others)
         let gone = Set(moved.map(\.id))
         duplicates = duplicates.compactMap { group in
             var group = group
@@ -467,7 +464,20 @@ final class Care {
         }
         monitor.readDisk()
         store.record(.files, "Copies of \(keeper.name)", freed: moved.reduce(0) { $0 + $1.size }, trashed: trashed)
-        store.message = Store.Message(text: "\(moved.count) of \(Store.counted(others.count, "copy", "copies")) in the Trash.", failed: moved.count < others.count)
+        store.message = Store.Message(text: "\(moved.count) of \(Store.counted(others.count, "copy", "copies")) \(store.removed).", failed: moved.count < others.count)
+    }
+
+    /// Removes each file on its own, so one that stays does not hold back the rest.
+    private func removeEach(_ files: [LargeFile]) async -> (moved: [LargeFile], trashed: [Trashed]) {
+        var moved: [LargeFile] = []
+        var trashed: [Trashed] = []
+        for file in files {
+            let removal = await remove([file.url])
+            guard removal.failures.isEmpty else { continue }
+            moved.append(file)
+            trashed += removal.trashed
+        }
+        return (moved, trashed)
     }
 
     /// The copies still byte for byte the same as the keeper.
@@ -525,7 +535,7 @@ final class Care {
         defer { store.busy = nil }
         let before = docker?.reduce(0) { $0 + $1.size } ?? 0
         let failed = await store.failure("docker exited with an error") {
-            try await ProcessRunner(timeout: 300).run(program, arguments, env: store.loginEnv)
+            try await Docker.run(program, arguments, env: store.loginEnv, runner: ProcessRunner(timeout: 300))
         }
         await scanDocker()
         let freed = max(before - (docker?.reduce(0) { $0 + $1.size } ?? before), 0)
@@ -544,21 +554,21 @@ final class Care {
         guard store.busy == nil, allowed([spot.url]) else { return }
         if let open = spot.busyBundleIDs.first(where: isRunning) {
             let name = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == open }?.localizedName ?? open
-            store.message = Store.Message(text: "\(name) is open. Quit it first, then move \(spot.title) to the Trash.", failed: true)
+            store.message = Store.Message(text: "\(name) is open. Quit it first, then remove \(spot.title).", failed: true)
             return
         }
-        guard Alerts.confirm("Move \(spot.title) to the Trash?",
+        guard Alerts.confirm(store.removeQuestion(spot.title),
                              "\(Store.bytes(spot.size)) in \((spot.url.path as NSString).abbreviatingWithTildeInPath). \(spot.detail)",
-                             button: "Move to Trash") else { return }
-        store.busy = "Moving \(spot.title) to the Trash"
+                             button: store.removeButton) else { return }
+        store.busy = "Removing \(spot.title)"
         defer { store.busy = nil }
         let (failure, trashed) = await recycle([spot.url])
+        recordRemoval(.developer, spot.title, freed: spot.size, failure: failure, trashed: trashed)
         if let failure {
             store.message = Store.Message(text: "\(spot.title): \(failure)", failed: true)
         } else {
             xcodeSpots.removeAll { $0.id == spot.id }
-            store.record(.developer, spot.title, freed: spot.size, trashed: trashed)
-            store.message = Store.Message(text: "\(spot.title) is in the Trash.", failed: false)
+            store.message = Store.Message(text: "\(spot.title) is \(store.removed).", failed: false)
         }
         monitor.readDisk()
     }
@@ -566,7 +576,7 @@ final class Care {
     func trashDependencies(_ folders: [LargeFile]) async {
         guard store.busy == nil, !folders.isEmpty, allowed(folders.map(\.url)) else { return }
         // A project may have started since the scan, or have a shell open in it.
-        let cwds = (try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["-a", "-d", "cwd", "-Fcn"], env: [:]))?.output ?? ""
+        guard let cwds = await workingDirectories() else { return }
         let running = ProjectDependencies.running(folders, commands: await Monitor.commands())
             + folders.filter { !OpenFile.workingIn($0.url.deletingLastPathComponent().path, cwds).isEmpty }
         if !running.isEmpty {
@@ -577,35 +587,35 @@ final class Care {
             return
         }
         let total = folders.reduce(0) { $0 + $1.size }
-        guard Alerts.confirm("Move \(Store.counted(folders.count, "dependency folder")) to the Trash?",
+        guard Alerts.confirm(store.removeQuestion(Store.counted(folders.count, "dependency folder")),
                              "\(Store.bytes(total)). The next install in each project brings them back.\n\n"
                                  + Alerts.lines(folders.map { ($0.url.path as NSString).abbreviatingWithTildeInPath }),
-                             button: "Move to Trash") else { return }
-        store.busy = "Moving dependencies to the Trash"
+                             button: store.removeButton) else { return }
+        store.busy = "Removing dependencies"
         defer { store.busy = nil }
         let (failure, trashed) = await recycle(folders.map(\.url))
         let gone = Set(folders.map(\.id))
         dependencies.removeAll { gone.contains($0.id) && !FileManager.default.fileExists(atPath: $0.url.path) }
-        if failure == nil { store.record(.developer, "Project Dependencies", freed: total, trashed: trashed) }
+        recordRemoval(.developer, "Project Dependencies", freed: total, failure: failure, trashed: trashed)
         store.message = failure.map { Store.Message(text: $0, failed: true) }
-            ?? Store.Message(text: "\(Store.bytes(total)) of dependencies are in the Trash.", failed: false)
+            ?? Store.Message(text: "\(Store.bytes(total)) of dependencies are \(store.removed).", failed: false)
         monitor.readDisk()
     }
 
     func trash(_ model: AIModel) async {
-        guard store.busy == nil, allowed(model.paths), Alerts.confirm("Move \(model.name) to the Trash?",
+        guard store.busy == nil, allowed(model.paths), Alerts.confirm(store.removeQuestion(model.name),
                                                 "\(Store.bytes(model.size)) of \(model.source.rawValue) model files. "
                                                     + "Pulling the model again downloads it.",
-                                                button: "Move to Trash") else { return }
+                                                button: store.removeButton) else { return }
         store.busy = "Removing \(model.name)"
         defer { store.busy = nil }
         let (failure, trashed) = await recycle(model.paths)
+        recordRemoval(.developer, model.name, freed: model.size, failure: failure, trashed: trashed)
         if let failure {
             store.message = Store.Message(text: "\(model.name): \(failure)", failed: true)
         } else {
             models.removeAll { $0.id == model.id }
-            store.record(.developer, model.name, freed: model.size, trashed: trashed)
-            store.message = Store.Message(text: "\(model.name) is in the Trash.", failed: false)
+            store.message = Store.Message(text: "\(model.name) is \(store.removed).", failed: false)
         }
         monitor.readDisk()
     }
@@ -690,7 +700,7 @@ final class Care {
         let permanently = store.deletesPermanently
         let removal = await Task.detached {
             Removal.remove(AIClutter.stillJunk(picked, in: AIClutter.find(home: home, claudeTemp: temp, open: open, commands: commands))
-                .filter { !ignored.covers($0) }, permanently: permanently)
+                .filter { !ignored.touches($0) }, permanently: permanently)
         }.value
         await scanAI()
         let freed = max(total - picked.reduce(0) { sum, p in sum + (aiJunk.first { $0.id == p.id }?.size ?? 0) }, 0)
@@ -751,16 +761,16 @@ final class Care {
         guard store.busy == nil, allowed([app.url]), canTouch(app) else { return }
         // What the ignore list names stays behind; the rest still goes.
         let leftovers = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory())
-            .filter { !store.ignoreList.covers($0) }
+            .filter { !store.ignoreList.touches($0) }
         let method = Uninstall.method(declared: app.declared, source: app.source)
         var how: String
         switch method {
         case .remove(_, let resource): how = "zc-care removes \(resource) and drops it from the Brewfile."
         case .cask(let token): how = "Homebrew uninstalls the cask \(token)."
-        case .trash: how = "The app moves to the Trash."
+        case .trash: how = store.deletesPermanently ? "The app is deleted for good." : "The app moves to the Trash."
         }
         if !leftovers.isEmpty {
-            how += "\n\nIts files move to the Trash:\n" + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath })
+            how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n") + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath })
         }
         // Again: the app may have opened while the alert was up.
         guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall"), canTouch(app) else { return }
@@ -803,6 +813,8 @@ final class Care {
             // Only an app that went to the Trash comes back whole; a
             // Homebrew or zc-care removal has nothing there to restore.
             store.record(.apps, app.name, freed: app.size ?? 0, trashed: trashed.isEmpty ? nil : trashed)
+        } else if !trashed.isEmpty {
+            store.record(.apps, app.name, trashed: trashed)
         }
         if let failure {
             store.message = Store.Message(text: "\(app.name): \(failure)", failed: true)
@@ -843,26 +855,26 @@ final class Care {
     func reset(_ app: InstalledApp) async {
         guard store.busy == nil, canTouch(app) else { return }
         let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory())
-            .filter { !store.ignoreList.covers($0) }
+            .filter { !store.ignoreList.touches($0) }
         guard !data.isEmpty else {
             store.message = Store.Message(text: "\(app.name) keeps no settings or data to reset.", failed: false)
             return
         }
         let urls = data.map(URL.init(fileURLWithPath:))
         guard Alerts.confirm("Reset \(app.name)?",
-                                            "It opens as on its first launch. These move to the Trash:\n"
+                                            "It opens as on its first launch. " + (store.deletesPermanently ? "These are deleted for good:\n" : "These move to the Trash:\n")
                                                 + Alerts.lines(data.map { ($0 as NSString).abbreviatingWithTildeInPath }),
                                             button: "Reset"), canTouch(app) else { return }
         store.busy = "Resetting \(app.name)"
         defer { store.busy = nil }
         await bootOut(Leftovers.agents(in: data))
         let (failure, trashed) = await recycle(urls)
+        recordRemoval(.apps, "Reset \(app.name)", freed: 0, failure: failure, trashed: trashed)
         if let failure {
             store.message = Store.Message(text: "\(app.name): \(failure)", failed: true)
         } else {
             // cfprefsd keeps the settings in memory and would write them back.
             _ = try? await ProcessRunner(timeout: 10).run("/usr/bin/killall", ["cfprefsd"], env: [:])
-            store.record(.apps, "Reset \(app.name)", trashed: trashed)
             store.message = Store.Message(text: "\(app.name) is reset.", failed: false)
         }
     }
@@ -898,18 +910,18 @@ final class Care {
               allowed(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
         guard await !openInApp(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }) else { return }
         let total = picked.reduce(0) { $0 + $1.size }
-        guard Alerts.confirm("Move what \(Store.counted(picked.count, "removed app")) left to the Trash?",
+        guard Alerts.confirm(store.removeQuestion("what \(Store.counted(picked.count, "removed app")) left"),
                              "\(Store.bytes(total)) in caches, settings and support files:\n\n"
                                  + Alerts.lines(picked.map(\.bundleID), max: 10),
-                             button: "Move to Trash") else { return }
+                             button: store.removeButton) else { return }
         store.busy = "Removing leftovers"
         defer { store.busy = nil }
         let (failure, trashed) = await recycle(picked.flatMap { $0.paths.map(URL.init(fileURLWithPath:)) })
         let gone = Set(picked.map(\.id))
         orphans?.removeAll { o in gone.contains(o.id) && !o.paths.contains(where: FileManager.default.fileExists) }
-        if failure == nil { store.record(.apps, "App Leftovers", freed: total, trashed: trashed) }
+        recordRemoval(.apps, "App Leftovers", freed: total, failure: failure, trashed: trashed)
         store.message = failure.map { Store.Message(text: $0, failed: true) }
-            ?? Store.Message(text: "Leftovers of \(Store.counted(picked.count, "app")) are in the Trash.", failed: false)
+            ?? Store.Message(text: "Leftovers of \(Store.counted(picked.count, "app")) are \(store.removed).", failed: false)
         monitor.readDisk()
     }
 
@@ -956,15 +968,34 @@ final class Care {
         await loadApps()
     }
 
-    /// Moves to the Trash; the Finder asks for a password when the app
-    /// belongs to the system, as App Store apps do.
+    /// Removes by the choice in Settings: to the Trash, or for good.
+    private func remove(_ urls: [URL]) async -> Removal {
+        let permanently = store.deletesPermanently
+        return await Task.detached { Removal.remove(urls, permanently: permanently) }.value
+    }
+
+    /// Moves to the Trash, where the Finder asks for a password when the
+    /// app belongs to the system, as App Store apps do; or deletes for good
+    /// when Settings says so. A batch that stops midway still reports what
+    /// moved, so Put Back has it.
     private func recycle(_ urls: [URL]) async -> (failure: String?, trashed: [Trashed]) {
-        do {
-            let moved = try await NSWorkspace.shared.recycle(urls)
-            return (nil, moved.map { Trashed(original: $0.key, inTrash: $0.value) })
-        } catch {
-            return (error.localizedDescription, [])
+        if store.deletesPermanently {
+            let removal = await remove(urls)
+            return (removal.failures.isEmpty ? nil : removal.summary, [])
         }
+        return await withCheckedContinuation { continuation in
+            NSWorkspace.shared.recycle(urls) { moved, error in
+                continuation.resume(returning: (error?.localizedDescription,
+                                                moved.map { Trashed(original: $0.key, inTrash: $0.value) }))
+            }
+        }
+    }
+
+    /// Logs a removal, and what moved before one that failed, which Put Back can still return.
+    private func recordRemoval(_ kind: ActivityEntry.Kind, _ title: String, freed: Int64,
+                               failure: String?, trashed: [Trashed]) {
+        guard failure == nil || !trashed.isEmpty else { return }
+        store.record(kind, title, freed: failure == nil ? freed : 0, trashed: trashed)
     }
 
     private func lastLine(_ text: String?) -> String? {
@@ -1060,14 +1091,14 @@ final class Care {
         guard store.busy == nil, agent.path.hasPrefix(NSHomeDirectory() + "/"), allowed([URL(fileURLWithPath: agent.path)]),
               Alerts.confirm("Remove \(agent.label)?",
                              "It runs \((agent.program as NSString).abbreviatingWithTildeInPath), which is gone. "
-                                 + "Its plist moves to the Trash.", button: "Remove") else { return }
+                                 + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash."), button: "Remove") else { return }
         store.busy = "Removing \(agent.label)"
         defer { store.busy = nil }
         await bootOut([agent.path])
         let (failure, trashed) = await recycle([URL(fileURLWithPath: agent.path)])
-        if failure == nil { store.record(.maintenance, "Broken Launch Agent", freed: 0, trashed: trashed) }
+        recordRemoval(.maintenance, "Broken Launch Agent", freed: 0, failure: failure, trashed: trashed)
         store.message = failure.map { Store.Message(text: "\(agent.label): \($0)", failed: true) }
-            ?? Store.Message(text: "\(agent.label) is in the Trash.", failed: false)
+            ?? Store.Message(text: "\(agent.label) is \(store.removed).", failed: false)
         await loadAgents()
     }
 

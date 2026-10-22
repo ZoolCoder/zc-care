@@ -28,7 +28,7 @@ struct ScriptRunner: Runner {
         Check(name: "security automatic update checks", status: "fail", detail: "sudo softwareupdate --schedule on"),
         Check(name: "security Time Machine backups", status: "fail", detail: "System Settings, General, Time Machine: add a backup disk"),
     ]
-    #expect(Fix.rootCommands(for: checks) == "socketfilterfw --setglobalstate on; softwareupdate --schedule on")
+    #expect(Fix.rootCommands(for: checks) == "socketfilterfw --setglobalstate on && softwareupdate --schedule on")
     #expect(Fix.rootCommands(for: [checks[1], checks[3]]) == nil)
     #expect(Fix.pane(for: checks[3].detail!).absoluteString.hasSuffix("Time-Machine-Settings.extension"))
 }

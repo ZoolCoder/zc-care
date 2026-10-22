@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -194,7 +195,26 @@ func Parse(data []byte) (Config, error) {
 	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return Config{}, err
 	}
+	cfg.cleanFileNames()
 	return cfg, cfg.Validate()
+}
+
+// cleanFileNames rewrites each localdir file name to its clean form, so
+// ./a.txt and a.txt are one file. A name that clashes with another after
+// cleaning is left for Validate to report.
+func (c *Config) cleanFileNames() {
+	for i, t := range c.Targets {
+		if t.Provider != "localdir" || len(t.Files) == 0 {
+			continue
+		}
+		cleaned := make(map[string]string, len(t.Files))
+		for name, content := range t.Files {
+			cleaned[filepath.Clean(name)] = content
+		}
+		if len(cleaned) == len(t.Files) {
+			c.Targets[i].Files = cleaned
+		}
+	}
 }
 
 var kebab = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
@@ -280,9 +300,18 @@ func (t Target) validateFields(where string) []error {
 
 func (t Target) checkLocaldir(c *fieldCheck) {
 	c.need("path", t.Path)
-	for name := range t.Files {
-		if !filepath.IsLocal(name) {
+	// Names differ in case on a case-sensitive disk only; APFS is usually
+	// case-insensitive, and a.txt with A.txt there is one file. Not checked.
+	cleaned := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(t.Files)) {
+		clean := filepath.Clean(name)
+		switch {
+		case !filepath.IsLocal(name) || clean == ".":
 			c.add("file %q must stay inside the target path", name)
+		case cleaned[clean] != "":
+			c.add("files %q and %q are the same file", cleaned[clean], name)
+		default:
+			cleaned[clean] = name
 		}
 	}
 }

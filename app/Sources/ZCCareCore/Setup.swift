@@ -77,7 +77,7 @@ extension Fix {
     /// password dialog secures the Mac. Nil when none can run as root.
     public static func rootCommands(for checks: [Check]) -> String? {
         let steps = rootSteps(for: checks)
-        return steps.isEmpty ? nil : steps.map(\.command).joined(separator: "; ")
+        return steps.isEmpty ? nil : steps.map(\.command).joined(separator: " && ")
     }
 }
 

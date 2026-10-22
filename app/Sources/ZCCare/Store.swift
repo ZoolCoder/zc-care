@@ -161,10 +161,18 @@ final class Store {
         didSet { UserDefaults.standard.set(vitalsAlerts, forKey: Keys.vitalsAlerts) }
     }
 
-    /// Cache, browser and AI clutter cleanups go to the Trash, where My
-    /// Activity can put them back, unless this is on.
+    /// Every removal goes to the Trash, where My Activity can put it back,
+    /// unless this is on: then it is deleted for good.
     var deletesPermanently: Bool {
         didSet { UserDefaults.standard.set(deletesPermanently, forKey: Keys.deletesPermanently) }
+    }
+
+    /// Where a removed item is, for a message: "in the Trash" or "deleted".
+    var removed: String { deletesPermanently ? "deleted" : "in the Trash" }
+    var removeButton: String { deletesPermanently ? "Delete" : "Move to Trash" }
+
+    func removeQuestion(_ what: String) -> String {
+        deletesPermanently ? "Delete \(what) for good?" : "Move \(what) to the Trash?"
     }
 
     var vitalLimits: VitalLimits {
@@ -552,7 +560,7 @@ final class Store {
         let home = NSHomeDirectory()
         var plists: [(String, [String: Any], [DateComponents])] = []
         for agent in services where agent.kind == "agent" {
-            let path = Launchd.plistPath(agent.name, home: home)
+            let path = Launchd.agentPath(agent.name, home: home)
             guard let data = FileManager.default.contents(atPath: path),
                   let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
             else { continue }

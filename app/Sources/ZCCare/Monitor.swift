@@ -209,10 +209,10 @@ extension Store {
             }
             return
         }
-        let stuck = Trashed.putBack(entry.trashed ?? [])
-        if stuck.isEmpty, let index = activity.entries.firstIndex(of: entry) {
-            activity.entries[index].putBack = .now
-            activity.entries[index].bytes = 0
+        // What stays in the Trash keeps its Put Back for another try.
+        var stuck: [String] = []
+        if let index = activity.entries.firstIndex(of: entry) {
+            stuck = activity.entries[index].putBackFromTrash()
         }
         try? activity.save(to: Self.activityFile)
         monitor.readDisk()

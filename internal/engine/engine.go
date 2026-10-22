@@ -117,11 +117,13 @@ func (e *Engine) Plan(ctx context.Context) (plan.Plan, error) {
 		results[n] = result{actions, err}
 	})
 	var p plan.Plan
+	var errs []error
 	for _, r := range results {
-		if r.err != nil {
-			return plan.Plan{}, r.err
-		}
+		errs = append(errs, r.err)
 		p.Add(r.actions...)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return plan.Plan{}, err
 	}
 	return p, nil
 }
@@ -169,6 +171,9 @@ func run(ctx context.Context, p plan.Plan, w io.Writer) ran {
 		err := a.Do(ctx)
 		o := Outcome{Target: a.Target, Resource: a.Resource, Err: err}
 		if err == nil {
+			o.Undo = undo
+		} else if undo != nil && undo.KeepOnError {
+			undo.Partial = true
 			o.Undo = undo
 		}
 		r.outcomes = append(r.outcomes, o)
@@ -255,7 +260,24 @@ func Revert(providers Providers, undos []plan.Undo) plan.Plan {
 	for _, name := range order {
 		p.Add(providers[name].(provider.Reverter).Revert(byProvider[name])...)
 	}
+	markPartial(&p, undos)
 	return p
+}
+
+// markPartial labels the actions that revert a change which failed half way:
+// they put back what was there before, which the change may not have touched.
+func markPartial(p *plan.Plan, undos []plan.Undo) {
+	partial := map[[2]string]bool{}
+	for _, u := range undos {
+		if u.Partial {
+			partial[[2]string{u.Target, u.Resource}] = true
+		}
+	}
+	for i, a := range p.Actions {
+		if partial[[2]string{a.Target, a.Resource}] && a.Op != plan.OpManual {
+			p.Actions[i].Detail = strings.TrimSpace("partial: the change failed, so this restores the state before it; " + a.Detail)
+		}
+	}
 }
 
 func cannotUndo(u plan.Undo) string {

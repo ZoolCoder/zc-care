@@ -113,12 +113,42 @@ func Write(o Options) (Result, error) {
 	if err := os.MkdirAll(o.Dir, 0o755); err != nil {
 		return Result{}, err
 	}
-	for _, name := range names {
-		if err := os.WriteFile(filepath.Join(o.Dir, name), out[name], 0o644); err != nil {
-			return Result{}, err
-		}
+	if err := writeAll(o.Dir, names, out); err != nil {
+		return Result{}, err
 	}
 	return res, nil
+}
+
+// writeAll stages every file in a temp file beside its place first, then
+// renames them all, so a failed write leaves the old files whole. A rename
+// replaces a symlink itself, so -force never writes through a link to
+// somewhere else.
+func writeAll(dir string, names []string, content map[string][]byte) error {
+	staged := map[string]string{}
+	defer func() {
+		for _, tmp := range staged {
+			_ = os.Remove(tmp)
+		}
+	}()
+	for _, name := range names {
+		tmp, err := os.CreateTemp(dir, "."+name+"-*")
+		if err != nil {
+			return err
+		}
+		staged[name] = tmp.Name()
+		_, werr := tmp.Write(content[name])
+		cerr := tmp.Close()
+		if err := errors.Join(werr, cerr, os.Chmod(tmp.Name(), 0o644)); err != nil {
+			return err
+		}
+	}
+	for _, name := range names {
+		if err := os.Rename(staged[name], filepath.Join(dir, name)); err != nil {
+			return err
+		}
+		delete(staged, name)
+	}
+	return nil
 }
 
 // keep appends captured's entries that brewfile lacks under their own
