@@ -20,6 +20,9 @@
 | `undo` | Put back what the last `apply` replaced, or the last `-n N`, or one entry (`-id`, from `-list`). It plans the reverse, shows it and asks first when it uninstalls or overwrites. `-plan` shows it and changes nothing; `-json` prints it. See xref:#_undo[Undo].
 | `history` | What was applied, newest first: when, which target, from the terminal, ZC Care or an agent, and whether it worked. Drift changes show here too.
 | `drift` | Plan, and save how many changes are outstanding to `~/.local/state/zc-care/drift.json`, which ZC Care shows. `-last` prints the saved one; `-plist` prints a launchd agent that runs it every morning.
+| `init` | Write a starter config for this Mac and save its profiles. Installs nothing. See xref:getting-started.adoc[Getting started] and <<_init_profile_and_skip,Init, profile and skip>>.
+| `profile [NAME...]` | Show or set who this Mac is for. A target with `profiles` applies only on a Mac with one of them. See xref:configuration.adoc[Writing a config].
+| `skip [KIND:NAME...]` | List or change the packages this Mac does not install. See xref:new-machine.adoc[A new Mac in one command].
 | `mcp` | The MCP server on standard input and output.
 | `version` | The version.
 |===
@@ -28,23 +31,67 @@
 
 [cols="1,3"]
 |===
-| `-config FILE` | Config file, or `-` for standard input.
+| `-config FILE` | Config file, or `-` for standard input. Every command that reads the config takes it, `diff` and `export` too.
 | `-target NAME` | Limit to this target; repeat for several.
 | `-out FILE` | `plan`: save the plan for `apply FILE`. `capture`: write the manifest to `FILE` instead of standard output.
-| `-force` | `capture -out`: overwrite `FILE` if it exists.
+| `-force` | `capture -out`, `export -o`: overwrite `FILE` if it exists.
 | `-state LIST` | `list`: only these states, comma-separated, such as `outdated,not declared`.
 | `-kind LIST` | `list`: only these kinds, comma-separated, such as `cask,mas`.
 | `-adoc` | `list`: the declared packages and runtimes as an AsciiDoc page, one table per section.
 | `-why TEXT` | `add`: one line on why the item is there.
 | `-section NAME` | `add`: the manifest section to add it under; a new name starts a new section.
-| `-json` | `plan`, `status`, `list`, `doctor` and `diff`: machine-readable.
-| `-exit-code` | `plan`: exit 2 for changes, 3 for manual-only.
+| `-item ITEM` | `add`, `remove`: the item as `kind:name`, instead of the first argument.
+| `-json` | `plan`, `status`, `list`, `apply`, `validate`, `doctor`, `diff`, `undo`, `history`, `drift`, `init`, `profile` and `skip`: machine-readable. `undo -json` prints the reverse plan and changes nothing; `capture` has no JSON form.
+| `-exit-code` | `plan`: exit 2 for changes, 3 for manual-only. `diff`: exit 2 when the two snapshots differ.
 | `-upgrade` | `plan`, `apply`: also upgrade outdated packages and runtimes, as if every `packages` and `tools` target said `upgrade: true`.
 | `-only RESOURCE` | `plan`, `apply`: only the change to this resource, such as `brew:tmux`; repeat for several. A saved plan remembers `-upgrade` and `-only`.
 | `-fix` | `doctor`: plan and apply the fixes, after a yes. Cannot be combined with `-json`.
-| `-n N`, `-id ID`, `-list` | `undo`: how many applies to revert, which one, or list them.
-| `-yes` | `apply`, `undo`, `doctor -fix`: skip the confirmation prompt.
+| `-n N` | `history`: how many entries to show, 20 by default. `undo`: how many applies to revert.
+| `-id ID`, `-list`, `-plan` | `undo`: which entry to revert, list them, or show the reverse and change nothing.
+| `-yes` | `apply`, `remove`, `undo`, `doctor -fix`: skip the confirmation prompt.
+| `-data DIR` | `undo`, `history`: the directory of the activity log, instead of the default state folder.
+| `-last`, `-plist`, `-hour N` | `drift`: print the saved count, print the launchd agent, and the hour it runs at (9 by default, 0 to 23).
+| `-o FILE` | `export`: write the snapshot to `FILE`, mode 0600, instead of standard output. Refuses an existing file without `-force`.
 |===
+
+== Init, profile and skip
+
+These three set up a Mac that has no config yet, or a config shared by several
+Macs. The walk-through is in xref:getting-started.adoc[Getting started]; the
+keys they feed are in xref:configuration.adoc[Writing a config].
+
+`init` writes a starter config and installs nothing; `plan` and `apply` come
+next. It puts the packages of other profiles' sections on this Mac's skip
+list and saves the Mac's profiles.
+
+[source,console]
+----
+$ zc-care init -list
+$ zc-care init -profile developer -role work
+$ zc-care init -profile developer,creative -from-mac -dir ~/dotfiles/zc-care
+----
+
+* `-profile p[,p]`: who the Mac is for, comma-separated.
+* `-role ROLE`: what it is for, such as `work` or `personal`.
+* `-from-mac`: also keep the apps this Mac has installed.
+* `-dir DIR`: where to write the config; `~/.config/zc-care` by default.
+* `-force`: replace files that are there.
+* `-list`: show the profiles and roles, and write nothing.
+* `-json`: machine-readable output.
+
+`profile` shows this Mac's profiles; with names it replaces them, and `-clear`
+drops them all, so every target applies again. A name is kebab case, such as
+`developer`. `-json` prints the list.
+
+`skip` lists the packages this Mac does not install. Pass items as `kind:name`
+to add them, and `-undo` to take them off. A skipped package that is missing
+stays out of `plan`, `apply` and `drift`; one already installed is untouched.
+
+[source,console]
+----
+$ zc-care skip cask:ghostty brew:colima
+$ zc-care skip -undo cask:ghostty
+----
 
 == Compare two Macs
 
@@ -212,6 +259,13 @@ file ask first; pass `-yes` to skip the prompt. An undo is itself recorded in
 `history` as from `undo`, but it cannot be undone, and neither can
 `doctor -fix`. The MCP server does not offer `undo`.
 
+An undo that fails half way remembers what it already put back: the next
+`undo` of the same entry skips those and retries the rest. An entry with
+nothing but manual work left exits 3. An apply that failed while writing a
+dotfile keeps a partial record, labelled `partial`, so the file's previous
+content can still be restored. Undo refuses to uninstall a cask that adopted
+an app already in `/Applications`, since removing it would take the app too.
+
 == Capture
 
 `capture` writes the manifest that would declare what the machine has: a
@@ -269,8 +323,8 @@ number, on the menu bar and in SketchyBar's `zccare` item.
 |===
 | `0` | Nothing to do, or the apply converged and was verified.
 | `1` | Something failed.
-| `2` | With `-exit-code`: changes are outstanding.
-| `3` | With `-exit-code`: nothing left but `MANUAL` items.
+| `2` | With `-exit-code`: changes are outstanding, or `diff` found a difference.
+| `3` | With `-exit-code`: nothing left but `MANUAL` items. `undo`: the entry has only manual work left.
 |===
 
 == JSON

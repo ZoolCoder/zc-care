@@ -59,6 +59,7 @@ an error.
 | | `mode` | `file` copies (the default); `symlink` links back into the source.
 | `tools` | `file` | Required. The mise config file whose tools to install.
 | | `upgrade` | Also plan an `UPDATE` for each runtime with a newer version that its request allows. Off by default.
+| `agents` | `file` | Required. The agents file: `clients`, `servers`, `rules`, `skills` and `models`. See xref:providers.adoc#agents[agents].
 | `desktop` | `wallpaper` | The picture to show on every desktop.
 | | `screensaver` | The web page for WebViewScreenSaver to show. Set this, `wallpaper`, `accent`, or any of them.
 | | `accent` | The macOS accent colour: `blue`, `purple`, `pink`, `red`, `orange`, `yellow`, `green` or `graphite`.

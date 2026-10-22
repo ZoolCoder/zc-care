@@ -173,6 +173,10 @@ zc-care/
 |Releases
 |Done
 |ZC Care, with the CLI inside, and its `zc-care` cask. Before `zc-care`, goreleaser also shipped CLI binaries, Linux packages and Windows zips.
+
+|v0.2.0
+|Done
+|`undo` and `doctor -fix`; `export` and `diff` to compare two Macs; `init`, `profile` and `skip`, and Set Up This Mac in the app; `${keychain:...}` references in agents manifests; cleanups that go to the Trash by default; Space Lens growth tracking; Docker and Xcode in Developer. See xref:commands.adoc[] and xref:app.adoc[].
 |===
 
 == Next

@@ -12,10 +12,20 @@ same work. Remove the line in the pull request that finishes it.
 - [ ] Install from the cask on a clean macOS VM and run `bootstrap.sh` end to
       end.
 
+## GitHub
+
+- [ ] Find why `push` and `pull_request` events start no Actions runs. Check
+      Settings, Actions, General, and
+      `gh api repos/zoolcoder/zc-care/actions/permissions`.
+
 ## ZC Care
 
 - [ ] Sign ZC Care with a Developer ID and notarise it, so Full Disk Access
       survives an update and Gatekeeper opens it without a warning.
+- [ ] Upload `.github/social-preview.png` by hand in the repository's
+      Settings, General, Social preview; GitHub has no API for it.
+- [ ] Add the SSH signing key to GitHub as a signing key, so commits show
+      Verified.
 - [ ] Find why macOS refuses ZC Care's notification request, which vitals
       alerts and the weekly scan rely on.
 
