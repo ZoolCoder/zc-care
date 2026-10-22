@@ -27,6 +27,15 @@ func runUpgrade(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		return err
 	}
 
+	// Standard input is read once and handed to both steps.
+	listIn, applyIn := stdin, stdin
+	if *path == "-" {
+		config, err := io.ReadAll(stdin)
+		if err != nil {
+			return err
+		}
+		listIn, applyIn = bytes.NewReader(config), bytes.NewReader(config)
+	}
 	var scope []string
 	if *path != "" {
 		scope = append(scope, "-config", *path)
@@ -34,7 +43,7 @@ func runUpgrade(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	for _, t := range targets {
 		scope = append(scope, "-target", t)
 	}
-	file, err := snapshotOutdated(scope, stdin, stderr)
+	file, err := snapshotOutdated(scope, listIn, stderr)
 	if err != nil {
 		return err
 	}
@@ -51,7 +60,7 @@ func runUpgrade(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	if *yes {
 		apply = append(apply, "-yes")
 	}
-	return runCLI(apply, stdin, stdout, stderr)
+	return runCLI(apply, applyIn, stdout, stderr)
 }
 
 // snapshotOutdated writes `list -json -state outdated` to the upgrades folder

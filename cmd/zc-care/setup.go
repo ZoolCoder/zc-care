@@ -145,6 +145,9 @@ func runProfile(args []string, _ io.Reader, stdout, stderr io.Writer) error {
 		return errors.New("no home folder to keep the profiles in")
 	}
 	names := flags.Args()
+	if err := rejectTrailingFlags("profile", names); err != nil {
+		return err
+	}
 	for _, n := range names {
 		if !config.IsProfile(n) {
 			return fmt.Errorf("profile %q must be kebab-case, such as developer or work", n)

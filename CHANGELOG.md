@@ -147,6 +147,23 @@ here with what to edit.
 - Plan text output strips control characters from target, resource and
   detail (JSON is unchanged), and rendering fails with a clear error when an
   action has a command but is marked manual, or has none and is not manual.
+- Undo refuses to overwrite or delete a file that was edited after the apply
+  and says which path to fix by hand, and it no longer recreates a folder you
+  deleted. Undo records written before this release are undone as before.
+- Flags placed before the subcommand, such as `zc-care -yes apply`, fail with
+  a message instead of silently running a plan. A flag placed after an
+  operand, such as `remove brew:htop -yes`, fails instead of being dropped.
+- apply and undo warn on stderr when the undo record or the activity log could
+  not be saved.
+- Undo journal entries and saved plans are written through a temporary file
+  and renamed, so a failed write cannot leave a truncated file.
+- export records the config path and the target selection; `diff FILE` reads
+  the live side from that config and warns when you point it at another one.
+- A cancelled `apply -json` prints a result with `cancelled: true`.
+  `upgrade -config -` reads standard input once. `doctor -fix` stops on
+  Ctrl-C. The usage text says that undo exits 3 when only manual items are
+  left.
+- Fixed a crash when an undo record carried saved content but no data.
 - A missing `mas` waits for the apply that installs it through brew, so App
   Store apps are retried in the follow-up pass. The localdir provider refuses
   to write through a symlink to a missing file or to a directory, naming the

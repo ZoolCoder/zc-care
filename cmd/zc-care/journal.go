@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/zoolcoder/zc-care/internal/engine"
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
+	"github.com/zoolcoder/zc-care/internal/provider"
 )
 
 const viaUndo = "undo"
@@ -68,13 +70,17 @@ func saveJournal(dataDir string, outcomes []engine.Outcome, via string) error {
 	for n, u := range undos {
 		if len(u.Blob) > 0 {
 			path := filepath.Join(dir, fmt.Sprintf("%s.%d.blob", e.ID, n))
-			if err := os.WriteFile(path, u.Blob, 0o600); err != nil {
+			if err := manifest.WriteFile(path, u.Blob, 0o600); err != nil {
 				return err
 			}
 			u.Data = maps.Clone(u.Data)
+			if u.Data == nil {
+				u.Data = map[string]string{}
+			}
 			u.Data["blob"] = path
 		}
-		e.Undos = append(e.Undos, u)
+		// The apply is over, so the file holds what it wrote.
+		e.Undos = append(e.Undos, provider.StampFileUndo(u))
 	}
 	return e.write(dir)
 }
@@ -92,7 +98,7 @@ func (e journalEntry) write(dir string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, e.ID+".json"), raw, 0o600)
+	return manifest.WriteFile(filepath.Join(dir, e.ID+".json"), raw, 0o600)
 }
 
 // loadJournal reads every entry, newest first. A file that does not parse is

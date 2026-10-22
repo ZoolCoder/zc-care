@@ -51,13 +51,23 @@ func (Provider) Revert(undos []plan.Undo) []plan.Action {
 		switch u.Verb {
 		case "remove":
 			a.Op, a.Detail = plan.OpDelete, "remove "+file+": it did not exist before"
-			a.Do = func(context.Context) error { return provider.RemoveFile(file) }
+			a.Do = func(context.Context) error {
+				if err := provider.CheckUnchanged(file, u.Data); err != nil {
+					return err
+				}
+				return provider.RemoveFile(file)
+			}
 		case "symlink":
 			a.Detail = "point " + file + " at " + u.Data["target"] + " again"
 			a.Do = func(context.Context) error { return restoreLink(file, u.Data["target"]) }
 		default:
 			a.Detail = "restore the previous content of " + file
-			a.Do = func(context.Context) error { return provider.RestoreFile(file, u.Data["blob"], u.Data["mode"]) }
+			a.Do = func(context.Context) error {
+				if err := provider.CheckUnchanged(file, u.Data); err != nil {
+					return err
+				}
+				return provider.RestoreFile(file, u.Data["blob"], u.Data["mode"])
+			}
 		}
 		actions = append(actions, a)
 	}

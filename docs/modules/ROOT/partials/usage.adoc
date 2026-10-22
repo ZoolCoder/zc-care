@@ -43,7 +43,8 @@ Exit codes:
   0  nothing to do, or the apply converged and was verified
   1  something failed
   2  with -exit-code: changes are outstanding
-  3  with -exit-code: nothing left but MANUAL items
+  3  with -exit-code: nothing left but MANUAL items; undo: nothing left but
+     MANUAL items, even without it
 
 Flags:
   -config string   config file, or "-" for standard input; default: $ZC_CARE_CONFIG,

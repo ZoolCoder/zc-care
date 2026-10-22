@@ -58,7 +58,7 @@ func runUndo(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	case *planOnly:
 		return writeUndoPlan(stdout, chosen, p)
 	}
-	return applyUndo(*data, chosen, p, *yes, stdin, stdout)
+	return applyUndo(*data, chosen, p, *yes, stdin, stdout, stderr)
 }
 
 func flagGiven(flags *flag.FlagSet, name string) bool {
@@ -137,7 +137,7 @@ func writeUndoPlan(w io.Writer, chosen []journalEntry, p plan.Plan) error {
 // applyUndo runs the reverts of p and records which undos it put back, so a
 // retry after a failure skips them. An entry is undone only when every one of
 // its changes is; one with changes that need a person stays open and exits 3.
-func applyUndo(dataDir string, chosen []journalEntry, p plan.Plan, yes bool, stdin io.Reader, stdout io.Writer) error {
+func applyUndo(dataDir string, chosen []journalEntry, p plan.Plan, yes bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := writeUndoPlan(stdout, chosen, p); err != nil {
 		return err
 	}
@@ -151,7 +151,7 @@ func applyUndo(dataDir string, chosen []journalEntry, p plan.Plan, yes bool, std
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		outcomes, runErr = engine.Run(ctx, p, stdout)
-		recordApply(dataDir, outcomes, viaUndo)
+		recordApply(dataDir, outcomes, viaUndo, stderr)
 	}
 	left, acked, saveErr := markProgress(dataDir, chosen, revertedBy(chosen, p, outcomes, runErr))
 	if err := errors.Join(runErr, saveErr); err != nil {

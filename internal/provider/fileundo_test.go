@@ -1,9 +1,13 @@
 package provider
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/zoolcoder/zc-care/internal/plan"
 )
 
 func TestDigestSeparatesParts(t *testing.T) {
@@ -34,5 +38,108 @@ func TestFileBeforeFollowsASymlinkAndKeepsTheMode(t *testing.T) {
 	}
 	if u, _ := FileBefore("p", filepath.Join(dir, "nope")); u.Verb != "remove" {
 		t.Fatalf("undo %+v", u)
+	}
+}
+
+// restoreRecord is the journal's view of a file the apply replaced: the saved
+// content in a blob file, the apply's result stamped in.
+func restoreRecord(t *testing.T, stamp bool) (plan.Undo, string) {
+	t.Helper()
+	dir := t.TempDir()
+	file := filepath.Join(dir, "conf")
+	blob := filepath.Join(dir, "blob")
+	for path, content := range map[string]string{blob: "old", file: "applied"} {
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u := SavedFileUndo("p", file, []byte("old"), 0o600)
+	u.Data["blob"] = blob
+	if stamp {
+		u = StampFileUndo(u)
+	}
+	return u, file
+}
+
+func runRevert(t *testing.T, u plan.Undo) error {
+	t.Helper()
+	return RevertFiles([]plan.Undo{u})[0].Do(context.Background())
+}
+
+func TestRevertRestoresAnUnchangedFile(t *testing.T) {
+	u, file := restoreRecord(t, true)
+	if err := runRevert(t, u); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(file); string(got) != "old" {
+		t.Fatalf("content %q", got)
+	}
+}
+
+func TestRevertRefusesAFileEditedAfterTheApply(t *testing.T) {
+	u, file := restoreRecord(t, true)
+	if err := os.WriteFile(file, []byte("my edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := runRevert(t, u)
+	if err == nil || !strings.Contains(err.Error(), file+" changed since the apply") {
+		t.Fatalf("err %v", err)
+	}
+	if got, _ := os.ReadFile(file); string(got) != "my edit" {
+		t.Fatalf("edit lost: %q", got)
+	}
+}
+
+func TestRevertWithoutADigestStillRestores(t *testing.T) {
+	u, file := restoreRecord(t, false)
+	if err := os.WriteFile(file, []byte("anything"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRevert(t, u); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(file); string(got) != "old" {
+		t.Fatalf("content %q", got)
+	}
+}
+
+func TestRevertRefusesWhenTheFolderIsGone(t *testing.T) {
+	u, file := restoreRecord(t, false)
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	blob := u.Data["blob"]
+	moved := filepath.Join(t.TempDir(), "blob")
+	if err := os.Rename(blob, moved); err != nil {
+		t.Fatal(err)
+	}
+	u.Data["blob"] = moved
+	u.Data["path"] = filepath.Join(filepath.Dir(file), "gone", "conf")
+	err := runRevert(t, u)
+	if err == nil || !strings.Contains(err.Error(), "its folder is gone") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestRevertRemoveRefusesAFileEditedAfterTheApply(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "new")
+	if err := os.WriteFile(file, []byte("applied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := StampFileUndo(NewFileUndo("p", file))
+	if err := os.WriteFile(file, []byte("edited"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRevert(t, u); err == nil {
+		t.Fatal("removed an edited file")
+	}
+	if err := os.WriteFile(file, []byte("applied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRevert(t, u); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); err == nil {
+		t.Fatal("file survived")
 	}
 }

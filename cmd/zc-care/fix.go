@@ -50,7 +50,7 @@ func fixPlan(results []security.Result, r sh.Runner) plan.Plan {
 // fixFindings plans the repairs for the failed checks, shows them, applies
 // them after a yes, and re-runs the checks it repaired. A finding with no
 // command stays advice in the report.
-func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, yes bool, stdin io.Reader, stdout io.Writer) error {
+func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, yes bool, stdin io.Reader, stdout, stderr io.Writer) error {
 	p := fixPlan(results, r)
 	if p.Empty() {
 		_, err := fmt.Fprintln(stdout, "\nnothing doctor can fix on its own; the rest is advice above")
@@ -65,7 +65,7 @@ func fixFindings(ctx context.Context, results []security.Result, r sh.Runner, ye
 	}
 	fmt.Fprintln(stdout)
 	outcomes, err := engine.Run(ctx, p, stdout)
-	recordApply("", outcomes, viaDoctor)
+	recordApply("", outcomes, viaDoctor, stderr)
 	unverified, failing := stillFailing(ctx, p, r)
 	err = errors.Join(err, failing)
 	for _, name := range unverified {

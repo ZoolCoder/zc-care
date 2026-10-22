@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -44,8 +46,36 @@ func liveSnapshot(ctx context.Context, configPath string, targets []string, stdi
 	}
 	host, _ := os.Hostname()
 	macOS, _ := sh.System().Output(ctx, "sw_vers", "-productVersion")
-	return newSnapshot(eng.Items(ctx), resolved, host, strings.TrimSpace(string(macOS)),
-		time.Now().UTC().Format(time.RFC3339)), nil
+	s := newSnapshot(eng.Items(ctx), resolved, host, strings.TrimSpace(string(macOS)),
+		time.Now().UTC().Format(time.RFC3339))
+	s.Config, s.Selection = absConfig(configPath), slices.Clone(targets)
+	return s, nil
+}
+
+// absConfig is the absolute path of the config file; "" for standard input.
+func absConfig(path string) string {
+	if path == "-" {
+		return ""
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	return abs
+}
+
+// liveSide is the config and targets the live side of a diff reads: those the
+// snapshot was taken with, unless -config was given. It warns when the config
+// is not the snapshot's own.
+func liveSide(a snapshot, configFlag string, stderr io.Writer) (string, []string) {
+	if configFlag == "" && a.Config != "" {
+		return a.Config, a.Selection
+	}
+	path := findConfig(configFlag)
+	if a.Config != "" && absConfig(path) != a.Config {
+		fmt.Fprintf(stderr, "warning: snapshot was taken from %s\n", a.Config)
+	}
+	return path, a.Selection
 }
 
 // runExport writes the snapshot of this Mac to stdout, or to the -o file.
@@ -89,6 +119,9 @@ func runDiff(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	files := flags.Args()
+	if err := rejectTrailingFlags("diff", files); err != nil {
+		return err
+	}
 	if len(files) < 1 || len(files) > 2 {
 		return errors.New("diff needs one or two snapshot files, from export")
 	}
@@ -104,7 +137,8 @@ func runDiff(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	} else {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		b, err = liveSnapshot(ctx, findConfig(*path), nil, stdin, stderr)
+		livePath, liveTargets := liveSide(a, *path, stderr)
+		b, err = liveSnapshot(ctx, livePath, liveTargets, stdin, stderr)
 	}
 	if err != nil {
 		return err

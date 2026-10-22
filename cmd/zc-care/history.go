@@ -29,7 +29,7 @@ func dataFolder(dataDir string) string {
 
 // recordApply writes one entry per target that ran an action: failed when
 // any of its actions failed, naming each with its own error.
-func recordApply(dataDir string, outcomes []engine.Outcome, via string) {
+func recordApply(dataDir string, outcomes []engine.Outcome, via string, stderr io.Writer) {
 	byTarget := map[string][]engine.Outcome{}
 	var order []string
 	for _, o := range outcomes {
@@ -41,13 +41,17 @@ func recordApply(dataDir string, outcomes []engine.Outcome, via string) {
 	log := activityLog(dataDir)
 	for _, t := range order {
 		detail, ok := applyDetail(byTarget[t], via)
-		_ = log.Append(activity.Entry{At: time.Now(), Kind: "apply", Target: t, Detail: detail, OK: ok})
+		if err := log.Append(activity.Entry{At: time.Now(), Kind: "apply", Target: t, Detail: detail, OK: ok}); err != nil {
+			fmt.Fprintf(stderr, "warning: activity log not written: %v\n", err)
+		}
 	}
 	// An undo is not itself undone: running it again would only redo. A
 	// doctor fix keeps no record either: it changes system settings undo
 	// cannot restore.
 	if via != viaUndo && via != viaDoctor {
-		_ = saveJournal(dataDir, outcomes, via)
+		if err := saveJournal(dataDir, outcomes, via); err != nil {
+			fmt.Fprintf(stderr, "warning: undo record not saved: %v\n", err)
+		}
 	}
 }
 

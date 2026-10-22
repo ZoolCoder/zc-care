@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/zoolcoder/zc-care/internal/config"
 	"github.com/zoolcoder/zc-care/internal/engine"
+	"github.com/zoolcoder/zc-care/internal/manifest"
 	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/sh"
 )
@@ -71,7 +73,8 @@ Exit codes:
   0  nothing to do, or the apply converged and was verified
   1  something failed
   2  with -exit-code: changes are outstanding
-  3  with -exit-code: nothing left but MANUAL items
+  3  with -exit-code: nothing left but MANUAL items; undo: nothing left but
+     MANUAL items, even without it
 
 Flags:
   -config string   config file, or "-" for standard input; default: $` + envConfig + `,
@@ -201,6 +204,32 @@ func dispatch(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	return fmt.Errorf("unknown command %q", cmd)
 }
 
+func isCommand(word string) bool {
+	switch word {
+	case "version", "help", "doctor", "upgrade", "history", "drift", "undo", "plan", "apply", "status", "list", "capture", "validate":
+		return true
+	}
+	_, ok := optional[word]
+	return ok
+}
+
+// rejectTrailingFlags fails when a flag follows an operand, where the flag
+// package no longer parses it: `remove brew:htop -yes` would drop -yes.
+func rejectTrailingFlags(cmd string, operands []string) error {
+	var flags, rest []string
+	for _, o := range operands {
+		if strings.HasPrefix(o, "-") && o != "-" {
+			flags = append(flags, o)
+		} else {
+			rest = append(rest, o)
+		}
+	}
+	if len(flags) == 0 {
+		return nil
+	}
+	return fmt.Errorf("flags go before NAME: %s %s %s", name, cmd, strings.Join(append(flags, rest...), " "))
+}
+
 func wantsHelp(args []string) bool {
 	return len(args) > 0 && slices.Contains([]string{"-h", "-help", "--help"}, args[0])
 }
@@ -234,6 +263,15 @@ func parseCLIFlags(cmd string, args []string, stderr io.Writer) (cliFlags, error
 	flags.Var(&f.targets, "target", "limit to this target")
 	flags.Var(&f.only, "only", "only the change to this resource")
 	if err := flags.Parse(args); err != nil {
+		return f, err
+	}
+	// With flags first the command is the default plan, and `-yes apply`
+	// would leave apply an ignored operand: nothing applied, exit 0.
+	if isCommand(flags.Arg(0)) {
+		rest := slices.DeleteFunc(slices.Clone(args), func(a string) bool { return a == flags.Arg(0) })
+		return f, fmt.Errorf("put flags after the subcommand: %s %s %s", name, flags.Arg(0), strings.Join(rest, " "))
+	}
+	if err := rejectTrailingFlags(cmd, flags.Args()); err != nil {
 		return f, err
 	}
 	f.path = findConfig(f.path)
@@ -355,7 +393,7 @@ func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.
 			return errors.New("this plan deletes things, overwrites outside edits or values undo cannot restore, or runs scripts, and the config came from stdin; pass -yes to confirm")
 		}
 		if !confirm(stdin, log, destructiveWhy) {
-			return errCancelled
+			return errors.Join(f.writeCancelled(stdout), errCancelled)
 		}
 	}
 	fmt.Fprintln(log)
@@ -364,7 +402,7 @@ func runApply(ctx context.Context, eng *engine.Engine, p plan.Plan, saved *plan.
 		apply = eng.ApplyFollowing
 	}
 	outcomes, err := apply(ctx, p, log)
-	recordApply("", outcomes, f.via)
+	recordApply("", outcomes, f.via, stderr)
 	return errors.Join(f.writeApplied(stdout, p, outcomes, err), err)
 }
 
@@ -534,14 +572,17 @@ func findConfig(flagValue string) string {
 }
 
 func savePlan(s plan.Saved, path string) error {
+	var buf bytes.Buffer
+	if err := s.Write(&buf); err != nil {
+		return err
+	}
 	// 0600: a plan names paths and resources, which is nobody else's
-	// business on a shared machine.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
-	if err != nil {
+	// business on a shared machine. Through a temp file, so a failed write
+	// leaves the old plan whole.
+	if err := manifest.WriteFile(path, buf.Bytes(), 0o600); err != nil {
 		return fmt.Errorf("save plan: %w", err)
 	}
-	defer func() { _ = f.Close() }()
-	return s.Write(f)
+	return nil
 }
 
 func readSavedPlan(path string) (plan.Saved, error) {

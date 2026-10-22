@@ -26,6 +26,9 @@ func runRemove(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := rejectTrailingFlags("remove", flags.Args()); err != nil {
+		return err
+	}
 	if *item == "" {
 		*item = flags.Arg(0)
 	}

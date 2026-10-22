@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/zoolcoder/toolshell/doctor"
 	"github.com/zoolcoder/zc-care/internal/config"
@@ -37,6 +39,8 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return errors.New("-fix prints a plan and asks; it cannot also be -json")
 	}
 	*path = findConfig(*path)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	r := doctor.New(version)
 	r.AddCheck(doctor.Binary(name))
@@ -88,7 +92,7 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if !*fix {
 		return reportErr
 	}
-	return errors.Join(reportErr, fixFindings(context.Background(), found, sh.System(), *yes, stdin, stdout))
+	return errors.Join(reportErr, fixFindings(ctx, found, sh.System(), *yes, stdin, stdout, stderr))
 }
 
 // addShadows checks that the shell runs each tools target's commands from

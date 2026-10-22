@@ -37,6 +37,9 @@ func runSkip(args []string, _ io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 	items := flags.Args()
+	if err := rejectTrailingFlags("skip", items); err != nil {
+		return err
+	}
 	for _, i := range items {
 		if kind, n, ok := strings.Cut(i, ":"); !ok || kind == "" || n == "" {
 			return fmt.Errorf("%q is not kind:name, such as cask:ghostty", i)

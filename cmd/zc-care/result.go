@@ -24,6 +24,9 @@ type applyResult struct {
 	Failed      []applyChange `json:"failed"`
 	Outstanding []applyChange `json:"outstanding"`
 	Verified    bool          `json:"verified"`
+	// Cancelled is set when the person declined the confirmation, so
+	// nothing ran.
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 // writeApplied prints the -json result of an apply; without -json it prints
@@ -46,6 +49,15 @@ func (f cliFlags) writeApplied(w io.Writer, p plan.Plan, outcomes []engine.Outco
 	}
 	r.Verified = runErr == nil && len(r.Outstanding) == 0
 	return writeJSON(w, r)
+}
+
+// writeCancelled prints the -json result of an apply the person declined:
+// nothing applied, so nothing verified.
+func (f cliFlags) writeCancelled(w io.Writer) error {
+	if !f.asJSON {
+		return nil
+	}
+	return writeJSON(w, applyResult{Applied: []applyChange{}, Failed: []applyChange{}, Outstanding: []applyChange{}, Cancelled: true})
 }
 
 // validateResult is what validate -json prints.

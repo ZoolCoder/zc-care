@@ -40,7 +40,7 @@ func TestPartialFailureIsRecordedPerTarget(t *testing.T) {
 		{Target: "pkgs", Resource: "jq"},
 		{Target: "pkgs", Resource: "wget", Err: errors.New("no bottle")},
 		{Target: "dots", Resource: ".zshrc"},
-	}, "the terminal")
+	}, "the terminal", io.Discard)
 	entries, err := activityLog("").Recent(10)
 	if err != nil || len(entries) != 2 {
 		t.Fatalf("entries %v: %+v", err, entries)
