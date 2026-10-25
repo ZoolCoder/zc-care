@@ -61,6 +61,8 @@ struct DeveloperView: View {
                         }
                     }
                     if !care.xcodeSpots.isEmpty { xcode }
+                    SimulatorRuntimesSection(care: care)
+                    AndroidSection(care: care)
                     if let usage = care.docker, !usage.isEmpty {
                         docker(usage)
                     } else if care.docker == nil, care.scannedDeveloper, dockerInstalled {
