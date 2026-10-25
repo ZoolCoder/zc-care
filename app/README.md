@@ -109,7 +109,7 @@ Click the mark, or press ⌃⌥Z, to open the panel.
 |---|---|
 | Mac | Disk, memory, CPU, battery, network and sensors, the largest junk folders, and advice. |
 | Overview | Each target with what is in place and missing, and *Apply* per target. |
-| Updates | Outdated packages and runtimes, with *Update* per item and *Update All…*. |
+| Updates | macOS updates from Software Update, with *Open Software Update*; outdated packages and runtimes, with *Update* per item and *Update All…*. |
 | Health | `doctor` findings, with *Fix*, *Copy Fix* and *Ignore*. |
 | Services | Homebrew services and launchd agents, with *Start*, *Run Now* and logs. |
 
@@ -133,13 +133,13 @@ ZC Care sends it the count of open items for its `zccare` item.
 |---|---|
 | Smart Care | Scans everything at once: junk, clutter, updates, health. *Run* cleans up, then updates. |
 | Cleanup | Clears caches, logs, build output, npx packages and Mail downloads. Clears AI clutter: Claude Code temp files and old versions, and the caches and logs of Claude, Cursor, ChatGPT, Windsurf, Codex, Gemini CLI and Chrome DevTools MCP. Empties the Trash. |
-| Protection | Shows Gatekeeper's verdict per app, background apps, the privacy permissions apps hold, and each browser's history, cookies and cache, cleared only while that browser is closed. |
-| Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin Time Machine snapshots, reindex Spotlight, clean Homebrew, Docker and simulators. |
+| Protection | Shows Gatekeeper's verdict per app, background apps, extensions (Safari, Finder, Share, Quick Look, Spotlight, Notification Center, Action, Photos and system extensions, with host app, state, and a flag when the host app is gone or the developer unidentified), the privacy permissions apps hold, and each browser's history, cookies and cache, cleared only while that browser is closed. |
+| Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin Time Machine snapshots, reindex Spotlight, clean Homebrew, Docker and simulators. Top processes by CPU or memory with *Quit* and *Force Quit*; ZC Care, system daemons and other users' processes cannot be quit. |
 | Applications | Uninstalls an app with what it keeps in the Library. *Adopt* replaces a hand-installed app with its Homebrew cask. Finds leftovers of removed apps. |
 | My Clutter | Finds large files, duplicates, similar images (Vision keeps the one with the most pixels), old downloads and installers. |
 | Space Lens | Maps what fills your home folder. |
 | Cloud Cleanup | Lists the files cloud drives keep downloaded; *Remove Download* frees them and keeps them in the cloud. |
-| Developer | Finds `node_modules` and virtualenvs of projects untouched for 90 days, and local models from Ollama, LM Studio and Hugging Face. |
+| Developer | Finds `node_modules` and virtualenvs of projects untouched for 90 days, and local models from Ollama, LM Studio and Hugging Face. Simulator runtimes with *Delete* (permanent, Xcode downloads them again), and Android system images and AVDs with *Show in Finder*. |
 | My Tools | Lists every tool as a searchable card, including *Screen Cleaning Mode*. |
 | My Activity | Shows Mac health, disk use, what ZC Care freed by kind, recommendations and recent runs. |
 
