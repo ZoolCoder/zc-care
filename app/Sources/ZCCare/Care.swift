@@ -79,6 +79,12 @@ final class Care {
     /// Caches, logs, temp files and old versions AI tools leave.
     var aiJunk: [AIJunk] = []
     var scanningAI = false
+    /// Preference files macOS cannot read, attachments Mail keeps beside
+    /// online mail, and the Trash of each volume, for Cleanup.
+    var brokenPrefs: [LargeFile] = []
+    var mailAttachments: [LargeFile] = []
+    var trashBins: [TrashBin] = []
+    var scanningCleanup = false
     var scanningDeveloper = false
     /// Whether a developer scan has finished: before one, a nil `docker`
     /// means unknown, not down.
@@ -128,6 +134,8 @@ final class Care {
     /// Duplicates are looked for from this size up: hashing smaller files
     /// costs more than they waste.
     nonisolated static let duplicateFile: Int64 = 10_000_000
+    /// Mail attachments under this are not worth the row.
+    nonisolated static let mailAttachment: Int64 = 1_000_000
 
     init(store: Store) {
         self.store = store
@@ -207,7 +215,8 @@ final class Care {
         case .cleanup:
             async let junk: Void = monitor.scan()
             async let ai: Void = scanAI()
-            _ = await (junk, ai)
+            async let rest: Void = scanCleanup()
+            _ = await (junk, ai, rest)
         case .clutter: await scanFiles()
         case .developer: await scanDeveloper()
         case .apps: await loadApps()
@@ -464,6 +473,8 @@ final class Care {
     private func forget(_ ids: Set<String>) {
         largeFiles.removeAll { ids.contains($0.id) }
         oldDownloads.removeAll { ids.contains($0.id) }
+        brokenPrefs.removeAll { ids.contains($0.id) }
+        mailAttachments.removeAll { ids.contains($0.id) }
         diskImages.removeAll { ids.contains($0.id) }
         dependencies.removeAll { ids.contains($0.id) }
         duplicates = duplicates.compactMap { group in
@@ -796,6 +807,49 @@ final class Care {
             AIClutter.find(home: home, claudeTemp: temp, open: open, commands: commands)
         }.value
         applyIgnoreList()
+    }
+
+    /// Reads what Cleanup lists beside the junk folders.
+    func scanCleanup() async {
+        guard !scanningCleanup else { return }
+        scanningCleanup = true
+        defer { scanningCleanup = false }
+        let home = NSHomeDirectory()
+        let minimum = Self.mailAttachment
+        (brokenPrefs, mailAttachments, trashBins) = await Task.detached(priority: .utility) {
+            (BrokenPreferences.find(home: home), MailAttachments.find(home: home, minimum: minimum),
+             TrashBins.find(home: home, volumes: TrashBins.mountedVolumes()))
+        }.value
+        applyIgnoreList()
+    }
+
+    /// Clears every junk folder Clean All covers, after a look at the list.
+    func cleanAll() async {
+        guard store.busy == nil, !removing, !monitor.scanning else { return }
+        removing = true
+        defer { removing = false }
+        let spots = store.spotsToCleanAll
+        guard !spots.isEmpty else { return }
+        let items = spots.map { spot in
+            ReviewItem(id: spot.id, name: spot.title, detail: (spot.path as NSString).abbreviatingWithTildeInPath,
+                       size: monitor.junk[spot.id] ?? 0, icon: NSWorkspace.shared.icon(forFile: spot.path))
+        }
+        let review = Review(title: "Clean up \(Store.bytes(items.reduce(0) { $0 + $1.size }))?",
+                            note: "All of it comes back on its own when needed.", items: items, button: "Clean Up")
+        guard await confirm(review), store.busy == nil, !monitor.scanning else { return }
+        store.busy = "Cleaning up"
+        defer { store.busy = nil }
+        let (log, trashed) = await store.clean(spots, title: "System Junk")
+        finish(log, kind: .junk, trashed: trashed)
+    }
+
+    /// Mail must be closed first: it writes an attachment back from its
+    /// own index as long as it runs.
+    func trashMailAttachments(_ files: [LargeFile]) async {
+        guard store.busy == nil, !removing else { return }
+        let mail = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.mail")
+        guard await closed(mail, toDo: "remove \(Store.counted(files.count, "attachment"))") else { return }
+        await trashFiles(files, title: "Mail Attachments")
     }
 
     /// Clears the picked junk as Cleanup clears caches: each tool makes it
