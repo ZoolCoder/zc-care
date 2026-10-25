@@ -13,14 +13,14 @@ struct PanelView: View {
             if let problem = store.setupProblem {
                 SetupCard(problem: problem, setup: store.needsConfig ? store.openSetup : nil, choose: store.chooseConfig)
             } else if let snapshot = store.snapshot {
-                Tabs(store: store, snapshot: snapshot)
+                Tabs(store: store, snapshot: snapshot, system: store.system)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(snapshot.errors, id: \.self) { Text($0).font(.caption).foregroundStyle(Theme.bad) }
                         switch store.tab {
                         case .mac: MacTab(store: store, snapshot: snapshot)
                         case .overview: OverviewTab(store: store, snapshot: snapshot)
-                        case .updates: UpdatesTab(store: store, items: snapshot.outdated)
+                        case .updates: UpdatesTab(store: store, system: store.system, items: snapshot.outdated)
                         case .health: HealthTab(store: store)
                         case .services: ServicesTab(store: store, services: snapshot.services)
                         }
@@ -39,6 +39,8 @@ struct PanelView: View {
         .frame(width: 430)
         .themed()
         .onAppear { store.refreshIfStale() }
+        // Not .task: closing the panel would cancel a check that takes up to 40 s.
+        .onAppear { Task { await store.system.refreshIfStale() } }
     }
 }
 
@@ -105,6 +107,7 @@ private struct Header: View {
 private struct Tabs: View {
     @Bindable var store: Store
     let snapshot: Snapshot
+    let system: SystemUpdates
 
     var body: some View {
         HStack(spacing: 4) {
@@ -136,7 +139,7 @@ private struct Tabs: View {
         switch tab {
         case .mac: store.monitor.vitals.concerns(insecure: 0).count
         case .overview: snapshot.targets.map(\.gaps).reduce(0, +)
-        case .updates: snapshot.outdated.count
+        case .updates: snapshot.outdated.count + system.updates.count
         case .health: store.findings.count
         case .services: snapshot.services.filter { !$0.isRunning }.count
         }
@@ -445,34 +448,72 @@ private struct PlanSection: View {
 
 // MARK: Updates
 
+/// What `softwareupdate -l` found, kept for six hours: it asks Apple's
+/// servers and takes up to 40 seconds.
+@MainActor @Observable
+final class SystemUpdates {
+    private(set) var updates: [MacUpdate] = []
+    private(set) var checking = false
+    private(set) var failure: String?
+    /// When the last check answered; a failed check leaves it, so the next open tries again.
+    private(set) var checkedAt: Date?
+
+    func refreshIfStale() async {
+        if let checkedAt, Date.now.timeIntervalSince(checkedAt) < 6 * 3600 { return }
+        await check()
+    }
+
+    func check() async {
+        guard !checking else { return }
+        checking = true
+        defer { checking = false }
+        do {
+            updates = try await MacUpdate.list()
+            failure = nil
+            checkedAt = .now
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+}
+
 private struct UpdatesTab: View {
     let store: Store
+    let system: SystemUpdates
     let items: [Item]
     @State private var filter = ""
 
     var body: some View {
-        if items.isEmpty {
-            EmptyNote(text: "Everything is up to date.")
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    if items.count > 6 {
-                        TextField("Filter", text: $filter)
-                            .textFieldStyle(.roundedBorder)
-                            .controlSize(.small)
-                    } else {
-                        Spacer()
-                    }
-                    Button("Update All…") { Task { await store.updateAll() } }
+        VStack(alignment: .leading, spacing: 10) {
+            MacUpdatesSection(system: system)
+            if !items.isEmpty {
+                cliUpdates
+            } else {
+                EmptyNote(text: "Packages and runtimes are up to date.")
+            }
+        }
+    }
+
+    /// "Update All…" applies these items only; macOS updates need Software Update.
+    private var cliUpdates: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                if items.count > 6 {
+                    TextField("Filter", text: $filter)
+                        .textFieldStyle(.roundedBorder)
                         .controlSize(.small)
-                        .disabled(store.busy != nil)
+                } else {
+                    Spacer()
                 }
-                ForEach(groups, id: \.0) { title, group in
-                    VStack(alignment: .leading, spacing: 4) {
-                        SectionTitle(title: title, count: group.count)
-                        ListCard {
-                            ForEach(group) { item in UpdateRow(store: store, item: item) }
-                        }
+                Button("Update All…") { Task { await store.updateAll() } }
+                    .controlSize(.small)
+                    .disabled(store.busy != nil)
+            }
+            ForEach(groups, id: \.0) { title, group in
+                VStack(alignment: .leading, spacing: 4) {
+                    SectionTitle(title: title, count: group.count)
+                    ListCard {
+                        ForEach(group) { item in UpdateRow(store: store, item: item) }
                     }
                 }
             }
@@ -488,6 +529,79 @@ private struct UpdatesTab: View {
             (rank.firstIndex(of: $0) ?? rank.count, $0) < (rank.firstIndex(of: $1) ?? rank.count, $1)
         }
         return kinds.map { kind in (titles[kind] ?? kind.capitalized, shown.filter { $0.kind == kind }) }
+    }
+}
+
+/// macOS updates are installed in Software Update, which needs a password
+/// and a restart: the button opens it.
+private struct MacUpdatesSection: View {
+    let system: SystemUpdates
+    private static let softwareUpdate = URL(string: "x-apple.systempreferences:com.apple.Software-Update-Settings.extension")!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SectionTitle(title: "macOS", count: system.updates.isEmpty ? nil : system.updates.count)
+                Spacer()
+                if system.checking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Check Again") { Task { await system.check() } }
+                        .buttonStyle(.zcLink).font(.caption)
+                }
+                if !system.updates.isEmpty {
+                    Button("Open Software Update") { NSWorkspace.shared.open(Self.softwareUpdate) }
+                        .controlSize(.small)
+                }
+            }
+            if let failure = system.failure {
+                Text("Could not check for macOS updates: \(failure)")
+                    .font(.caption).foregroundStyle(Theme.bad).lineLimit(1).help(failure)
+            } else if system.updates.isEmpty, !system.checking, let checkedAt = system.checkedAt {
+                Text("Up to date, checked \(checkedAt.formatted(date: .omitted, time: .shortened)).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !system.updates.isEmpty {
+                ListCard {
+                    ForEach(system.updates) { update in MacUpdateRow(update: update) }
+                }
+            }
+        }
+    }
+}
+
+private struct MacUpdateRow: View {
+    let update: MacUpdate
+
+    var body: some View {
+        HStack(spacing: 10) {
+            SymbolTile(symbol: "arrow.down.circle.fill", colors: Tint.blue)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(update.title).lineLimit(1)
+                Text(detail).font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if let flag {
+                Text(flag)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(update.restart ? Theme.warning.opacity(0.85) : .white.opacity(0.25)))
+                    .foregroundStyle(.white)
+            }
+        }
+        .modifier(Hover())
+        .help(update.label)
+    }
+
+    private var detail: String {
+        let size = update.sizeKiB.map { ByteCountFormatter.string(fromByteCount: Int64($0) * 1024, countStyle: .file) }
+        return [update.version, size].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var flag: String? {
+        if update.restart { return "Restart" }
+        return update.recommended ? "Recommended" : nil
     }
 }
 

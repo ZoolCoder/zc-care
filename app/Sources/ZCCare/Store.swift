@@ -35,6 +35,8 @@ final class Store {
     var tab: Tab = .mac
     /// Disk, memory, CPU and the rest, for the Mac tab.
     let monitor = Monitor()
+    /// One check shared by every panel view, so two views do not ask Apple twice.
+    let system = SystemUpdates()
     /// The Mac tab's open tile: what Free Up clears, or the busiest apps.
     var macDetail: MacDetail? {
         didSet {
