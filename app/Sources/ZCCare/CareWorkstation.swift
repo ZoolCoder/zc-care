@@ -36,6 +36,7 @@ struct MyWorkstation: View {
                         }
                     }
                     .modifier(Glass())
+                    NotInConfig(store: store, items: undeclared(), targets: targets)
                     Inventory(items: store.inventory ?? [], search: $search)
                     History(entries: store.history)
                 }
@@ -50,6 +51,10 @@ struct MyWorkstation: View {
     private func refresh(_ store: Store) async {
         await store.refresh()
         if store.workstationError != nil { await store.loadWorkstation() }
+    }
+
+    private func undeclared() -> [Item] {
+        (care.store.inventory ?? []).filter { $0.state == "not declared" }
     }
 
     private func items(of target: String) -> [Item] {
@@ -145,6 +150,146 @@ private struct TargetRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// Item kinds each provider can write into its manifest with `add`.
+private let addableKinds: [String: Set<String>] = [
+    "packages": ["brew", "cask", "mas"],
+    "tools": ["runtime"],
+]
+
+/// A batch waiting for its why line.
+private struct PendingAdd: Identifiable {
+    let id = UUID()
+    let target: String
+    let items: [Item]
+}
+
+private struct NotInConfig: View {
+    let store: Store
+    let items: [Item]
+    let targets: [TargetStatus]
+    @State private var selected: Set<String> = []
+    @State private var pending: PendingAdd?
+
+    var body: some View {
+        let groups = addable
+        if !groups.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Not in Your Config").font(.headline)
+                    Text("\(groups.map(\.items.count).reduce(0, +))").font(.callout).foregroundStyle(.secondary)
+                    Spacer()
+                    let batch = nextBatch(groups)
+                    Button(batch.map { "Add \($0.items.count) to \($0.target)…" } ?? "Add Selected…") { pending = batch }
+                        .disabled(store.busy != nil || batch == nil)
+                }
+                Text("Installed on this Mac, but no target declares them.").font(.caption).foregroundStyle(.secondary)
+                ForEach(groups, id: \.target) { group in
+                    Text(group.target).font(.subheadline.weight(.medium)).padding(.top, 4)
+                    ForEach(group.items) { item in row(item, target: group.target) }
+                }
+            }
+            .modifier(Glass())
+            .sheet(item: $pending) { batch in
+                WhySheet(batch: batch) { why, section in
+                    pending = nil
+                    Task { await add(batch, why: why, section: section) }
+                } cancel: { pending = nil }
+            }
+        }
+    }
+
+    private func row(_ item: Item, target: String) -> some View {
+        HStack(spacing: 8) {
+            Toggle("", isOn: binding(for: key(target, item))).labelsHidden().toggleStyle(.checkbox)
+            Text(item.app ?? item.name).font(.callout).lineLimit(1)
+            Text(item.kind).font(.caption2).foregroundStyle(.secondary)
+            Spacer()
+            if let version = item.version { Text(version).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+            Button("Add to Config…") { pending = PendingAdd(target: target, items: [item]) }
+                .controlSize(.small)
+                .disabled(store.busy != nil)
+        }
+    }
+
+    /// Undeclared items grouped by the target whose provider can add them.
+    private var addable: [(target: String, items: [Item])] {
+        targets.compactMap { t in
+            guard let kinds = addableKinds[t.provider] else { return nil }
+            let mine = items.filter { $0.target == t.target && kinds.contains($0.kind) }
+            return mine.isEmpty ? nil : (t.target, mine)
+        }
+    }
+
+    private func key(_ target: String, _ item: Item) -> String { target + "|" + item.resource }
+
+    private func binding(for key: String) -> Binding<Bool> {
+        Binding(get: { selected.contains(key) },
+                set: { if $0 { selected.insert(key) } else { selected.remove(key) } })
+    }
+
+    private func chosen(in groups: [(target: String, items: [Item])]) -> [(target: String, item: Item)] {
+        groups.flatMap { g in g.items.filter { selected.contains(key(g.target, $0)) }.map { (g.target, $0) } }
+    }
+
+    /// The selected items of the first target that has any: the CLI adds into
+    /// one manifest at a time, and the rest stay ticked for the next click.
+    private func nextBatch(_ groups: [(target: String, items: [Item])]) -> PendingAdd? {
+        let picks = chosen(in: groups)
+        guard let target = picks.first?.target else { return nil }
+        return PendingAdd(target: target, items: picks.filter { $0.target == target }.map(\.item))
+    }
+
+    private func add(_ batch: PendingAdd, why: String, section: String) async {
+        guard store.busy == nil, let cli = store.cli else { return }
+        let label = batch.items.count == 1 ? batch.items[0].resource : "\(batch.items.count) items"
+        store.busy = "Adding \(label)"
+        defer { store.busy = nil }
+        var added = 0
+        do {
+            for item in batch.items {
+                try await cli.add(target: batch.target, item: item, why: why, section: section)
+                selected.remove(key(batch.target, item))
+                added += 1
+            }
+        } catch {
+            let progress = batch.items.count > 1 ? " (\(added) of \(batch.items.count) added)" : ""
+            store.message = Store.Message(text: "Could not add to \(batch.target)\(progress): \(error.localizedDescription)", failed: true)
+            if added > 0 { await store.configChanged() }
+            return
+        }
+        store.message = Store.Message(text: "Added \(label) to \(batch.target).", failed: false)
+        await store.configChanged()
+    }
+}
+
+private struct WhySheet: View {
+    let batch: PendingAdd
+    let confirm: (_ why: String, _ section: String) -> Void
+    let cancel: () -> Void
+    @State private var why = "Added from this Mac by ZC Care"
+    @State private var section = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(batch.items.count == 1 ? "Add \(batch.items[0].resource) to \(batch.target)?"
+                                        : "Add \(batch.items.count) items to \(batch.target)?")
+                .font(.headline)
+            Text(Alerts.lines(batch.items.map(\.resource), max: 6)).font(.caption).foregroundStyle(.secondary)
+            TextField("Why it is there", text: $why)
+            TextField("Section (optional)", text: $section)
+            HStack {
+                Spacer()
+                Button("Cancel", action: cancel).keyboardShortcut(.cancelAction)
+                Button("Add") { confirm(why.trimmingCharacters(in: .whitespaces), section.trimmingCharacters(in: .whitespaces)) }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(why.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
     }
 }
 

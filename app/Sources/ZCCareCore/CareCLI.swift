@@ -306,6 +306,16 @@ public struct CareCLI: Sendable {
         if r.status != 0 { throw CLIError(message: lastLine(r.stderr) ?? "skip exited \(r.status)") }
     }
 
+    /// Declares an item this Mac has in the target's manifest, and returns
+    /// the CLI's confirmation line.
+    @discardableResult
+    public func add(target: String, item: Item, why: String, section: String = "") async throws -> String {
+        let args = ["add", "-target", target, "-why", why] + (section.isEmpty ? [] : ["-section", section]) + [item.resource]
+        let r = try await run(args)
+        if r.status != 0 { throw CLIError(message: lastLine(r.stderr) ?? "add exited \(r.status)") }
+        return lastLine(r.output) ?? "added \(item.resource) to \(target)"
+    }
+
     /// Reads everything at once; a part that fails leaves an error, not a
     /// blank menu.
     public func snapshot() async -> Snapshot {
