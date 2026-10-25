@@ -22,10 +22,7 @@ struct DeveloperView: View {
                         }
                         ForEach(care.dependencies) { dep in
                             HStack(spacing: 10) {
-                                Toggle("", isOn: Binding(get: { picked.contains(dep.id) },
-                                                         set: { on in if on { picked.insert(dep.id) } else { picked.remove(dep.id) } }))
-                                    .toggleStyle(.checkbox)
-                                    .labelsHidden()
+                                PickBox(id: dep.id, picked: $picked)
                                 CareRow(icon: SymbolTile(symbol: "shippingbox.fill", colors: Tint.orange, size: 32),
                                     title: dep.url.deletingLastPathComponent().lastPathComponent + "/" + dep.name,
                                     detail: (dep.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
@@ -41,23 +38,11 @@ struct DeveloperView: View {
                             .padding(.leading, 8)
                         }
                         if !care.dependencies.isEmpty {
-                            HStack {
-                                Text("node_modules, Python virtualenvs and Rust or Maven target folders; an install brings them back.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Button(picked.count == care.dependencies.count ? "Select None" : "Select All") {
-                                    picked = picked.count == care.dependencies.count ? [] : Set(care.dependencies.map(\.id))
-                                }
-                                .controlSize(.small)
-                                Button(care.store.deletesPermanently ? "Delete \(picked.count)" : "Move \(picked.count) to Trash") {
-                                    Task {
-                                        await care.trashDependencies(care.dependencies.filter { picked.contains($0.id) })
-                                    }
-                                }
-                                .controlSize(.small)
-                                .disabled(picked.isEmpty || care.store.busy != nil)
+                            PickBar(store: care.store, ids: care.dependencies.map(\.id), picked: $picked,
+                                    size: care.dependencies.filter { picked.contains($0.id) }.reduce(0) { $0 + $1.size },
+                                    note: "node_modules, Python virtualenvs and Rust or Maven target folders; an install brings them back.") {
+                                Task { await care.trashDependencies(care.dependencies.filter { picked.contains($0.id) }) }
                             }
-                            .padding(10)
                         }
                     }
                     if !care.xcodeSpots.isEmpty { xcode }
@@ -96,7 +81,6 @@ struct DeveloperView: View {
                 .padding(.bottom, 70)
             }
         }
-        .onChange(of: care.dependencies.map(\.id)) { _, ids in picked.formIntersection(ids) }
     }
 
     private var xcode: some View {

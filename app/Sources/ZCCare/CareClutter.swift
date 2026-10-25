@@ -19,7 +19,7 @@ struct ClutterView: View {
                         if care.largeFiles.isEmpty {
                             empty("No file over \(Store.bytes(Care.largeFile)) outside Library.")
                         }
-                        ForEach(care.largeFiles) { FileRow(care: care, file: $0) }
+                        FileList(care: care, files: care.largeFiles, title: "Large Files")
                     }
                     CareSection("Duplicates") {
                         if care.duplicates.isEmpty {
@@ -82,13 +82,13 @@ struct ClutterView: View {
                         if care.oldDownloads.isEmpty {
                             empty("Nothing in Downloads older than 30 days.")
                         }
-                        ForEach(care.oldDownloads) { FileRow(care: care, file: $0, dateLabel: "added") }
+                        FileList(care: care, files: care.oldDownloads, title: "Old Downloads", dateLabel: "added")
                     }
                     CareSection("Installers") {
                         if care.diskImages.isEmpty {
                             empty("No disk images or packages in Downloads or on the Desktop.")
                         }
-                        ForEach(care.diskImages) { FileRow(care: care, file: $0, dateLabel: "added") }
+                        FileList(care: care, files: care.diskImages, title: "Installers", dateLabel: "added")
                     }
                 }
                 .padding(.horizontal, 28)
@@ -100,5 +100,30 @@ struct ClutterView: View {
     private func empty(_ text: String, looking: String? = nil) -> some View {
         Text(care.scanningFiles ? "Looking through your home folder…" : looking ?? text)
             .foregroundStyle(.secondary).padding(10)
+    }
+}
+
+/// Files with a checkbox each, and a bar to remove what is picked.
+private struct FileList: View {
+    @Bindable var care: Care
+    let files: [LargeFile]
+    let title: String
+    var dateLabel = "modified"
+    @State private var picked: Set<String> = []
+
+    var body: some View {
+        ForEach(files) { file in
+            HStack(spacing: 10) {
+                PickBox(id: file.id, picked: $picked)
+                FileRow(care: care, file: file, dateLabel: dateLabel)
+            }
+            .padding(.leading, 8)
+        }
+        if !files.isEmpty {
+            PickBar(store: care.store, ids: files.map(\.id), picked: $picked,
+                    size: files.filter { picked.contains($0.id) }.reduce(0) { $0 + $1.size }) {
+                Task { await care.trashFiles(files.filter { picked.contains($0.id) }, title: title) }
+            }
+        }
     }
 }

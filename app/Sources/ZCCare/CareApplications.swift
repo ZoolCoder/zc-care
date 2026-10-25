@@ -171,10 +171,7 @@ private struct LeftoverList: View {
                     }
                     ForEach(orphans) { o in
                         HStack(spacing: 10) {
-                            Toggle("", isOn: Binding(get: { picked.contains(o.id) },
-                                                     set: { on in if on { picked.insert(o.id) } else { picked.remove(o.id) } }))
-                                .toggleStyle(.checkbox)
-                                .labelsHidden()
+                            PickBox(id: o.id, picked: $picked)
                             CareRow(icon: SymbolTile(symbol: "folder.badge.questionmark", colors: Tint.gray, size: 32),
                                 title: o.bundleID,
                                 detail: o.paths.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · "),
@@ -188,20 +185,11 @@ private struct LeftoverList: View {
                         }
                         .padding(.leading, 8)
                     }
-                    HStack {
-                        Text("Named for apps macOS no longer knows. Check before removing: a command-line tool may still use its settings.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button(care.store.deletesPermanently ? "Delete \(picked.count)" : "Move \(picked.count) to Trash") {
-                            Task {
-                                await care.trashOrphans(orphans.filter { picked.contains($0.id) })
-                                picked.formIntersection(care.orphans?.map(\.id) ?? [])
-                            }
-                        }
-                        .controlSize(.small)
-                        .disabled(picked.isEmpty || care.store.busy != nil)
+                    PickBar(store: care.store, ids: orphans.map(\.id), picked: $picked,
+                            size: orphans.filter { picked.contains($0.id) }.reduce(0) { $0 + $1.size },
+                            note: "Named for apps macOS no longer knows. Check before removing: a command-line tool may still use its settings.") {
+                        Task { await care.trashOrphans(orphans.filter { picked.contains($0.id) }) }
                     }
-                    .padding(10)
                 } else {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
