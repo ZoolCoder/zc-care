@@ -59,6 +59,7 @@ struct ProtectionView: View {
                         }
                         .padding(10)
                     }
+                    ExtensionsSection()
                     CareSection("Browser Privacy") {
                         if let traces = care.browserTraces {
                             if traces.isEmpty {
