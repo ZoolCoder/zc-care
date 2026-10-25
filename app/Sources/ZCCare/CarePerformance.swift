@@ -7,6 +7,7 @@ import ZCCareCore
 struct PerformanceView: View {
     @Bindable var care: Care
     @State private var order = Monitor.Order.cpu
+    @State private var showMore = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,6 +64,7 @@ struct PerformanceView: View {
                         HStack {
                             Text("Top Processes").font(.title3.weight(.semibold))
                             Spacer()
+                            Toggle("Show 25", isOn: $showMore).toggleStyle(.checkbox).controlSize(.small)
                             Picker("", selection: $order) {
                                 Text("CPU").tag(Monitor.Order.cpu)
                                 Text("Memory").tag(Monitor.Order.memory)
@@ -74,9 +76,9 @@ struct PerformanceView: View {
                         VStack(spacing: 0) {
                             ForEach(care.monitor.top) { p in
                                 CareRow(icon: SymbolTile(symbol: "cpu", colors: Tint.violet, size: 32),
-                                    title: p.name, detail: "pid \(p.pid)",
+                                    title: p.name, detail: processDetail(p),
                                     value: order == .cpu ? String(format: "%.0f%% CPU", p.cpu) : Store.bytes(p.memory, .memory)) {
-                                    EmptyView()
+                                    ProcessControls(care: care, proc: p)
                                 }
                             }
                         }
@@ -91,12 +93,65 @@ struct PerformanceView: View {
         }
         .onAppear { if care.maintenance.isEmpty { care.loadMaintenance() } }
         // ps every three seconds while the module shows.
-        .task(id: order) {
+        .task(id: [order == .cpu, showMore]) {
             care.monitor.order = order
+            care.monitor.topCount = showMore ? 25 : 10
             while !Task.isCancelled {
                 await care.monitor.readTop()
                 try? await Task.sleep(for: .seconds(3))
             }
         }
+        .onDisappear { care.monitor.topCount = 6 }
+    }
+}
+
+private func processDetail(_ p: Proc) -> String {
+    let flag = p.isZombie ? " · zombie" : p.isStopped ? " · stopped" : ""
+    return "pid \(p.pid)\(flag)"
+}
+
+/// Quit and Force Quit for one process row, or why there are none.
+private struct ProcessControls: View {
+    let care: Care
+    let proc: Proc
+
+    var body: some View {
+        if let reason = Processes.protection(of: proc) {
+            Button("Quit") {}.controlSize(.small).disabled(true).help(reason)
+        } else {
+            HStack(spacing: 6) {
+                Button("Quit") {
+                    // An app gets the polite Quit it would from the Dock; anything else is asked about first.
+                    guard isApp || Alerts.confirm("Quit \(proc.name)?",
+                                                  "It is not an app, so it gets a signal to end; what it was doing may be lost.",
+                                                  button: "Quit") else { return }
+                    act(force: false)
+                }
+                .controlSize(.small)
+                Button("Force Quit") {
+                    guard Alerts.confirm("Force quit \(proc.name)?", "Unsaved work is lost.", button: "Force Quit") else { return }
+                    act(force: true)
+                }
+                .controlSize(.small)
+            }
+            .gatedOnBusy(care.store)
+        }
+    }
+
+    private var isApp: Bool { NSRunningApplication(processIdentifier: proc.pid)?.bundleIdentifier != nil }
+
+    private func act(force: Bool) {
+        if !end(force: force) {
+            care.store.message = Store.Message(text: "Could not quit \(proc.name); macOS did not allow it.", failed: true)
+        }
+        Task { await care.monitor.readTop() }
+    }
+
+    /// Apps close the polite way; anything else gets a signal.
+    private func end(force: Bool) -> Bool {
+        if let app = NSRunningApplication(processIdentifier: proc.pid), app.bundleIdentifier != nil {
+            return force ? app.forceTerminate() : app.terminate()
+        }
+        return kill(proc.pid, force ? SIGKILL : SIGTERM) == 0
     }
 }

@@ -167,22 +167,37 @@ public struct SpeedTest: Sendable, Equatable {
     }
 }
 
-/// A process from `ps -Aceo pid=,pcpu=,rss=,comm=`.
+/// A process from `ps -Aceo pid=,pcpu=,rss=,comm=`, or with `detailed`
+/// from `ps -Aceo pid=,pcpu=,rss=,uid=,ppid=,stat=,comm=`.
 public struct Proc: Sendable, Equatable, Identifiable {
     public var pid: Int32
     public var cpu: Double
     /// Resident memory in bytes.
     public var memory: Int64
     public var name: String
+    public var uid: UInt32? = nil
+    public var ppid: Int32? = nil
+    /// The ps state letters, such as "Ss" or "T".
+    public var state = ""
 
     public var id: Int32 { pid }
+    public var isStopped: Bool { state.contains("T") }
+    public var isZombie: Bool { state.contains("Z") }
 
-    public static func parse(ps: String) -> [Proc] {
-        ps.split(whereSeparator: \.isNewline).compactMap { line in
+    public static func parse(ps: String, detailed: Bool = false) -> [Proc] {
+        let leading = detailed ? 6 : 3
+        return ps.split(whereSeparator: \.isNewline).compactMap { line in
             // The name may hold spaces, so it takes the rest of the line.
-            let f = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-            guard f.count == 4, let pid = Int32(f[0]), let cpu = Double(f[1]), let rss = Int64(f[2]) else { return nil }
-            return Proc(pid: pid, cpu: cpu, memory: rss * 1024, name: String(f[3]))
+            let f = line.split(separator: " ", maxSplits: leading, omittingEmptySubsequences: true)
+            guard f.count == leading + 1, let pid = Int32(f[0]), let cpu = Double(f[1]), let rss = Int64(f[2]) else { return nil }
+            var proc = Proc(pid: pid, cpu: cpu, memory: rss * 1024, name: f[leading].trimmingCharacters(in: .whitespaces))
+            if detailed {
+                guard let uid = UInt32(f[3]), let ppid = Int32(f[4]) else { return nil }
+                proc.uid = uid
+                proc.ppid = ppid
+                proc.state = String(f[5])
+            }
+            return proc
         }
     }
 }

@@ -16,6 +16,8 @@ final class Monitor {
     var model = "Mac"
     /// The busiest processes, while the memory or CPU tile is open.
     var top: [Proc] = []
+    /// Rows readTop keeps: six for the panel's tiles, more while Performance shows.
+    var topCount = 6
     var order: Order? {
         didSet {
             guard order != oldValue else { return }
@@ -100,9 +102,9 @@ final class Monitor {
 
     func readTop() async {
         guard let order else { return }
-        let args = ["-Aceo", "pid=,pcpu=,rss=,comm=", order == .memory ? "-m" : "-r"]
+        let args = ["-Aceo", "pid=,pcpu=,rss=,uid=,ppid=,stat=,comm=", order == .memory ? "-m" : "-r"]
         guard let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", args, env: [:]), self.order == order else { return }
-        let next = Array(Proc.parse(ps: r.output).prefix(6))
+        let next = Array(Proc.parse(ps: r.output, detailed: true).prefix(topCount))
         if next != top { top = next }
     }
 
