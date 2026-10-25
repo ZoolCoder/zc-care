@@ -48,8 +48,10 @@ public struct AppExtension: Codable, Sendable, Equatable, Identifiable {
 }
 
 public enum Extensions {
-    /// The extensions Apple ships live here and are not worth an audit.
+    /// The extensions Apple ships live here or carry its identifier prefix,
+    /// Xcode's among them, and are not worth an audit.
     static let appleRoots = ["/System/", "/usr/"]
+    static let applePrefix = "com.apple."
 
     /// Every extension on the Mac, by kind; a command that fails counts as none.
     public static func load(runner: Runner, env: [String: String] = [:],
@@ -62,7 +64,9 @@ public enum Extensions {
                 found += parsePluginkit(result.output, kind: kind)
             }
         }
-        found = found.filter { item in !appleRoots.contains { item.path?.hasPrefix($0) ?? false } }
+        found = found.filter { item in
+            !item.identifier.hasPrefix(applePrefix) && !appleRoots.contains { item.path?.hasPrefix($0) ?? false }
+        }
         if let result = try? await runner.run("/usr/bin/systemextensionsctl", ["list"], env: env), result.status == 0 {
             found += parseSystemExtensions(result.output)
         }
