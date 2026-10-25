@@ -6,6 +6,42 @@ here with what to edit.
 
 ## Unreleased
 
+### ZC Care
+
+- Protection lists extensions: Safari, Share, Finder Sync, Quick Look,
+  Spotlight, Notification Center, Action and Photos extensions from
+  `pluginkit`, and system extensions from `systemextensionsctl`, each with
+  its host app and whether it is on. An extension whose host app is gone, or
+  a system extension without a team id, is flagged. Apple's own are left
+  out. *Open Extensions Settings* opens the pane that switches them.
+- The panel's Updates tab lists macOS updates from `softwareupdate -l`, with
+  version, size and a *Restart* or *Recommended* flag, and *Open Software
+  Update*. A check that answered holds for six hours; one that failed is
+  retried on the next open, and *Check Again* runs one now. The count joins
+  the tab's badge. *Update All…* still applies only the packages and
+  runtimes.
+- Performance's top processes show ten or twenty-five rows and have *Quit*
+  and *Force Quit*. An app gets the Quit it would from the Dock; anything
+  else, and every Force Quit, asks first. Stopped and zombie processes are
+  marked. ZC Care, what it started, pid 0 and 1, the session's daemons and
+  other users' processes have no button, with the reason on hover.
+- Cleanup knows more developer caches: the pub cache's hosted packages,
+  Gradle wrapper distributions, the pnpm store (both locations), Bun's
+  install cache, Go's module download cache and mise's downloads. Each says
+  what comes back on its own and what to run first. Go's extracted modules
+  under `~/go/pkg/mod` are read-only and stay. The Maven repository is not
+  offered: `mvn install` puts your own builds there and no remote has them.
+- Developer lists simulator runtimes from `xcrun simctl`, each with platform,
+  version, build, state and size, and *Delete*, which is permanent and says
+  so; a runtime Xcode bundles has the button greyed out. When an Android SDK
+  is installed, its system images and AVDs are listed with *Show in Finder*
+  only.
+- My Workstation has *Not in Your Config*: formulae, casks, App Store apps
+  and runtimes on this Mac that the config does not name, grouped by target.
+  *Add to Config…* asks for the why line and an optional section, runs
+  `zc-care add`, and reloads, so the next plan shows the item; a bulk add
+  covers the selected items of one target at a time.
+
 ### Docs
 
 - The install steps add `brew trust zoolcoder/zc-care`: Homebrew refuses to

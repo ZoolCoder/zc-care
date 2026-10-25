@@ -88,7 +88,7 @@ panel, which has five tabs:
 
 - **Mac:** live disk, memory, CPU, battery, network and sensors.
 - **Overview:** each target, with *Apply*.
-- **Updates:** outdated packages, with *Update All*.
+- **Updates:** macOS updates and outdated packages, with *Update All*.
 - **Health:** `doctor` findings, with *Fix*.
 - **Services:** with *Start* and their logs.
 
@@ -99,13 +99,13 @@ It has these modules:
 |---|---|
 | Smart Care | Scans everything at once and cleans up in one click. |
 | Cleanup | Clears caches, logs, build output and Mail downloads. Clears what AI tools leave behind: Claude Code temp files and old versions, and the caches of Claude, Cursor, ChatGPT, Windsurf, Codex and Gemini CLI. |
-| Protection | Shows Gatekeeper's verdict per app, background apps (newly appeared ones marked) and privacy permissions. |
-| Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin snapshots, reindex Spotlight. |
+| Protection | Shows Gatekeeper's verdict per app, background apps (newly appeared ones marked), extensions (Safari, Finder, Share, Quick Look, Spotlight and system extensions, with their host app and state) and privacy permissions. |
+| Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin snapshots, reindex Spotlight. Top processes by CPU or memory, with *Quit* and *Force Quit*. |
 | Applications | Uninstalls apps with their leftovers. *Adopt* moves an app installed by hand to Homebrew. |
 | My Clutter, Space Lens | Find large and duplicate files, old downloads and installers, and map what fills your disk. Space Lens keeps the previous scan, marks folders that grew and links them to the module that can clean them. |
 | Cloud Cleanup | Lists the files iCloud Drive keeps downloaded on the Mac. *Remove Download* frees the space and keeps the file in iCloud. Google Drive, OneDrive and Dropbox are counted, and their folders open in Finder. |
-| Developer | Finds `node_modules` and virtualenvs of projects idle for 90 days, and local AI models. Shows what Docker keeps, with Prune Build Cache and Prune Dangling Images (permanent), and Xcode's DerivedData, Archives, DeviceSupport and simulator caches. |
-| My Workstation | What your config declares and what is in place: coverage, each target with *Apply*, every item to search, and what was applied. *Choose Apps…* opens the app picker. |
+| Developer | Finds `node_modules` and virtualenvs of projects idle for 90 days, and local AI models. Shows what Docker keeps, with Prune Build Cache and Prune Dangling Images (permanent), and Xcode's DerivedData, Archives, DeviceSupport and simulator caches. Simulator runtimes, with *Delete* (permanent), and Android system images and AVDs. |
+| My Workstation | What your config declares and what is in place: coverage, each target with *Apply*, every item to search, and what was applied. What this Mac has that the config does not name, with *Add to Config…*. *Choose Apps…* opens the app picker. |
 | My Tools, My Activity | Give every tool in one grid, Mac health, and what ZC Care has freed so far. |
 
 <p>
