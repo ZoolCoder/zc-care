@@ -57,6 +57,11 @@ final class Care {
     /// Held from the first check to the end of a removal that asks first, so
     /// a second click cannot start the same flow while the first checks.
     private var removing = false
+    /// The sheets the window shows for a removal: the last look at what
+    /// goes, the apps to quit first, and how the run went.
+    var review: Prompt<Review, Bool>?
+    var quitRequest: Prompt<QuitRequest, Bool>?
+    var completed: RunLog?
     var scannedAt: Date?
     var largeFiles: [LargeFile] = []
     var duplicates: [DuplicateGroup] = []
@@ -369,14 +374,110 @@ final class Care {
         }
     }
 
-    /// Whether an app has any of the files open, which then stay put; a
-    /// disk image a VM runs from or a video in an editor. Says which app.
+    /// Whether something has any of the files open, which then stay put; a
+    /// disk image a VM runs from or a video in an editor. Apps are offered
+    /// to quit in a sheet; a command that is no app is named.
     private func openInApp(_ urls: [URL]) async -> Bool {
-        guard let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--"] + urls.map(\.path), env: [:]),
-              let app = OpenFile.holders(r.output).first else { return false }
+        guard let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--"] + urls.map(\.path), env: [:]) else { return false }
+        let holders = OpenFile.holders(r.output)
+        guard !holders.isEmpty else { return false }
+        let apps = NSWorkspace.shared.runningApplications.filter { app in
+            holders.contains(app.localizedName ?? "") || holders.contains(app.executableURL?.lastPathComponent ?? "")
+        }
         let what = urls.count == 1 ? "\(urls[0].lastPathComponent) is" : "\(Store.counted(urls.count, "of these files")) may be"
-        store.message = Store.Message(text: "\(what) open in \(app). Close it first.", failed: true)
-        return true
+        if apps.count < holders.count, let command = holders.first(where: { name in !apps.contains { $0.localizedName == name || $0.executableURL?.lastPathComponent == name } }) {
+            store.message = Store.Message(text: "\(what) open in \(command). Close it first.", failed: true)
+            return true
+        }
+        let name = urls.count == 1 ? urls[0].lastPathComponent : Store.counted(urls.count, "file")
+        return await !closed(apps, toDo: "remove \(name)")
+    }
+
+    // MARK: Sheets
+
+    /// Shows what a removal is about to do, and waits for the answer.
+    func confirm(_ review: Review) async -> Bool {
+        await withCheckedContinuation { continuation in
+            self.review = Prompt(review) { [weak self] ok in
+                self?.review = nil
+                continuation.resume(returning: ok)
+            }
+        }
+    }
+
+    /// Lists the apps in the way with Quit and Force Quit, and waits until
+    /// they are gone or the user skips. True when none is left running.
+    func closed(_ apps: [NSRunningApplication], toDo what: String) async -> Bool {
+        let running = apps.filter { !$0.isTerminated }
+        guard !running.isEmpty else { return true }
+        return await withCheckedContinuation { continuation in
+            quitRequest = Prompt(QuitRequest(apps: running, toDo: what)) { [weak self] ok in
+                self?.quitRequest = nil
+                continuation.resume(returning: ok)
+            }
+        }
+    }
+
+    /// Not ZC Care itself, and not while the app runs: it would write its
+    /// files straight back. A running copy is offered to quit.
+    private func closed(_ app: InstalledApp, toDo what: String) async -> Bool {
+        if app.bundleID == Bundle.main.bundleIdentifier {
+            store.message = Store.Message(text: "ZC Care cannot do that to itself.", failed: true)
+            return false
+        }
+        // By id too: a copy running from elsewhere uses the same settings.
+        let running = NSWorkspace.shared.runningApplications.filter {
+            $0.bundleURL?.standardizedFileURL == app.url.standardizedFileURL || ($0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleID)
+        }
+        return await closed(running, toDo: what)
+    }
+
+    /// Shows how a run went, and logs what went for My Activity.
+    private func finish(_ log: RunLog, kind: ActivityEntry.Kind, trashed: [Trashed]) {
+        var log = log
+        log.end()
+        if !log.done.isEmpty || !trashed.isEmpty {
+            store.record(kind, log.title, freed: log.freed, trashed: trashed)
+        }
+        monitor.readDisk()
+        store.message = nil
+        completed = log
+    }
+
+    /// Removes the files picked in a list, each on its own, after a last look.
+    func trashFiles(_ files: [LargeFile], title: String) async {
+        guard store.busy == nil, !removing, !files.isEmpty, allowed(files.map(\.url)) else { return }
+        removing = true
+        defer { removing = false }
+        guard await !openInApp(files.map(\.url)), store.busy == nil else { return }
+        let review = Review(title: store.removeQuestion(Store.counted(files.count, "file")), items: files.map(ReviewItem.init),
+                            button: store.removeButton)
+        guard await confirm(review), store.busy == nil else { return }
+        store.busy = "Removing \(Store.counted(files.count, "file"))"
+        defer { store.busy = nil }
+        let (log, trashed) = await removeEach(files, title: title)
+        forget(Set(log.done.map(\.path)))
+        finish(log, kind: .files, trashed: trashed)
+    }
+
+    /// Drops files that went from every list that showed them.
+    private func forget(_ ids: Set<String>) {
+        largeFiles.removeAll { ids.contains($0.id) }
+        oldDownloads.removeAll { ids.contains($0.id) }
+        diskImages.removeAll { ids.contains($0.id) }
+        dependencies.removeAll { ids.contains($0.id) }
+        duplicates = duplicates.compactMap { group in
+            var group = group
+            group.files.removeAll { ids.contains($0.id) }
+            return group.files.count > 1 ? group : nil
+        }
+        drop(ids)
+        if let scan = space {
+            let shown = ids.filter { scan.root.find($0) != nil }
+            guard !shown.isEmpty else { return }
+            space?.root = shown.reduce(scan.root) { $0.removing($1) }
+            try? space?.save(to: Self.savedSpace)
+        }
     }
 
     /// The working directory of every process, from lsof. Nil, with a
@@ -413,20 +514,7 @@ final class Care {
         defer { store.busy = nil }
         let removal = await remove([file.url])
         if removal.failures.isEmpty {
-            largeFiles.removeAll { $0.id == file.id }
-            oldDownloads.removeAll { $0.id == file.id }
-            diskImages.removeAll { $0.id == file.id }
-            dependencies.removeAll { $0.id == file.id }
-            duplicates = duplicates.compactMap { group in
-                var group = group
-                group.files.removeAll { $0.id == file.id }
-                return group.files.count > 1 ? group : nil
-            }
-            drop([file.id])
-            if let scan = space, scan.root.find(file.url.path) != nil {
-                space?.root = scan.root.removing(file.url.path)
-                try? space?.save(to: Self.savedSpace)
-            }
+            forget([file.id])
             monitor.readDisk()
             store.record(.files, file.name, freed: file.size, trashed: removal.trashed)
             store.message = Store.Message(text: "\(file.name) is \(store.removed).", failed: false)
@@ -457,17 +545,14 @@ final class Care {
         removing = true
         defer { removing = false }
         guard allowed(others.map(\.url)), await !openInApp(others.map(\.url)), store.busy == nil,
-              Alerts.confirm(store.removeQuestion(Store.counted(others.count, "similar image")),
-                                                "\(Store.bytes(group.wasted)). \(group.best.name) stays.",
-                                                button: store.removeButton) else { return }
+              await confirm(Review(title: store.removeQuestion(Store.counted(others.count, "similar image")),
+                                   note: "\(group.best.name) stays.", items: others.map(ReviewItem.init), button: store.removeButton)),
+              store.busy == nil else { return }
         store.busy = "Removing similar images"
         defer { store.busy = nil }
-        let (moved, trashed) = await removeEach(others)
-        drop(Set(moved.map(\.id)))
-        monitor.readDisk()
-        let freed = moved.reduce(0) { $0 + $1.size }
-        store.record(.files, "Similar to \(group.best.name)", freed: freed, trashed: trashed)
-        store.message = Store.Message(text: "\(moved.count) of \(Store.counted(others.count, "image")) \(store.removed).", failed: moved.count < others.count)
+        let (log, trashed) = await removeEach(others, title: "Similar to \(group.best.name)")
+        drop(Set(log.done.map(\.path)))
+        finish(log, kind: .files, trashed: trashed)
     }
 
     func keepOldest(_ group: DuplicateGroup) async {
@@ -479,11 +564,10 @@ final class Care {
             return
         }
         guard allowed(others.map(\.url)), await !openInApp(others.map(\.url)),
-              Alerts.confirm(store.removeQuestion("\(Store.counted(others.count, "copy", "copies")) of \(keeper.name)"),
-                             "\(Store.bytes(group.size * Int64(others.count))). \((keeper.url.path as NSString).abbreviatingWithTildeInPath) stays.\n\n"
-                                 + Alerts.lines(others.map { ($0.url.path as NSString).abbreviatingWithTildeInPath }),
-                             button: store.removeButton) else { return }
-        // Again: a copy may have changed while the alert was up.
+              await confirm(Review(title: store.removeQuestion("\(Store.counted(others.count, "copy", "copies")) of \(keeper.name)"),
+                                   note: "\((keeper.url.path as NSString).abbreviatingWithTildeInPath) stays.",
+                                   items: others.map(ReviewItem.init), button: store.removeButton)) else { return }
+        // Again: a copy may have changed while the sheet was up.
         let confirmed = Set(others.map(\.id))
         let unchanged = await stillSame(group).filter { confirmed.contains($0.id) }
         guard unchanged.count == others.count else {
@@ -492,29 +576,27 @@ final class Care {
         }
         store.busy = "Removing copies of \(keeper.name)"
         defer { store.busy = nil }
-        let (moved, trashed) = await removeEach(others)
-        let gone = Set(moved.map(\.id))
+        let (log, trashed) = await removeEach(others, title: "Copies of \(keeper.name)")
+        let gone = Set(log.done.map(\.path))
         duplicates = duplicates.compactMap { group in
             var group = group
             group.files.removeAll { gone.contains($0.id) }
             return group.files.count > 1 ? group : nil
         }
-        monitor.readDisk()
-        store.record(.files, "Copies of \(keeper.name)", freed: moved.reduce(0) { $0 + $1.size }, trashed: trashed)
-        store.message = Store.Message(text: "\(moved.count) of \(Store.counted(others.count, "copy", "copies")) \(store.removed).", failed: moved.count < others.count)
+        finish(log, kind: .files, trashed: trashed)
     }
 
-    /// Removes each file on its own, so one that stays does not hold back the rest.
-    private func removeEach(_ files: [LargeFile]) async -> (moved: [LargeFile], trashed: [Trashed]) {
-        var moved: [LargeFile] = []
+    /// Removes each file on its own, so one that stays does not hold back
+    /// the rest, and logs how each went.
+    private func removeEach(_ files: [LargeFile], title: String) async -> (log: RunLog, trashed: [Trashed]) {
+        var log = RunLog(title: title, permanent: store.deletesPermanently)
         var trashed: [Trashed] = []
         for file in files {
             let removal = await remove([file.url])
-            guard removal.failures.isEmpty else { continue }
-            moved.append(file)
+            log.add(file.url, size: file.size, removal: removal)
             trashed += removal.trashed
         }
-        return (moved, trashed)
+        return (log, trashed)
     }
 
     /// The copies still byte for byte the same as the keeper.
@@ -589,12 +671,11 @@ final class Care {
     /// Moves an Xcode folder to the Trash, unless Xcode or the Simulator
     /// has it open.
     func trash(_ spot: XcodeSpot) async {
-        guard store.busy == nil, allowed([spot.url]) else { return }
-        if let open = spot.busyBundleIDs.first(where: isRunning) {
-            let name = NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == open }?.localizedName ?? open
-            store.message = Store.Message(text: "\(name) is open. Quit it first, then remove \(spot.title).", failed: true)
-            return
-        }
+        guard store.busy == nil, !removing, allowed([spot.url]) else { return }
+        removing = true
+        defer { removing = false }
+        let open = spot.busyBundleIDs.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
+        guard await closed(open, toDo: "remove \(spot.title)"), store.busy == nil else { return }
         guard Alerts.confirm(store.removeQuestion(spot.title),
                              "\(Store.bytes(spot.size)) in \((spot.url.path as NSString).abbreviatingWithTildeInPath). \(spot.detail)",
                              button: store.removeButton) else { return }
@@ -626,20 +707,19 @@ final class Care {
                                               + "\(ids.count == 1 ? "its" : "their") dependencies stay.", failed: false)
             return
         }
-        let total = folders.reduce(0) { $0 + $1.size }
-        guard store.busy == nil, Alerts.confirm(store.removeQuestion(Store.counted(folders.count, "dependency folder")),
-                             "\(Store.bytes(total)). The next install in each project brings them back.\n\n"
-                                 + Alerts.lines(folders.map { ($0.url.path as NSString).abbreviatingWithTildeInPath }),
-                             button: store.removeButton) else { return }
+        guard store.busy == nil,
+              await confirm(Review(title: store.removeQuestion(Store.counted(folders.count, "dependency folder")),
+                                   note: "The next install in each project brings them back.",
+                                   items: folders.map(ReviewItem.init), button: store.removeButton)),
+              store.busy == nil else { return }
         store.busy = "Removing dependencies"
         defer { store.busy = nil }
         let (failure, trashed) = await recycle(folders.map(\.url))
         let gone = Set(folders.map(\.id))
         dependencies.removeAll { gone.contains($0.id) && !FileManager.default.fileExists(atPath: $0.url.path) }
-        recordRemoval(.developer, "Project Dependencies", freed: total, failure: failure, trashed: trashed)
-        store.message = failure.map { Store.Message(text: $0, failed: true) }
-            ?? Store.Message(text: "\(Store.bytes(total)) of dependencies are \(store.removed).", failed: false)
-        monitor.readDisk()
+        var log = RunLog(title: "Project Dependencies", permanent: store.deletesPermanently)
+        log.add(folders.map { ($0.url, $0.size) }, trashed: trashed, failure: failure)
+        finish(log, kind: .developer, trashed: trashed)
     }
 
     func trash(_ model: AIModel) async {
@@ -803,7 +883,10 @@ final class Care {
     /// through zc-care remove, which drops it from the manifest too;
     /// the rest go to the Trash, where they can be put back.
     func uninstall(_ app: InstalledApp) async {
-        guard store.busy == nil, allowed([app.url]), canTouch(app) else { return }
+        guard store.busy == nil, !removing, allowed([app.url]) else { return }
+        removing = true
+        defer { removing = false }
+        guard await closed(app, toDo: "uninstall \(app.name)"), store.busy == nil else { return }
         // What the ignore list names stays behind; the rest still goes.
         let leftovers = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
             .filter { !store.ignoreList.touches($0) }
@@ -818,7 +901,8 @@ final class Care {
             how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n") + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath })
         }
         // Again: the app may have opened while the alert was up.
-        guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall"), canTouch(app) else { return }
+        guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall"),
+              await closed(app, toDo: "uninstall \(app.name)"), store.busy == nil else { return }
         store.busy = "Uninstalling \(app.name)"
         defer { store.busy = nil }
         var failure: String?
@@ -872,8 +956,6 @@ final class Care {
         monitor.readDisk()
     }
 
-    /// Not ZC Care itself, and not while the app runs: it would write its
-    /// files straight back.
     /// Stops the agents so they do not run on from the Trash.
     private func bootOut(_ agents: [String]) async {
         for agent in agents {
@@ -881,25 +963,13 @@ final class Care {
         }
     }
 
-    private func canTouch(_ app: InstalledApp) -> Bool {
-        if app.bundleID == Bundle.main.bundleIdentifier {
-            store.message = Store.Message(text: "ZC Care cannot do that to itself.", failed: true)
-            return false
-        }
-        // By id too: a copy running from elsewhere uses the same settings.
-        if NSWorkspace.shared.runningApplications.contains(where: {
-            $0.bundleURL?.standardizedFileURL == app.url.standardizedFileURL || ($0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleID)
-        }) {
-            store.message = Store.Message(text: "Quit \(app.name) first.", failed: true)
-            return false
-        }
-        return true
-    }
-
     /// The app as on its first launch: its settings, caches and data go to
     /// the Trash, and the app stays.
     func reset(_ app: InstalledApp) async {
-        guard store.busy == nil, canTouch(app) else { return }
+        guard store.busy == nil, !removing else { return }
+        removing = true
+        defer { removing = false }
+        guard await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
         let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
             .filter { !store.ignoreList.touches($0) }
         guard !data.isEmpty else {
@@ -910,7 +980,7 @@ final class Care {
         guard Alerts.confirm("Reset \(app.name)?",
                                             "It opens as on its first launch. " + (store.deletesPermanently ? "These are deleted for good:\n" : "These move to the Trash:\n")
                                                 + Alerts.lines(data.map { ($0 as NSString).abbreviatingWithTildeInPath }),
-                                            button: "Reset"), canTouch(app) else { return }
+                                            button: "Reset"), await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
         store.busy = "Resetting \(app.name)"
         defer { store.busy = nil }
         await bootOut(Leftovers.agents(in: data))
@@ -960,20 +1030,23 @@ final class Care {
         removing = true
         defer { removing = false }
         guard await !openInApp(picked.flatMap(\.paths).map { URL(fileURLWithPath: $0) }), store.busy == nil else { return }
-        let total = picked.reduce(0) { $0 + $1.size }
-        guard Alerts.confirm(store.removeQuestion("what \(Store.counted(picked.count, "removed app")) left"),
-                             "\(Store.bytes(total)) in caches, settings and support files:\n\n"
-                                 + Alerts.lines(picked.map(\.bundleID), max: 10),
-                             button: store.removeButton) else { return }
+        let items = picked.map { orphan in
+            ReviewItem(id: orphan.id, name: orphan.bundleID,
+                       detail: orphan.paths.map { ($0 as NSString).abbreviatingWithTildeInPath }.joined(separator: " · "),
+                       size: orphan.size, icon: NSImage(systemSymbolName: "folder.badge.questionmark", accessibilityDescription: nil))
+        }
+        guard await confirm(Review(title: store.removeQuestion("what \(Store.counted(picked.count, "removed app")) left"),
+                                   note: "Caches, settings and support files.", items: items, button: store.removeButton)),
+              store.busy == nil else { return }
         store.busy = "Removing leftovers"
         defer { store.busy = nil }
-        let (failure, trashed) = await recycle(picked.flatMap { $0.paths.map(URL.init(fileURLWithPath:)) })
+        let files = picked.flatMap { orphan in orphan.paths.map { (URL(fileURLWithPath: $0), DiskUsage.allocated(URL(fileURLWithPath: $0))) } }
+        let (failure, trashed) = await recycle(files.map(\.0))
         let gone = Set(picked.map(\.id))
         orphans?.removeAll { o in gone.contains(o.id) && !o.paths.contains(where: FileManager.default.fileExists) }
-        recordRemoval(.apps, "App Leftovers", freed: total, failure: failure, trashed: trashed)
-        store.message = failure.map { Store.Message(text: $0, failed: true) }
-            ?? Store.Message(text: "Leftovers of \(Store.counted(picked.count, "app")) are \(store.removed).", failed: false)
-        monitor.readDisk()
+        var log = RunLog(title: "App Leftovers", permanent: store.deletesPermanently)
+        log.add(files, trashed: trashed, failure: failure)
+        finish(log, kind: .apps, trashed: trashed)
     }
 
     // MARK: Adopting
@@ -1245,11 +1318,12 @@ final class Care {
     /// Deletes one browser's history, cookies or cache, only while that
     /// browser is closed: an open one holds the databases and writes them back.
     func clearBrowser(_ trace: BrowserTrace) async {
-        guard store.busy == nil else { return }
-        guard !isRunning(trace.bundleID) else {
-            store.message = Store.Message(text: "Quit \(trace.browser) first, then clear its \(trace.kind.lowercased()).", failed: true)
-            return
-        }
+        guard store.busy == nil, !removing else { return }
+        removing = true
+        defer { removing = false }
+        let what = "clear \(trace.browser)'s \(trace.kind.lowercased())"
+        guard await closed(NSRunningApplication.runningApplications(withBundleIdentifier: trace.bundleID), toDo: what),
+              store.busy == nil else { return }
         let effect = switch trace.kind {
         case BrowserPrivacy.cookies: "You will be signed out of websites in \(trace.browser)."
         case BrowserPrivacy.history: "\(trace.browser) forgets the pages you visited; bookmarks and passwords stay."
@@ -1260,10 +1334,9 @@ final class Care {
                                  ? "This permanently deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)); nothing goes to the Trash.\n\n"
                                  : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect,
                              button: "Clear") else { return }
-        guard store.busy == nil, !isRunning(trace.bundleID) else {
-            store.message = Store.Message(text: "Quit \(trace.browser) first, then clear its \(trace.kind.lowercased()).", failed: true)
-            return
-        }
+        // Again: the browser may have opened while the alert was up.
+        guard await closed(NSRunningApplication.runningApplications(withBundleIdentifier: trace.bundleID), toDo: what),
+              store.busy == nil else { return }
         store.busy = "Clearing \(trace.browser) \(trace.kind.lowercased())"
         defer { store.busy = nil }
         let permanently = store.deletesPermanently

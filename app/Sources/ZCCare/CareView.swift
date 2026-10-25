@@ -77,6 +77,11 @@ struct CareView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
+        .sheet(item: $care.review) { ReviewSheet(prompt: $0) }
+        .sheet(item: $care.quitRequest) { QuitSheet(prompt: $0) }
+        .sheet(isPresented: Binding(get: { care.completed != nil }, set: { if !$0 { care.completed = nil } })) {
+            if let log = care.completed { CompletionSheet(log: log) { care.completed = nil } }
+        }
         .tint(Theme.accent)
         .buttonStyle(PillButtonStyle())
         .background(CareBackground(look: care.module.look).ignoresSafeArea())
