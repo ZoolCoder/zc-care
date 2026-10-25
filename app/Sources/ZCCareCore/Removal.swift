@@ -8,7 +8,7 @@ public struct Removal: Sendable, Equatable {
         case permissionDenied, inUse
         case other(String)
 
-        var label: String {
+        public var label: String {
             switch self {
             case .permissionDenied: "permission denied"
             case .inUse: "in use"

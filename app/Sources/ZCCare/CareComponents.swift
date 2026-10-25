@@ -230,3 +230,29 @@ struct CareRow<Icon: View, Actions: View>: View {
         .onHover { over = $0 }
     }
 }
+
+/// Files with a checkbox each, and a bar to remove what is picked.
+struct FileList: View {
+    @Bindable var care: Care
+    let files: [LargeFile]
+    var dateLabel = "modified"
+    /// Removes the files picked.
+    let action: ([LargeFile]) -> Void
+    @State private var picked: Set<String> = []
+
+    var body: some View {
+        ForEach(files) { file in
+            HStack(spacing: 10) {
+                PickBox(id: file.id, picked: $picked)
+                FileRow(care: care, file: file, dateLabel: dateLabel)
+            }
+            .padding(.leading, 8)
+        }
+        if !files.isEmpty {
+            PickBar(store: care.store, ids: files.map(\.id), picked: $picked,
+                    size: files.filter { picked.contains($0.id) }.reduce(0) { $0 + $1.size }) {
+                action(files.filter { picked.contains($0.id) })
+            }
+        }
+    }
+}

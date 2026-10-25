@@ -9,6 +9,9 @@ public struct Junk: Sendable, Equatable, Identifiable {
     public var path: String
     /// Entries inside the folder to leave alone, by name in any case.
     public var keep: Set<String> = []
+    /// Cleared by hand only, never by Clean All: what it holds does not
+    /// come back on its own.
+    public var optional = false
 
     public static func spots(home: String) -> [Junk] {
         [
@@ -32,6 +35,10 @@ public struct Junk: Sendable, Equatable, Identifiable {
                  path: home + "/Library/Developer/Xcode/iOS DeviceSupport"),
             Junk(id: "simulators", title: "Simulator caches", detail: "Dyld and runtime caches the simulators rebuild.",
                  path: home + "/Library/Developer/CoreSimulator/Caches"),
+            Junk(id: "devicelogs", title: "Xcode device logs", detail: "Crash logs copied from iPhones and iPads; Xcode copies them again when a device connects.",
+                 path: home + "/Library/Developer/Xcode/iOS Device Logs"),
+            Junk(id: "testdevices", title: "Xcode test devices", detail: "Simulators cloned for test runs; the next run makes them again.",
+                 path: home + "/Library/Developer/XCTestDevices"),
             Junk(id: "go", title: "Go build cache", detail: "Compiled packages go build makes again.",
                  path: home + "/Library/Caches/go-build"),
             Junk(id: "pip", title: "pip cache", detail: "Wheels pip downloads again when needed.",
@@ -64,6 +71,8 @@ public struct Junk: Sendable, Equatable, Identifiable {
                  path: home + "/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
             Junk(id: "logs", title: "Logs", detail: "What apps logged; ZC Care keeps its own.",
                  path: home + "/Library/Logs", keep: ["ZCCare"]),
+            Junk(id: "iosbackups", title: "iPhone and iPad backups", detail: "Backups the Finder made of a device. A new one takes a full backup again; iCloud backups stay.",
+                 path: home + "/Library/Application Support/MobileSync/Backup", optional: true),
         ]
     }
 

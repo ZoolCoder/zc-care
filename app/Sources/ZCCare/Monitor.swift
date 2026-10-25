@@ -258,10 +258,16 @@ extension Store {
                           + removal.ending, failed: !removal.failures.isEmpty)
     }
 
+    /// The Free Up folders Clean All clears: those with something in them,
+    /// less the ones cleared by hand only.
+    var spotsToCleanAll: [Junk] {
+        Junk.spots(home: NSHomeDirectory()).filter { !$0.optional && (monitor.junk[$0.id] ?? 0) > 0 }
+    }
+
     /// Clears every Free Up folder after one question, for Smart Care.
     func cleanAll() async {
         guard !monitor.scanning else { return busyScanning() }
-        let spots = Junk.spots(home: NSHomeDirectory()).filter { (monitor.junk[$0.id] ?? 0) > 0 }
+        let spots = spotsToCleanAll
         let total = spots.reduce(Int64(0)) { $0 + (monitor.junk[$1.id] ?? 0) }
         let list = spots.map { "\($0.title): \(Self.bytes(monitor.junk[$0.id] ?? 0))" }.joined(separator: "\n")
         guard busy == nil, !spots.isEmpty,
@@ -272,22 +278,33 @@ extension Store {
                              button: "Clean Up") else { return }
         busy = "Cleaning up"
         defer { busy = nil }
+        let (log, trashed) = await clean(spots, title: "System Junk")
+        monitor.readDisk()
+        record(.junk, "System Junk", freed: log.freed, trashed: trashed)
+        message = Message(text: "Freed \(Self.bytes(log.freed))" + (log.allDone ? "." : "; \(Self.counted(log.failed.count, "item")) stayed."),
+                          failed: !log.allDone)
+    }
+
+    /// Clears the folders one after another and logs each: a line for what
+    /// a folder freed, and one per entry that stayed, with why.
+    func clean(_ spots: [Junk], title: String) async -> (log: RunLog, trashed: [Trashed]) {
         let open = monitor.runningApps()
-        var freed: Int64 = 0, removal = Removal()
+        var log = RunLog(title: title, permanent: deletesPermanently)
+        var trashed: [Trashed] = []
         let permanently = deletesPermanently
         for spot in spots {
             let keep = await monitor.keep(spot, open: open)
             let size = monitor.junk[spot.id] ?? 0
             let result = await Task.detached { spot.empty(keeping: keep, permanently: permanently) }.value
-            removal.failures += result.failures
-            removal.trashed += result.trashed
             let left = await Task.detached { spot.size(keeping: keep) }.value
             monitor.junk[spot.id] = left
-            freed += max(size - left, 0)
+            trashed += result.trashed
+            log.add(RunLog.Line(name: spot.title, detail: spot.path, size: max(size - left, 0)))
+            for failure in result.failures {
+                log.add(RunLog.Line(name: failure.name, detail: spot.path, size: 0, failure: failure.reason.label))
+            }
         }
-        monitor.readDisk()
-        record(.junk, "System Junk", freed: freed, trashed: removal.trashed)
-        message = Message(text: "Freed \(Self.bytes(freed))" + removal.ending, failed: !removal.failures.isEmpty)
+        return (log, trashed)
     }
 
     /// The Finder empties the Trash: the app cannot read it without Full
