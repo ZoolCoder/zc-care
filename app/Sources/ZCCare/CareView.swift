@@ -50,28 +50,31 @@ struct CareView: View {
         HStack(spacing: 0) {
             Sidebar(care: care)
             ZStack(alignment: .bottom) {
-                Group {
-                    if care.showsIntro(care.module) {
-                        ModuleIntro(care: care, module: care.module)
-                    } else {
-                        switch care.module {
-                        case .smartCare: SmartCareView(care: care)
-                        case .cleanup: CleanupView(care: care)
-                        case .clutter: ClutterView(care: care)
-                        case .developer: DeveloperView(care: care)
-                        case .apps: ApplicationsView(care: care)
-                        case .performance: PerformanceView(care: care)
-                        case .protection: ProtectionView(care: care)
-                        case .spaceLens: SpaceLensView(care: care)
-                        case .cloud: CloudCleanupView(care: care)
-                        case .workstation: MyWorkstation(care: care)
-                        case .tools: MyTools(care: care)
-                        case .activity: MyActivity(care: care)
+                VStack(spacing: 0) {
+                    if care.store.accessLost { AccessLostBanner(store: care.store) }
+                    Group {
+                        if care.showsIntro(care.module) {
+                            ModuleIntro(care: care, module: care.module)
+                        } else {
+                            switch care.module {
+                            case .smartCare: SmartCareView(care: care)
+                            case .cleanup: CleanupView(care: care)
+                            case .clutter: ClutterView(care: care)
+                            case .developer: DeveloperView(care: care)
+                            case .apps: ApplicationsView(care: care)
+                            case .performance: PerformanceView(care: care)
+                            case .protection: ProtectionView(care: care)
+                            case .spaceLens: SpaceLensView(care: care)
+                            case .cloud: CloudCleanupView(care: care)
+                            case .workstation: MyWorkstation(care: care)
+                            case .tools: MyTools(care: care)
+                            case .activity: MyActivity(care: care)
+                            }
                         }
                     }
+                    // minHeight 0: a module taller than the window must not push the window's content.
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
                 }
-                // minHeight 0: a module taller than the window must not push the window's content.
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
                 Toast(store: care.store).padding(.bottom, 14)
             }
         }
@@ -87,6 +90,30 @@ struct CareView: View {
         .background(CareBackground(look: care.module.look).ignoresSafeArea())
         .animation(.easeInOut(duration: 0.35), value: care.module)
         .ignoresSafeArea()
+    }
+}
+
+/// Says Full Disk Access went missing, which an update causes, rather than
+/// letting permissions and Put Back fail without a word.
+private struct AccessLostBanner: View {
+    let store: Store
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lock.trianglebadge.exclamationmark.fill").foregroundStyle(Theme.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Full Disk Access stopped working").font(.callout.weight(.semibold))
+                Text("It worked before; after an update macOS no longer honours it, even if the switch still shows on. Switch ZC Care off and on again. Privacy permissions, Safari data and Put Back need it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Don't Remind Me") { store.forgetAccess() }.buttonStyle(.zcLink)
+            Button("Open Settings…") { Access.openFullDiskSettings() }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(Theme.warning.opacity(0.12))
+        .padding(.top, 28)
     }
 }
 

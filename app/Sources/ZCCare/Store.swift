@@ -86,6 +86,7 @@ final class Store {
         static let barStats = "barStats"
         static let deletesPermanently = "deletesPermanently"
         static let leftoverAlerts = "leftoverAlerts"
+        static let hadFullDisk = "hadFullDiskAccess"
     }
 
     /// A reading the menu bar can show beside the mark.
@@ -147,6 +148,31 @@ final class Store {
         monitor.ignore = ignoreList
         watch.limits = vitalLimits
         if !barStats.isEmpty { monitor.start(.bar) }
+        checkAccess()
+        // A grant made in System Settings shows when the app comes back,
+        // whichever of its windows is open.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkAccess() }
+        }
+    }
+
+    /// Full Disk Access was on at an earlier check and is off now: macOS
+    /// drops it when an ad hoc signed build is replaced by an update.
+    private(set) var accessLost = false
+
+    func checkAccess() {
+        let granted = Access.fullDisk
+        let had = UserDefaults.standard.bool(forKey: Keys.hadFullDisk)
+        if granted, !had { UserDefaults.standard.set(true, forKey: Keys.hadFullDisk) }
+        let lost = !granted && had
+        if lost != accessLost { accessLost = lost }
+    }
+
+    /// The user would rather go on without it: no more reminders.
+    func forgetAccess() {
+        UserDefaults.standard.set(false, forKey: Keys.hadFullDisk)
+        accessLost = false
     }
 
     /// What the menu bar shows beside the mark, sampled while any shows.
