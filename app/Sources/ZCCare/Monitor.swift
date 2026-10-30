@@ -54,7 +54,7 @@ final class Monitor {
 
     private var sampler = Sampler()
     private var loop: Task<Void, Never>?
-    private var readers: Set<Reader> = []
+    private(set) var readers: Set<Reader> = []
     private var tick = 0
     private let macmon = ["/opt/homebrew/bin/macmon", "/usr/local/bin/macmon"].first(where: FileManager.default.isExecutableFile)
 

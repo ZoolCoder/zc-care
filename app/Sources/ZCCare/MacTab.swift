@@ -65,6 +65,7 @@ struct MacTab: View {
                     TopList(store: store, order: .cpu)
                 case .battery:
                     if let battery = vitals.battery { BatteryDetail(battery: battery) }
+                    AwakeList(store: store)
                     TopList(store: store, order: .cpu)
                 case .network: NetworkDetail(store: store)
                 case nil: EmptyView()
@@ -609,6 +610,55 @@ private struct BatteryDetail: View {
                 if let watts = battery.adapterWatts { ValueRow(title: "Charger", value: "\(watts) W") }
             }
         }
+    }
+}
+
+/// The apps that stop the Mac, or its screen, sleeping when idle, read
+/// again every five seconds while the panel shows; a hidden panel keeps its
+/// views, so the loop stops with the panel's reading, not on disappear.
+private struct AwakeList: View {
+    let store: Store
+    @State private var blockers: [SleepBlocker]?
+    @State private var failed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Keeping Awake")
+            ListCard {
+                if let blockers, !blockers.isEmpty {
+                    ForEach(blockers) { row($0) }
+                } else {
+                    Text(failed ? "Could not ask macOS what keeps it awake." : blockers == nil ? "…" : "Nothing keeps the Mac awake.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: store.monitor.readers.contains(.panel)) {
+            while !Task.isCancelled, store.monitor.readers.contains(.panel) {
+                let read = SleepBlocker.read { NSRunningApplication(processIdentifier: $0)?.localizedName ?? SleepBlocker.processName($0) }
+                failed = read == nil
+                blockers = read
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    private func row(_ blocker: SleepBlocker) -> some View {
+        let app = NSRunningApplication(processIdentifier: blocker.pid)
+        let what = blocker.display ? "Screen on" : "Awake"
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(blocker.name).lineLimit(1)
+                if let via = blocker.via { Text("through \(via)").font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer()
+            Text([what, blocker.held(at: .now)].compactMap { $0 }.joined(separator: " · "))
+                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            if let app, app.activationPolicy == .regular, app != .current {
+                Button("Quit") { store.quit(app) }.controlSize(.small).gatedOnBusy(store)
+            }
+        }
+        .modifier(Hover())
     }
 }
 

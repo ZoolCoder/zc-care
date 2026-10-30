@@ -1236,3 +1236,33 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(Alert.summed("leftovers com.example.a") == nil)
     #expect(Alert.summed("more") == nil)
 }
+
+@Test func sleepBlockersGroupByTheAppTheyAreFor() {
+    let early = Date(timeIntervalSince1970: 1_000_000), late = early + 600
+    let byProcess: [Int32: [[String: Any]]] = [
+        // caffeinate holding two assertions for pid 50, which holds one too.
+        60: [["AssertType": "PreventUserIdleSystemSleep", "Process Name": "caffeinate", "AssertionOnBehalfOfPID": NSNumber(value: 50),
+              "AssertStartWhen": late, "AssertLevel": NSNumber(value: 255)],
+             ["AssertType": "PreventUserIdleDisplaySleep", "Process Name": "caffeinate", "AssertionOnBehalfOfPID": NSNumber(value: 50),
+              "AssertStartWhen": late - 60]],
+        50: [["AssertType": "PreventUserIdleSystemSleep", "Process Name": "Xcode", "AssertStartWhen": late]],
+        70: [["AssertType": "PreventSystemSleep", "Process Name": "Music", "AssertStartWhen": early]],
+        // caffeinate -t without a client: its parent shell is the owner.
+        80: [["AssertType": "PreventUserIdleSystemSleep", "Process Name": "caffeinate", "AssertStartWhen": late]],
+        90: [["AssertType": "PreventUserIdleSystemSleep"]],
+        95: [["AssertType": "PreventUserIdleDisplaySleep", "Process Name": "Zoom", "AssertLevel": NSNumber(value: 0)]],
+        342: [["AssertType": "PreventUserIdleSystemSleep", "Process Name": "powerd"]],
+        398: [["AssertType": "UserIsActive", "Process Name": "WindowServer"]],
+    ]
+    let names: [Int32: String] = [50: "Xcode", 81: "zsh"]
+    let found = SleepBlocker.parse(byProcess, onBattery: false, name: { names[$0] }, parent: { $0 == 80 ? 81 : nil })
+    #expect(found.map(\.name) == ["Music", "Xcode", "zsh", "pid 90"])
+    #expect(found.map(\.via) == [nil, nil, "caffeinate", nil])
+    #expect(found.map(\.display) == [false, true, false, false])
+    #expect(found[1].since == late - 60)
+    #expect(found[1].held(at: late + 3840) == "for 1 h 5 min")
+    #expect(found[0].held(at: early + 59) == "under 1 min")
+
+    let unplugged = SleepBlocker.parse(byProcess, onBattery: true, name: { names[$0] }, parent: { _ in nil })
+    #expect(!unplugged.map(\.name).contains("Music"))
+}
