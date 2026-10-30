@@ -1183,6 +1183,53 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(recent.values == [0.2])
 }
 
+@Test func listenersMergeAddressesPerPort() async {
+    let output = """
+    p648
+    crapportd
+    f12
+    n*:56614
+    f16
+    n*:56614
+    p770
+    cpostgres
+    f7
+    n[::1]:5432
+    f8
+    n127.0.0.1:5432
+    p900
+    cnode
+    f20
+    n127.0.0.1:3000
+    f21
+    n192.168.1.9:3000
+    p901
+    cbad
+    nnot-a-port
+    p902
+    f3
+    n[::ffff:127.0.0.1]:8080
+    p903
+    cmdns
+    n[fe80::1%lo0]:9000
+    n[fe80:1::1]:9000
+    p904
+    clan
+    n[fe80::1%en0]:9001
+    """
+    let found = Listener.parse(output)
+    #expect(found.map(\.command) == ["node", "lan", "rapportd", "postgres", "pid 902", "mdns"])
+    #expect(found.map(\.port) == [3000, 9001, 56614, 5432, 8080, 9000])
+    #expect(found.map(\.reachable) == [true, true, true, false, false, false])
+
+    let none = FakeRunner(outputs: ["-nPw": CommandResult(status: 1)])
+    #expect(await Listener.read(runner: none) == [])
+    let failed = FakeRunner(outputs: ["-nPw": CommandResult(status: 1, stderr: "lsof: unknown option")])
+    #expect(await Listener.read(runner: failed) == nil)
+    let partial = FakeRunner(outputs: ["-nPw": CommandResult(status: 1, stdout: Data("p1\ncsshd\nn*:22\n".utf8), stderr: "lsof: oops")])
+    #expect(await Listener.read(runner: partial)?.map(\.port) == [22])
+}
+
 @Test func alertSummaryHoldsItsIDs() {
     let ids = ["leftovers com.example.a", "leftovers com.example.b"]
     #expect(Alert.summed(Alert.summary(of: ids)) == ids)

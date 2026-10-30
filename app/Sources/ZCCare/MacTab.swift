@@ -474,9 +474,13 @@ private struct FreeUpList: View {
     }
 }
 
-/// The connection's addresses, router and DNS, and the last speed test.
+/// The connection's addresses, router and DNS, the last speed test, and
+/// the user's apps waiting for connections.
 private struct NetworkDetail: View {
     let store: Store
+    @State private var listeners: [Listener]?
+    @State private var listenersFailed = false
+    @State private var reading = false
 
     private var monitor: Monitor { store.monitor }
 
@@ -529,7 +533,46 @@ private struct NetworkDetail: View {
                     }
                 }
             }
+            listening
         }
+        .task { await readListeners() }
+    }
+
+    private var listening: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SectionTitle(title: "Listening")
+                Spacer()
+                if reading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Refresh") { Task { await readListeners() } }.buttonStyle(.zcLink).font(.caption)
+                }
+            }
+            ListCard {
+                if !listenersFailed, let listeners, !listeners.isEmpty {
+                    ForEach(listeners) { listener in
+                        ValueRow(title: NSRunningApplication(processIdentifier: listener.pid)?.localizedName ?? listener.command,
+                                 value: "\(listener.port) · \(listener.reachable ? "Network" : "This Mac")")
+                    }
+                } else {
+                    Text(listenersFailed ? "Could not read the open ports." : listeners == nil ? "…" : "None of your apps is waiting for connections.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            Text("Your apps waiting for connections on a port. Network means other devices can try to connect, unless the firewall stops them.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func readListeners() async {
+        guard !reading else { return }
+        reading = true
+        defer { reading = false }
+        let read = await Listener.read(runner: ProcessRunner(timeout: 10))
+        listenersFailed = read == nil
+        // A failed refresh shows the failure, not the rows from before.
+        listeners = read
     }
 }
 
