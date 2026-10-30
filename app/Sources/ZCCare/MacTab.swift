@@ -604,7 +604,9 @@ private struct TrafficList: View {
                             Spacer()
                             Text("↓ \(Store.rate(Int64(app.down)))  ↑ \(Store.rate(Int64(app.up)))")
                                 .font(.callout.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
+                                .accessibilityLabel("receiving \(Store.rate(Int64(app.down))), sending \(Store.rate(Int64(app.up)))")
                         }
+                        .accessibilityElement(children: .combine)
                         .modifier(Hover())
                     }
                 } else {
@@ -850,6 +852,7 @@ private struct ValueRow: View {
             Text(value).font(.callout.monospacedDigit()).foregroundStyle(warn ? Theme.warning : .secondary)
                 .multilineTextAlignment(.trailing)
         }
+        .accessibilityElement(children: .combine)
         .modifier(Hover())
     }
 }
