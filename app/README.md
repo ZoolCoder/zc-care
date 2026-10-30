@@ -132,8 +132,8 @@ connected drives, disk images and shares, each with an Eject button, then
 the folders it can clear, with their sizes. *Free Up* on Memory splits
 memory into app memory, wired, compressed, cached files, free and swap. *Top Apps* on CPU lists what is
 busy. *Details* on Battery shows its condition, capacity, cycles,
-temperature, time left and charger; *Top Apps* on CPU starts with the GPU, fan and power
-readings. The bottom bar opens ZC Care and the settings.
+temperature, time left and charger; *Top Apps* on CPU starts with each core's load, then the GPU, fan and
+power readings. The bottom bar opens ZC Care and the settings.
 
 If [SketchyBar](https://github.com/FelixKratz/SketchyBar) is installed,
 ZC Care sends it the count of open items for its `zccare` item.

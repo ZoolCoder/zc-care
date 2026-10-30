@@ -53,7 +53,7 @@ Smart Care. The pages:
 |===
 | Page | Shows
 
-| Mac | Disk, memory, CPU, battery, network and sensors, the largest junk folders to free up, and advice. Each tile opens a detail; Disk's lists connected drives, disk images and network shares to eject, Memory's splits memory into app, wired, compressed, cached, free and swap, Battery's shows its condition, capacity, cycles, temperature, time left and charger, and CPU's starts with GPU temperature and load, fan speeds and power draw when macmon is installed.
+| Mac | Disk, memory, CPU, battery, network and sensors, the largest junk folders to free up, and advice. Each tile opens a detail; Disk's lists connected drives, disk images and network shares to eject, Memory's splits memory into app, wired, compressed, cached, free and swap, Battery's shows its condition, capacity, cycles, temperature, time left and charger, and CPU's starts with the load of each super, performance and efficiency core, then GPU temperature and load, fan speeds and power draw when macmon is installed.
 | Overview | Each target with what is in place and missing, *Apply* per target, and *All Items*, which opens My Workstation.
 | Updates | macOS updates from Software Update, checked every six hours or with *Check Again*, with *Open Software Update*; outdated packages and runtimes, with *Update* per item and *Update All…*.
 | Health | `doctor` findings with *Fix*, *Copy Fix* and *Ignore*.
