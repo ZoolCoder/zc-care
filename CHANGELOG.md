@@ -8,6 +8,34 @@ here with what to edit.
 
 ### ZC Care
 
+- Protection opens on three numbers, issues found, checks passed and when it
+  last checked, and its *Security Settings* read FileVault, the firewall,
+  System Integrity Protection and automatic security responses beside
+  Gatekeeper, each On or Off in words. One that is off has *Turn On…*, which
+  opens its System Settings pane.
+- Protection clears *Recent Items*: the Apple menu's recent applications,
+  documents, servers and hosts, and each app's Open Recent, list by list or
+  all at once. Favorites and the Finder sidebar are never touched.
+- Protection lists the *Known Wi-Fi Networks* this Mac joins on its own, with
+  *Forget…*, which asks for your password. A network counts as forgotten
+  only once it is gone from the list read again.
+- A privacy permission an app holds has *Reset*, through `tccutil`: the app
+  asks again next time. A reset counts only once the permission is gone when
+  read again. Eight more services are listed, such as Bluetooth, Reminders
+  and App Management.
+- Browser Privacy offers *Site Data*, each site's IndexedDB storage in
+  Chromium browsers and Firefox's per-site storage, and *Saved Tabs*.
+  Extensions' storage stays; Local Storage holds sites and extensions in one
+  database, so it is not offered. Vivaldi's sessions are left alone, since
+  its named sessions live there too.
+- The window is navy in every module, with the module's colour as a faint
+  light, and status in words as well as colour. Smart Care says under its
+  button that nothing changes until you confirm. Applications has a search
+  field, counts on its filters and checkboxes: *Uninstall N…* goes app by
+  app, each asking, and No stops the rest. Performance has segments to show
+  one section alone.
+- Performance can *Verify Startup Disk*, a read-only `diskutil verifyVolume`
+  that needs no password; repairs stay with Disk Utility's First Aid.
 - Protection lists extensions: Safari, Share, Finder Sync, Quick Look,
   Spotlight, Notification Center, Action and Photos extensions from
   `pluginkit`, and system extensions from `systemextensionsctl`, each with
