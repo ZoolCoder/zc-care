@@ -91,6 +91,9 @@ here with what to edit.
   saved by an older version are kept.
 - Vitals alerts warn when a connected Bluetooth device's battery falls to
   a limit, 20 % at first, at most every six hours per device.
+- Vitals alerts warn when one app keeps a core busy (100 % at first) or
+  holds a lot of memory (8 GB at first) for ten minutes, at most every
+  three hours per app; the notification opens the CPU or Memory details.
 - Homebrew offers no formula for removal when `brew info` or `brew deps`
   fails, and says why a kept formula stays.
 - Intel Only no longer hangs on an app whose executable is not a file.

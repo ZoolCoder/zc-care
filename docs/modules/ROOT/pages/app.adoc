@@ -66,7 +66,8 @@ ignored health checks. With notifications on, ZC Care also tells you when an
 app dragged to the Trash left more than 1 MB in the Library; the
 notification opens Applications' Leftovers on it. Vitals alerts warn of a
 nearly full disk, memory pressure, heat, battery wear, a Trash over its
-limit (5 GB at first) and a Bluetooth device's battery at 20 %, each with a limit in Settings. On first launch a Welcome window offers the same
+limit (5 GB at first), a Bluetooth device's battery at 20 % and one app
+holding a core or 8 GB of memory for ten minutes, each with a limit in Settings. On first launch a Welcome window offers the same
 choices; each can be skipped. If SketchyBar is installed, ZC Care hands it the
 count of open items for its `zccare` item.
 

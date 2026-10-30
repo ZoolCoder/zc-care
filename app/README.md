@@ -121,7 +121,8 @@ The panel's settings turn on:
 - notifications, including one when an app dragged to the Trash left files
   in the Library, which opens Leftovers
 - vitals alerts, with a limit each: free disk space, memory pressure, CPU
-  heat, battery capacity, the Trash's size and a Bluetooth device's battery
+  heat, battery capacity, the Trash's size, a Bluetooth device's battery
+  and one app hogging the CPU or memory for ten minutes
 - the ⌃⌥Z hotkey
 - the weekly Smart Care scan
 - opening at login
