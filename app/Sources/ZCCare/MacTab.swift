@@ -49,7 +49,9 @@ struct MacTab: View {
             }
             Group {
                 switch open {
-                case .disk: FreeUpList(store: store)
+                case .disk:
+                    if !store.monitor.volumes.isEmpty { DriveList(store: store, volumes: store.monitor.volumes) }
+                    FreeUpList(store: store)
                 case .memory: TopList(store: store, order: .memory)
                 case .cpu:
                     if let sensors = vitals.sensors { SensorList(sensors: sensors) }
@@ -86,6 +88,9 @@ struct MacTab: View {
             if let disk = vitals.disk {
                 Text("Available: \(Store.bytes(disk.available))").foregroundStyle(disk.isLow ? Theme.warning : .secondary)
                 Text("of \(Store.bytes(disk.total))")
+            }
+            if !store.monitor.volumes.isEmpty {
+                Text(Store.counted(store.monitor.volumes.count, "drive") + " connected")
             }
         }
     }
@@ -346,6 +351,50 @@ private struct Recommendation: View {
         case .security: Tint.orange
         default: Tint.pink
         }
+    }
+}
+
+/// What can be ejected, each with its space and an Eject button.
+private struct DriveList: View {
+    let store: Store
+    let volumes: [Volume]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Drives", count: volumes.count)
+            ListCard {
+                ForEach(volumes) { volume in
+                    HStack(spacing: 8) {
+                        Image(systemName: volume.isLocal ? "externaldrive" : "server.rack")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(volume.name).lineLimit(1)
+                            Text(detail(volume)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        if store.monitor.ejecting.contains(volume.path) {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Button {
+                                Task { await store.eject(volume) }
+                            } label: {
+                                Image(systemName: "eject.fill")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Eject “\(volume.name)”")
+                            .accessibilityLabel("Eject \(volume.name)")
+                        }
+                    }
+                    .modifier(Hover())
+                }
+            }
+        }
+    }
+
+    private func detail(_ volume: Volume) -> String {
+        guard volume.total > 0 else { return volume.kind }
+        return "\(volume.kind) · \(Store.bytes(volume.available)) free of \(Store.bytes(volume.total))"
     }
 }
 

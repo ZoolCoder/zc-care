@@ -66,6 +66,26 @@ struct Sampler {
         return Disk(name: v.volumeName ?? "Macintosh HD", total: Int64(total), available: available)
     }
 
+    /// Volumes that can be ejected, by name. Off the main thread: a share
+    /// that stopped answering stalls the read.
+    nonisolated static func volumes() -> [Volume] {
+        let keys: [URLResourceKey] = [.volumeLocalizedNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey,
+                                      .volumeIsInternalKey, .volumeIsEjectableKey, .volumeIsRemovableKey, .volumeIsLocalKey]
+        let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
+        return urls.compactMap { url in
+            guard let v = try? url.resourceValues(forKeys: Set(keys)) else { return nil }
+            let name = v.volumeLocalizedName.flatMap { $0.isEmpty ? nil : $0 } ?? url.lastPathComponent
+            var volume = Volume(name: name, path: url.path,
+                                total: Int64(v.volumeTotalCapacity ?? 0), available: Int64(v.volumeAvailableCapacity ?? 0))
+            volume.isInternal = v.volumeIsInternal
+            volume.isEjectable = v.volumeIsEjectable ?? false
+            volume.isRemovable = v.volumeIsRemovable ?? false
+            volume.isLocal = v.volumeIsLocal ?? true
+            return volume.canEject ? volume : nil
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
     /// The internal battery, or nil on a Mac without one.
     func battery() -> Battery? {
         guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),

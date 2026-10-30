@@ -1059,3 +1059,32 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     b.health = "Service Recommended"
     #expect(b.isWorn && !b.isFaded && b.needsService)
 }
+
+@Test func volumesEjectOnlyWhatFinderWould() {
+    var root = Volume(name: "Macintosh HD", path: "/", total: 1, available: 1)
+    #expect(!root.canEject)
+    root.isEjectable = true
+    #expect(!root.canEject)
+    var data = Volume(name: "Data", path: "/System/Volumes/Data", total: 1, available: 1)
+    data.isInternal = false
+    #expect(!data.canEject)
+    // A second internal APFS volume stays, like in Finder's sidebar.
+    #expect(!Volume(name: "Work", path: "/Volumes/Work", total: 1, available: 1).canEject)
+    var stick = Volume(name: "Stick", path: "/Volumes/Stick", total: 1, available: 1)
+    stick.isInternal = false
+    #expect(stick.canEject && stick.kind == "External drive")
+    var image = Volume(name: "Installer", path: "/Volumes/Installer", total: 1, available: 1)
+    image.isInternal = nil
+    #expect(image.canEject && image.kind == "Disk image")
+    var card = Volume(name: "Card", path: "/Volumes/Card", total: 1, available: 1)
+    card.isEjectable = true
+    card.isRemovable = true
+    #expect(card.canEject && card.kind == "Card or disk")
+    var hidden = Volume(name: "Backups", path: "/Volumes/.timemachine/NAS/Backups", total: 1, available: 1)
+    hidden.isLocal = false
+    #expect(!hidden.canEject)
+    #expect(!Volume(name: "Volumes", path: "/Volumes", total: 1, available: 1).canEject)
+    var share = Volume(name: "NAS", path: "/Volumes/NAS", total: 1, available: 1)
+    share.isLocal = false
+    #expect(share.canEject && share.kind == "Network share")
+}

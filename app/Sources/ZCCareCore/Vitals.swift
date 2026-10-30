@@ -167,6 +167,42 @@ public struct Battery: Sendable, Equatable {
     }
 }
 
+/// A mounted volume, as the file system describes it.
+public struct Volume: Sendable, Equatable, Identifiable {
+    public var name: String
+    public var path: String
+    public var total: Int64
+    public var available: Int64
+    /// Nil for a disk image, which gives no answer.
+    public var isInternal: Bool? = true
+    public var isEjectable = false
+    public var isRemovable = false
+    public var isLocal = true
+
+    public var id: String { path }
+
+    public init(name: String, path: String, total: Int64, available: Int64) {
+        self.name = name
+        self.path = path
+        self.total = total
+        self.available = available
+    }
+
+    /// A network share, a disk image or a drive plugged in: unmounted from
+    /// Finder or ZC Care. The startup disk and its system volumes are not.
+    public var canEject: Bool {
+        let parts = path.split(separator: "/")
+        guard parts.count >= 2, parts[0] == "Volumes", !parts.contains(where: { $0.hasPrefix(".") }) else { return false }
+        return isEjectable || isRemovable || isInternal != true || !isLocal
+    }
+
+    public var kind: String {
+        if !isLocal { return "Network share" }
+        if isInternal == nil { return "Disk image" }
+        return isInternal == true ? "Card or disk" : "External drive"
+    }
+}
+
 /// Bytes a second through the interface that carries the default route.
 public struct Throughput: Sendable, Equatable {
     public var interface: String

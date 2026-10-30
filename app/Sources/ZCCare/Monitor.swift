@@ -25,6 +25,10 @@ final class Monitor {
             Task { await readTop() }
         }
     }
+    /// External drives, disk images and shares, while the panel shows.
+    var volumes: [Volume] = []
+    /// Volumes being ejected, by path.
+    var ejecting: Set<String> = []
     var speed: SpeedTest?
     var testingSpeed = false
     /// What each Free Up folder takes, once scanned.
@@ -82,6 +86,9 @@ final class Monitor {
         }
         if panel, tick % 30 == 0 { await readSystemProfile(into: &v) }
         if v != vitals { vitals = v }
+        // Apart from the copy above, which would bring back a drive ejected
+        // while it waited.
+        if panel, tick % 5 == 0 { await readVolumes() }
         if order != nil, tick % 2 == 1 { await readTop() }
         tick += 1
     }
@@ -98,6 +105,11 @@ final class Monitor {
         if let name = ((root?["SPHardwareDataType"] as? [[String: Any]])?.first?["machine_name"] as? String) {
             model = name
         }
+    }
+
+    func readVolumes() async {
+        let next = await Task.detached { Sampler.volumes() }.value
+        if next != volumes { volumes = next }
     }
 
     func readTop() async {
@@ -198,6 +210,29 @@ final class Monitor {
 // MARK: Actions
 
 extension Store {
+    /// Unmounts a volume and, for a drive, ejects it; Finder's own call,
+    /// off the main thread as it waits for the disk.
+    func eject(_ volume: Volume) async {
+        guard !monitor.ejecting.contains(volume.path) else { return }
+        monitor.ejecting.insert(volume.path)
+        defer { monitor.ejecting.remove(volume.path) }
+        let url = URL(fileURLWithPath: volume.path)
+        let failure = await Task.detached { () -> NSError? in
+            do {
+                try NSWorkspace.shared.unmountAndEjectDevice(at: url)
+                return nil
+            } catch {
+                return error as NSError
+            }
+        }.value
+        if let failure {
+            let busy = failure.code == fBsyErr ? " An app is still using it." : ""
+            message = Message(text: "“\(volume.name)” was not ejected: \(failure.localizedDescription)\(busy)", failed: true)
+        }
+        // A drive's other volumes go with it.
+        await monitor.readVolumes()
+    }
+
     /// Outside Caches: clearing caches must not clear the record of it.
     static let activityFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("dev.zoolcoder.zccare/activity.json")
