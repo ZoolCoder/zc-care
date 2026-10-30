@@ -80,6 +80,9 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's *Free Up* on Disk lists connected drives, disk images and
+  network shares with their free space and an Eject button; the Disk
+  tile counts them.
 - The panel's Battery tile opens *Details*: condition, maximum capacity,
   charge cycles, temperature, time left or to full and the charger's
   watts, with *Battery Settings*. The battery notification opens it.
