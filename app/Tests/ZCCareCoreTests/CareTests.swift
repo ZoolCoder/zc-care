@@ -477,6 +477,8 @@ private func write(_ url: URL, bytes: Int) throws {
     let script = Maintenance.adminScript([["/usr/bin/killall", "-HUP", "it's"], ["/bin/echo", "a \"b\""]])
     #expect(script == #"do shell script "'/usr/bin/killall' '-HUP' 'it'\\''s' && '/bin/echo' 'a \"b\"'" with administrator privileges"#)
     #expect(Maintenance.tasks(brew: nil, docker: nil, xcode: false).allSatisfy { $0.id != "brew" && $0.id != "docker" })
+    let verify = Maintenance.tasks(brew: nil, docker: nil, xcode: false).first { $0.id == "verify" }
+    #expect(verify?.steps == [["/usr/sbin/diskutil", "verifyVolume", "/"]] && verify?.admin == false && verify?.every == nil)
     let docker = Maintenance.tasks(brew: "/b", docker: "/d", xcode: true).first { $0.id == "docker" }
     #expect(docker != nil)
     #expect(docker?.steps.allSatisfy { !$0.contains("system") && !$0.contains("container") } == true)

@@ -35,6 +35,10 @@ public enum Maintenance {
             MaintenanceTask(id: "spotlight", title: "Reindex Spotlight",
                             detail: "Rebuilds the search index; search is slow for a while after.",
                             symbol: "magnifyingglass", steps: [["/usr/bin/mdutil", "-E", "/"]], admin: true),
+            // Read-only: First Aid repairs, and only from Disk Utility.
+            MaintenanceTask(id: "verify", title: "Verify Startup Disk",
+                            detail: "Checks the startup disk's file system for damage; nothing is changed. Takes a few minutes.",
+                            symbol: "internaldrive.fill", steps: [["/usr/sbin/diskutil", "verifyVolume", "/"]]),
             MaintenanceTask(id: "launchservices", title: "Repair Open With Menus",
                             detail: "Drops apps that are gone and registers those in /Applications again.",
                             symbol: "contextualmenu.and.cursorarrow",
