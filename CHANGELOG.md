@@ -36,6 +36,52 @@ here with what to edit.
   one section alone.
 - Performance can *Verify Startup Disk*, a read-only `diskutil verifyVolume`
   that needs no password; repairs stay with Disk Utility's First Aid.
+- Applications has an *Updates* segment: apps with a newer version from
+  their own Sparkle update feed, beside the Homebrew and App Store updates
+  zc-care reads. Each row shows installed and available version, size,
+  release date, where it comes from, a *What's New* disclosure and *Open to
+  Update* or *Update*; a release that needs a newer macOS says so. Feeds
+  are read only on *Check Now*, since each vendor's server learns the app is
+  installed: https only, never this Mac or the local network, at most 5 MB,
+  beta channels skipped. My Tools' *App Updater* opens it.
+- Space Lens has a *Startup Disk* view: the APFS container's volumes,
+  including the ones Finder hides (System, VM, Preboot, Recovery), the space
+  snapshots and metadata take, what macOS frees on its own (purgeable space
+  and local Time Machine snapshots, with *Thin…*), and the drive's health
+  from `diskutil`: SMART status, wear, spare blocks, temperature, power-on
+  hours, data written and media errors. A failing or worn drive becomes a
+  Smart Care recommendation to back up.
+- Developer has a *Homebrew* section: formulae nothing depends on any more
+  (from `brew autoremove --dry-run`, never one your config declares) with
+  *Remove…*, what `brew cleanup` would free with *Clean Up…*, and each
+  `brew doctor` warning, expandable. Reading uses dry runs only, with
+  Homebrew's auto-update off.
+- Applications has an *Intel Only* filter: apps whose code needs Rosetta,
+  read from each app's executable.
+- The Simulator Runtimes and Android sections in Developer load again;
+  they never started while empty.
+- My Clutter's large files filter by kind and by *Not opened for a year*,
+  and each shows when it was last opened.
+- My Activity has a tile each for protection, updates, maintenance and the
+  startup drive, each opening its view; recommendations open the view they
+  name. The weekly scan notifies when the startup drive is failing.
+- The panel opens on the Mac page with the health grade on top, as
+  CleanMyMac's menu does; the other pages, *Plan* and *Apply* moved to a
+  menu at its foot, which shows a dot when a page holds something to do,
+  beside a refresh button (⌘R) and a Smart Care button.
+- Applications lists apps in `~/Applications` too and flags an app
+  installed twice; uninstalling one copy keeps the settings the other uses.
+  Smart Care recommends removing the extra copy.
+- Applications' Leftovers lists installer package receipts outside Apple's
+  and whether their files are still there.
+- Homebrew offers no formula for removal when `brew info` or `brew deps`
+  fails, and says why a kept formula stays.
+- Intel Only no longer hangs on an app whose executable is not a file.
+- Uninstall and Reset ignore a bundle id that would reach outside the
+  Library, such as `../../Documents` in a planted app's Info.plist.
+- Performance can *Reset Quick Look*, which clears thumbnails and reloads
+  preview plug-ins, and *Clear Font Caches* for this user; neither needs a
+  password.
 - Protection lists extensions: Safari, Share, Finder Sync, Quick Look,
   Spotlight, Notification Center, Action and Photos extensions from
   `pluginkit`, and system extensions from `systemextensionsctl`, each with
