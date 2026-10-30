@@ -1182,3 +1182,10 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     recent.append(0.2, at: start + 3500)
     #expect(recent.values == [0.2])
 }
+
+@Test func alertSummaryHoldsItsIDs() {
+    let ids = ["leftovers com.example.a", "leftovers com.example.b"]
+    #expect(Alert.summed(Alert.summary(of: ids)) == ids)
+    #expect(Alert.summed("leftovers com.example.a") == nil)
+    #expect(Alert.summed("more") == nil)
+}

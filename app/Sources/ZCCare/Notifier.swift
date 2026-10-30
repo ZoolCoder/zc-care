@@ -26,8 +26,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let shown = alerts.count > 3 ? Array(alerts.prefix(2)) : alerts
         for a in shown { send(id: a.id, title: a.title, body: a.body) }
         if alerts.count > 3 {
-            send(id: "more " + alerts.map(\.id).joined(), title: "\(alerts.count - 2) more need attention",
-                 body: alerts.dropFirst(2).map(\.title).joined(separator: ", "))
+            let rest = alerts.dropFirst(2)
+            send(id: Alert.summary(of: rest.map(\.id)), title: "\(rest.count) more need attention",
+                 body: rest.map(\.title).joined(separator: ", "))
         }
     }
 

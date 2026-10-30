@@ -12,6 +12,18 @@ public struct Alert: Sendable, Equatable {
         self.title = title
         self.body = body
     }
+
+    /// The id of one notification summing up these alerts: `more` and
+    /// their ids, one per line.
+    public static func summary(of ids: [String]) -> String {
+        (["more"] + ids).joined(separator: "\n")
+    }
+
+    /// The alert ids a summary's id holds; nil for any other id.
+    public static func summed(_ id: String) -> [String]? {
+        guard id.hasPrefix("more\n") else { return nil }
+        return id.split(separator: "\n").dropFirst().map(String.init)
+    }
 }
 
 extension Snapshot {

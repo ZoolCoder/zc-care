@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ZCCareCore
 
 @main
 struct ZCCareApp: App {
@@ -79,6 +80,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// other vitals their tile in the panel.
     private func openAlert(_ id: String) {
         switch id {
+        case _ where ZCCareCore.Alert.summed(id) != nil:
+            // Every app it sums up is marked removed, so Leftovers lists
+            // them all; it opens where the first one's fix is.
+            let ids = ZCCareCore.Alert.summed(id) ?? []
+            for leftover in ids where leftover.hasPrefix("leftovers ") {
+                care.care.removedIDs.insert(String(leftover.dropFirst("leftovers ".count)))
+            }
+            if let first = ids.first { openAlert(first) } else { window.show() }
         case _ where id.hasPrefix("care"): care.show()
         case "vitals disk", "vitals trash": care.show(.cleanup)
         case _ where id.hasPrefix("leftovers "):
