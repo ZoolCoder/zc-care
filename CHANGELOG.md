@@ -82,6 +82,8 @@ here with what to edit.
   emptied.
 - The panel's CPU and memory graphs have *Copy Readings*, which copies
   each reading with its time as rows that paste into a spreadsheet.
+- An app's files in Applications open on where its space goes: the app,
+  its data, caches, settings and logs, largest first.
 - The panel's Network detail names the proxies in use (HTTP, HTTPS, SOCKS,
   FTP, automatic configuration or discovery) and the VPNs up beside the main
   connection.
