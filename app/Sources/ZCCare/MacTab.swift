@@ -230,7 +230,9 @@ private struct Tile<Lines: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: symbol).foregroundStyle(.white.opacity(0.9)).frame(width: 18)
-                Text(title).font(.callout.weight(.semibold)).lineLimit(1)
+                    .accessibilityHidden(true)
+                // The group and its link carry the title already.
+                Text(title).font(.callout.weight(.semibold)).lineLimit(1).accessibilityHidden(true)
                 Spacer(minLength: 4)
                 if let value { value.font(.caption.monospacedDigit().weight(.semibold)) }
             }
@@ -241,12 +243,17 @@ private struct Tile<Lines: View>: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 if let link {
+                    // Several tiles share a link name: name the tile too.
                     Button(link, action: action).buttonStyle(.zcLink).font(.callout.weight(.semibold))
+                        .accessibilityLabel("\(title) \(link)")
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                 }
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
         .modifier(Card(selected: selected))
     }
 }

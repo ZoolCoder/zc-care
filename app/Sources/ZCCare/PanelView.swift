@@ -905,7 +905,7 @@ private struct Footer: View {
                 }
                 .disabled(store.busy != nil)
             } label: {
-                Image(systemName: "laptopcomputer").accessibilityLabel("Pages")
+                Image(systemName: "laptopcomputer").accessibilityLabel(waiting ? "Pages, something needs doing" : "Pages")
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
