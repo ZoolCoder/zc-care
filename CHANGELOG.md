@@ -80,6 +80,8 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's CPU and Memory details graph load and memory used over the
+  last five minutes, with the peak.
 - The panel's network tile opens a Network detail with the connection's
   service, addresses, router and DNS, and the speed test.
 - The panel's Disk detail shows how fast the drives read and write.

@@ -129,10 +129,10 @@ The panel's settings turn on:
 
 Each tile on the Mac tab opens a detail. *Free Up* on Disk shows
 what the drives read and write each second, lists connected drives, disk images and shares, each with an Eject button, then
-the folders it can clear, with their sizes. *Free Up* on Memory splits
+the folders it can clear, with their sizes. *Free Up* on Memory graphs the last five minutes and splits
 memory into app memory, wired, compressed, cached files, free and swap. *Top Apps* on CPU lists what is
 busy. *Details* on Battery shows its condition, capacity, cycles,
-temperature, time left and charger; *Top Apps* on CPU starts with each core's load, then the GPU, fan and
+temperature, time left and charger; *Top Apps* on CPU starts with a graph of the last five minutes and each core's load, then the GPU, fan and
 power readings. *Details* on the network tile shows the connection's
 service, addresses, router and DNS, and runs a speed test. The bottom bar opens ZC Care and the settings.
 
