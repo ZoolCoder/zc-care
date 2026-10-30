@@ -522,6 +522,8 @@ private struct NetworkDetail: View {
                         if !connection.searchDomains.isEmpty {
                             ValueRow(title: "Search domains", value: connection.searchDomains.joined(separator: ", "))
                         }
+                        ForEach(connection.proxies, id: \.self) { proxy in ValueRow(title: "Proxy", value: proxy) }
+                        if !connection.tunnels.isEmpty { ValueRow(title: "VPN", value: connection.tunnels.joined(separator: ", ")) }
                     }
                     .textSelection(.enabled)
                 }

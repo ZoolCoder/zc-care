@@ -1155,6 +1155,23 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(Connection(global: ["PrimaryInterface": ""], ipv4: nil, ipv6: nil, dns: nil, setup: nil) == nil)
 }
 
+@Test func connectionNamesProxiesAndTunnels() {
+    #expect(Connection.proxies(nil) == [])
+    #expect(Connection.proxies(["HTTPEnable": 0, "HTTPProxy": "10.0.0.1", "ExceptionsList": ["*.local"]]) == [])
+    #expect(Connection.proxies([
+        "HTTPEnable": 1, "HTTPProxy": "10.0.0.1", "HTTPPort": 3128,
+        "HTTPSEnable": 1, "HTTPSProxy": "",
+        "SOCKSEnable": 1, "SOCKSProxy": "127.0.0.1",
+        "ProxyAutoConfigEnable": 1, "ProxyAutoConfigURLString": "http://wpad/proxy.pac",
+        "ProxyAutoDiscoveryEnable": 1,
+    ]) == ["HTTP 10.0.0.1:3128", "SOCKS 127.0.0.1", "Automatic configuration http://wpad/proxy.pac", "Automatic discovery"])
+    let services: [(name: String?, interface: String)] = [
+        ("Wi-Fi", "en0"), ("Tailscale", "utun4"), (nil, "ipsec0"), ("Work", "utun7"), ("Tailscale", "utun4"),
+    ]
+    #expect(Connection.tunnels(services, primary: "en0") == ["Tailscale", "Work", "ipsec0"])
+    #expect(Connection.tunnels(services, primary: "utun7") == ["Tailscale", "ipsec0"])
+}
+
 @Test func recentKeepsTheLatestReadings() {
     let start = Date(timeIntervalSince1970: 1_000_000)
     var recent = Recent(capacity: 3)

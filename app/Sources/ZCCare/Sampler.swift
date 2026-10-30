@@ -189,11 +189,24 @@ struct Sampler {
         // An IPv6-only network has no IPv4 global state.
         let global = value("State:/Network/Global/IPv4") ?? value("State:/Network/Global/IPv6")
         let service = global?["PrimaryService"] as? String
-        return Connection(global: global,
-                          ipv4: service.flatMap { value("State:/Network/Service/\($0)/IPv4") },
-                          ipv6: service.flatMap { value("State:/Network/Service/\($0)/IPv6") },
-                          dns: value("State:/Network/Global/DNS"),
-                          setup: service.flatMap { value("Setup:/Network/Service/\($0)") })
+        var read = Connection(global: global,
+                              ipv4: service.flatMap { value("State:/Network/Service/\($0)/IPv4") },
+                              ipv6: service.flatMap { value("State:/Network/Service/\($0)/IPv6") },
+                              dns: value("State:/Network/Global/DNS"),
+                              setup: service.flatMap { value("Setup:/Network/Service/\($0)") })
+        read?.proxies = Connection.proxies(SCDynamicStoreCopyProxies(store) as? [String: Any])
+        if let primary = read?.interface {
+            // One round trip to configd for every service's state and setup.
+            let patterns = ["State:/Network/Service/[^/]+/IPv4", "Setup:/Network/Service/[^/]+"] as CFArray
+            let all = SCDynamicStoreCopyMultiple(store, nil, patterns) as? [String: [String: Any]] ?? [:]
+            let services = all.compactMap { key, state -> (name: String?, interface: String)? in
+                guard key.hasPrefix("State:"), let interface = state["InterfaceName"] as? String else { return nil }
+                let id = key.split(separator: "/")[3]
+                return (all["Setup:/Network/Service/\(id)"]?["UserDefinedName"] as? String, interface)
+            }
+            read?.tunnels = Connection.tunnels(services, primary: primary)
+        }
+        return read
     }
 
     private func primaryInterface() -> String? {
