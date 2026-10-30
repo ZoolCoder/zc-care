@@ -298,14 +298,22 @@ private func write(_ url: URL, bytes: Int) throws {
 
 @Test func privacyRowsKeepKnownServices() {
     let rows = Privacy.parse("""
-    kTCCServiceCamera|us.zoom.xos|2
-    kTCCServiceMicrophone|us.zoom.xos|0
-    kTCCServiceUbiquity|com.apple.x|2
-    kTCCServiceCamera|us.zoom.xos|2
+    kTCCServiceCamera|us.zoom.xos|0|2
+    kTCCServiceMicrophone|us.zoom.xos|0|0
+    kTCCServiceUbiquity|com.apple.x|0|2
+    kTCCServiceCamera|us.zoom.xos|0|2
+    kTCCServiceSystemPolicyAllFiles|/usr/local/bin/tool|1|2
+    kTCCServiceBluetoothAlways|-bad id|0|2
     """)
 
-    #expect(rows == [Permission(service: "Camera", client: "us.zoom.xos", allowed: true),
-                     Permission(service: "Microphone", client: "us.zoom.xos", allowed: false)])
+    #expect(rows == [Permission(service: "Camera", client: "us.zoom.xos", allowed: true, resetName: "Camera"),
+                     Permission(service: "Microphone", client: "us.zoom.xos", allowed: false, resetName: "Microphone"),
+                     Permission(service: "Full Disk Access", client: "/usr/local/bin/tool", allowed: true),
+                     Permission(service: "Bluetooth", client: "-bad id", allowed: true)])
+    #expect(Privacy.resetArguments(rows[0]) == ["reset", "Camera", "us.zoom.xos"])
+    // A path, or a name that would read as a flag, is never handed to tccutil.
+    #expect(Privacy.resetArguments(rows[2]) == nil)
+    #expect(Privacy.resetArguments(rows[3]) == nil)
 }
 
 @Test func spaceLensBuildsATreeOfTheBiggest() {

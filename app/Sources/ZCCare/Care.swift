@@ -102,6 +102,8 @@ final class Care {
     var backgroundItems: [BackgroundItem] = []
     var assessments: [String: Assessment] = [:]
     var gatekeeper: Bool?
+    var securityChecks: [SecurityCheck] = []
+    var protectionCheckedAt: Date?
     /// Nil until read; the TCC databases need Full Disk Access.
     var permissions: [Permission]?
     /// Why the permissions could not be read, when it was not Full Disk Access.
@@ -1348,7 +1350,10 @@ final class Care {
         if apps.isEmpty { await loadApps() }
         async let status = try? ProcessRunner(timeout: 30).run("/usr/sbin/spctl", ["--status"], env: [:])
         async let tcc = readPermissions()
+        async let checks = readSecurityChecks()
         gatekeeper = await status.map { $0.output.contains("assessments enabled") }
+        securityChecks = await checks
+        protectionCheckedAt = Date()
         permissions = await tcc
         await loadBrowserTraces()
         let unassessed = apps.filter { assessments[$0.id] == nil }.map { (id: $0.id, path: $0.url.path) }
@@ -1358,6 +1363,15 @@ final class Care {
         } each: { id, a in
             assessments[id] = a
         }
+    }
+
+    private func readSecurityChecks() async -> [SecurityCheck] {
+        let runner = ProcessRunner(timeout: 20)
+        async let fv = try? runner.run(SecurityChecks.fileVault.path, SecurityChecks.fileVault.args, env: [:])
+        async let fw = try? runner.run(SecurityChecks.firewall.path, SecurityChecks.firewall.args, env: [:])
+        async let sip = try? runner.run(SecurityChecks.integrity.path, SecurityChecks.integrity.args, env: [:])
+        let prefs = NSDictionary(contentsOfFile: SecurityChecks.updates) as? [String: Any]
+        return await SecurityChecks.checks(fileVault: fv?.output, firewall: fw?.output, integrity: sip?.output, updates: prefs)
     }
 
     func loadBrowserTraces() async {
@@ -1381,6 +1395,8 @@ final class Care {
         let effect = switch trace.kind {
         case BrowserPrivacy.cookies: "You will be signed out of websites in \(trace.browser)."
         case BrowserPrivacy.history: "\(trace.browser) forgets the pages you visited; bookmarks and passwords stay."
+        case BrowserPrivacy.siteData: "Sites forget the databases they keep in \(trace.browser), such as offline data; you may be signed out of some. Extensions keep theirs."
+        case BrowserPrivacy.sessions: "\(trace.browser) no longer reopens the tabs and windows it saved; bookmarks stay."
         default: "\(trace.browser) downloads pages again as you visit them."
         }
         guard Alerts.confirm("Clear \(trace.browser)'s \(trace.kind.lowercased())?",
@@ -1448,6 +1464,30 @@ final class Care {
         }
         permissionsError = rows == nil ? failure : nil
         return rows?.sorted { ($0.service, $0.client) < ($1.service, $1.client) }
+    }
+
+    /// Forgets one app's answer for one service: macOS asks the app again
+    /// the next time it wants it. Nothing to put back, so it asks first.
+    func resetPermission(_ p: Permission) async {
+        guard store.busy == nil, let args = Privacy.resetArguments(p),
+              Alerts.confirm("Reset \(p.service) for \(p.client)?",
+                             "macOS forgets that you \(p.allowed ? "allowed" : "denied") it; the app asks again the next time it needs \(p.service).",
+                             button: "Reset") else { return }
+        store.busy = "Resetting \(p.service)"
+        defer { store.busy = nil }
+        do {
+            let r = try await ProcessRunner(timeout: 20).run("/usr/bin/tccutil", args, env: [:])
+            guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "tccutil exited \(r.status)") }
+            // tccutil without root can leave answers kept in the system database: read them again to know.
+            permissions = await readPermissions()
+            guard !(permissions?.contains { $0.id == p.id } ?? false) else {
+                throw CLIError(message: "macOS keeps this answer in the system database; change it in System Settings")
+            }
+            store.record(.privacy, "Reset \(p.service) for \(p.client)")
+            store.message = Store.Message(text: "\(p.client) asks for \(p.service) again next time.", failed: false)
+        } catch {
+            store.message = Store.Message(text: "\(p.service) not reset: \(error.localizedDescription)", failed: true)
+        }
     }
 
     func openSettings(_ pane: String) {

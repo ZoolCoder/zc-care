@@ -79,6 +79,9 @@ public struct Permission: Codable, Sendable, Equatable, Identifiable {
     public var service: String
     public var client: String
     public var allowed: Bool
+    /// The service as tccutil names it, for Reset; nil when the client is a
+    /// path, which tccutil cannot reset.
+    public var resetName: String?
 
     public var id: String { service + " " + client }
 }
@@ -101,10 +104,18 @@ public enum Privacy {
         "kTCCServiceCalendar": "Calendars",
         "kTCCServicePhotos": "Photos",
         "kTCCServiceLocation": "Location",
+        "kTCCServiceBluetoothAlways": "Bluetooth",
+        "kTCCServiceReminders": "Reminders",
+        "kTCCServiceSpeechRecognition": "Speech Recognition",
+        "kTCCServiceMediaLibrary": "Media & Apple Music",
+        "kTCCServiceSystemPolicyAppBundles": "App Management",
+        "kTCCServiceDeveloperTool": "Developer Tools",
+        "kTCCServiceSystemPolicyNetworkVolumes": "Network Volumes",
+        "kTCCServiceSystemPolicyRemovableVolumes": "Removable Volumes",
     ]
 
     /// The query `sqlite3 -separator '|'` runs on each TCC.db.
-    public static let query = "select service, client, auth_value from access"
+    public static let query = "select service, client, client_type, auth_value from access"
 
     /// Whether sqlite3's error is macOS keeping the database from an app
     /// without Full Disk Access, and not another failure.
@@ -114,15 +125,28 @@ public enum Privacy {
             .contains(where: text.contains)
     }
 
-    /// sqlite3's rows; auth_value 2 is allowed, 0 denied. Unknown services
-    /// are left out; one row per service and client.
+    /// sqlite3's rows; auth_value 2 is allowed, 0 denied, client_type 0 a
+    /// bundle id. Unknown services are left out; one row per service and client.
     public static func parse(_ text: String) -> [Permission] {
         var seen = Set<String>()
         return text.split(whereSeparator: \.isNewline).compactMap { line in
             let f = line.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-            guard f.count == 3, let name = services[f[0]] else { return nil }
-            let p = Permission(service: name, client: f[1], allowed: f[2] == "2")
+            guard f.count == 4, let name = services[f[0]] else { return nil }
+            // Location answers live with locationd, which tccutil does not reset.
+            let bundle = f[2] == "0" && isBundleID(f[1]) && f[0] != "kTCCServiceLocation"
+            let p = Permission(service: name, client: f[1], allowed: f[3] == "2",
+                               resetName: bundle ? String(f[0].dropFirst("kTCCService".count)) : nil)
             return seen.insert(p.id).inserted ? p : nil
         }
+    }
+
+    /// `tccutil reset <service> <bundle id>`: macOS forgets the answer and
+    /// asks the app again next time. Needs no administrator.
+    public static func resetArguments(_ p: Permission) -> [String]? {
+        p.resetName.map { ["reset", $0, p.client] }
+    }
+
+    private static func isBundleID(_ s: String) -> Bool {
+        !s.isEmpty && !s.hasPrefix("-") && s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-._".contains($0)) }
     }
 }
