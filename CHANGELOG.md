@@ -80,6 +80,9 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's Battery detail lists what keeps the Mac or its screen
+  awake, from the power assertions, with the process caffeinate runs for and
+  how long, and *Quit* for an app.
 - The panel's Battery detail lists the apps using the most CPU, a large
   share of battery drain, with *Quit*.
 - The panel's Network detail lists the user's apps waiting for

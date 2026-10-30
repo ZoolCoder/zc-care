@@ -132,7 +132,7 @@ what the drives read and write each second, lists connected drives, disk images 
 the folders it can clear, with their sizes. *Free Up* on Memory graphs the last five minutes and splits
 memory into app memory, wired, compressed, cached files, free and swap. *Top Apps* on CPU lists what is
 busy. *Details* on Battery shows its condition, capacity, cycles,
-temperature, time left and charger, then the apps using the most CPU; *Top Apps* on CPU starts with a graph of the last five minutes and each core's load, then the GPU, fan and
+temperature, time left and charger, what keeps the Mac or its screen awake and for how long, then the apps using the most CPU; *Top Apps* on CPU starts with a graph of the last five minutes and each core's load, then the GPU, fan and
 power readings. *Details* on the network tile shows the connection's
 service, addresses, router and DNS, runs a speed test, and lists your apps
 listening on a port, marked Network when other devices can try to connect. The bottom bar opens ZC Care and the settings.
