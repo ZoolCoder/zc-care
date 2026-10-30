@@ -290,6 +290,30 @@ public enum Leftovers {
         }
     }
 
+    /// Where an app's space goes, largest first, each part as the folder
+    /// its files sit in names it: "App", "Data", "Caches", "Settings",
+    /// "Logs" or "Other". Parts with nothing in them are left out.
+    public static func breakdown(_ files: [LargeFile], app: URL) -> [(part: String, size: Int64)] {
+        var sizes: [String: Int64] = [:]
+        for file in files {
+            sizes[part(of: file.url.path, app: app.path), default: 0] += file.size
+        }
+        return sizes.filter { $0.value > 0 }.map { (part: $0.key, size: $0.value) }
+            .sorted { $0.size != $1.size ? $0.size > $1.size : $0.part < $1.part }
+    }
+
+    private static func part(of path: String, app: String) -> String {
+        if path == app { return "App" }
+        let library = ["Caches": "Caches", "HTTPStorages": "Caches", "WebKit": "Caches",
+                       "Application Support": "Data", "Containers": "Data", "Application Scripts": "Data", "Cookies": "Data",
+                       "Preferences": "Settings", "Saved Application State": "Settings", "LaunchAgents": "Settings",
+                       "Logs": "Logs"]
+        // The last one: the home folder may sit under a Library of its own.
+        guard let range = path.range(of: "/Library/", options: .backwards) else { return "Other" }
+        let folder = path[range.upperBound...].prefix { $0 != "/" }
+        return library[String(folder)] ?? "Other"
+    }
+
     /// The launch agents among the paths: launchd keeps running them until
     /// they are booted out, even with the file in the Trash.
     public static func agents(in paths: [String]) -> [String] {

@@ -204,6 +204,11 @@ private struct AppFiles: View {
         Group {
             if let files {
                 VStack(alignment: .leading, spacing: 4) {
+                    let parts = Leftovers.breakdown(files, app: app.url)
+                    if parts.count > 1 {
+                        Text(parts.map { "\($0.part) \(Store.bytes($0.size))" }.joined(separator: " · "))
+                            .foregroundStyle(.secondary)
+                    }
                     ForEach(files) { file in
                         HStack {
                             Text((file.url.path as NSString).abbreviatingWithTildeInPath).lineLimit(1).truncationMode(.middle)

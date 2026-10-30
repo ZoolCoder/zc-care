@@ -1429,3 +1429,27 @@ private struct ProfilerRunner: Runner {
     #expect(recent.table(column: "CPU\tall", timeZone: utc)
         == "time\tCPU all %\n2027-01-15T08:00:00Z\t12.3\n2027-01-15T08:00:02Z\t100.0\n")
 }
+
+@Test func leftoversBreakDownWhereTheSpaceGoes() {
+    let app = URL(fileURLWithPath: "/Applications/Slack.app")
+    let lib = "/Users/u/Library/"
+    let file = { (path: String, size: Int64) in LargeFile(url: URL(fileURLWithPath: path), size: size) }
+    let parts = Leftovers.breakdown([
+        file(app.path, 300),
+        file(lib + "Application Support/Slack", 900),
+        file(lib + "Containers/com.tinyspeck.slackmacgap", 100),
+        file(lib + "Caches/com.tinyspeck.slackmacgap", 400),
+        file(lib + "HTTPStorages/com.tinyspeck.slackmacgap", 100),
+        file(lib + "Preferences/com.tinyspeck.slackmacgap.plist", 4),
+        file(lib + "Preferences/ByHost/com.tinyspeck.slackmacgap.ABC.plist", 4),
+        file(lib + "LaunchAgents/com.tinyspeck.slackmacgap.helper.plist", 4),
+        file(lib + "WebKit/com.tinyspeck.slackmacgap", 50),
+        file(lib + "Cookies/com.tinyspeck.slackmacgap.binarycookies", 50),
+        file(lib + "Logs/Slack", 0),
+        file("/Users/u/elsewhere/x", 7),
+        file("/Users/u/Library/Mobile Documents/x", 5),
+    ], app: app)
+    #expect(parts.map(\.part) == ["Data", "Caches", "App", "Other", "Settings"])
+    #expect(parts.map(\.size) == [1050, 550, 300, 12, 12])
+    #expect(Leftovers.breakdown([], app: app).isEmpty)
+}
