@@ -80,6 +80,12 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's Battery tile opens *Details*: condition, maximum capacity,
+  charge cycles, temperature, time left or to full and the charger's
+  watts, with *Battery Settings*. The battery notification opens it.
+- The CPU tile's *Top Apps* starts with the sensors macmon reads: GPU
+  temperature and load, each fan against its top speed, and the power
+  the CPU, the GPU and the whole Mac draw.
 - Vitals alerts warn once a day when the Trash holds more than a limit
   Settings sets, 5 GB at first; the notification opens Cleanup. Limits
   saved by an older version are kept.

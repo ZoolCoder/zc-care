@@ -128,7 +128,9 @@ The panel's settings turn on:
 
 Each tile on the Mac tab opens a detail. *Free Up* on Disk lists the
 folders it can clear, with their sizes. *Top Apps* on CPU lists what is
-busy. The bottom bar opens ZC Care and the settings.
+busy. *Details* on Battery shows its condition, capacity, cycles,
+temperature, time left and charger; *Top Apps* on CPU starts with the GPU, fan and power
+readings. The bottom bar opens ZC Care and the settings.
 
 If [SketchyBar](https://github.com/FelixKratz/SketchyBar) is installed,
 ZC Care sends it the count of open items for its `zccare` item.
