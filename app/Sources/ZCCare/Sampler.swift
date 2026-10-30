@@ -184,6 +184,18 @@ struct Sampler {
         return characteristics?["Physical Interconnect"] as? String == "Virtual Interface"
     }
 
+    func connection() -> Connection? {
+        let value = { (key: String) in SCDynamicStoreCopyValue(self.store, key as CFString) as? [String: Any] }
+        // An IPv6-only network has no IPv4 global state.
+        let global = value("State:/Network/Global/IPv4") ?? value("State:/Network/Global/IPv6")
+        let service = global?["PrimaryService"] as? String
+        return Connection(global: global,
+                          ipv4: service.flatMap { value("State:/Network/Service/\($0)/IPv4") },
+                          ipv6: service.flatMap { value("State:/Network/Service/\($0)/IPv6") },
+                          dns: value("State:/Network/Global/DNS"),
+                          setup: service.flatMap { value("Setup:/Network/Service/\($0)") })
+    }
+
     private func primaryInterface() -> String? {
         let global = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any]
         return global?["PrimaryInterface"] as? String

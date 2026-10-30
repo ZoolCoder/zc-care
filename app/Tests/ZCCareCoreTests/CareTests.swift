@@ -1134,3 +1134,23 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(DiskIO.rate(from: last, to: last, seconds: 0) == nil)
     #expect(DiskIO.rate(from: [:], to: last, seconds: 2) == nil)
 }
+
+@Test func connectionReadsThePrimaryService() {
+    let global: [String: Any] = ["PrimaryInterface": "en0", "PrimaryService": "S", "Router": "10.0.0.1"]
+    let read = Connection(global: global,
+                          ipv4: ["Addresses": ["192.168.1.9"], "SubnetMasks": ["255.255.255.0"], "Router": "192.168.1.1"],
+                          ipv6: ["Addresses": ["fe80::1", "2a02::9"]],
+                          dns: ["ServerAddresses": ["1.1.1.1", "8.8.8.8"], "SearchDomains": ["home"]],
+                          setup: ["UserDefinedName": "Wi-Fi"])
+    #expect(read?.service == "Wi-Fi" && read?.interface == "en0")
+    #expect(read?.addresses == ["192.168.1.9", "2a02::9"])
+    #expect(read?.subnetMask == "255.255.255.0" && read?.router == "192.168.1.1")
+    #expect(read?.dns == ["1.1.1.1", "8.8.8.8"] && read?.searchDomains == ["home"])
+    let bare = Connection(global: global, ipv4: nil, ipv6: nil, dns: nil, setup: nil)
+    #expect(bare?.service == "en0" && bare?.router == "10.0.0.1" && bare?.addresses == [] && bare?.subnetMask == nil)
+    let vpn = Connection(global: ["PrimaryInterface": "utun4"], ipv4: ["Addresses": ["100.64.0.2"]],
+                         ipv6: ["Addresses": ["FE80::2", "fd7a::2"]], dns: nil, setup: nil)
+    #expect(vpn?.service == "utun4" && vpn?.addresses == ["100.64.0.2", "fd7a::2"] && vpn?.router == nil)
+    #expect(Connection(global: nil, ipv4: nil, ipv6: nil, dns: nil, setup: nil) == nil)
+    #expect(Connection(global: ["PrimaryInterface": ""], ipv4: nil, ipv6: nil, dns: nil, setup: nil) == nil)
+}

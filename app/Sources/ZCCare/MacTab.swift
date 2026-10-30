@@ -61,6 +61,7 @@ struct MacTab: View {
                     if let sensors = vitals.sensors { SensorList(sensors: sensors) }
                     TopList(store: store, order: .cpu)
                 case .battery: if let battery = vitals.battery { BatteryDetail(battery: battery) }
+                case .network: NetworkDetail(store: store)
                 case nil: EmptyView()
                 }
             }
@@ -133,8 +134,7 @@ struct MacTab: View {
     private var networkTile: some View {
         let net = vitals.network
         return Tile(symbol: net?.wifi == false ? "network" : "wifi", title: net.map { $0.wifi ? "Wi-Fi" : $0.interface } ?? "Network",
-                    link: monitor.testingSpeed ? "Testing…" : "Test Speed",
-                    action: { Task { await store.testSpeed() } }) {
+                    link: "Details", selected: open == .network, action: { toggle(.network) }) {
             if let net {
                 Label(Store.rate(Int64(net.up)), systemImage: "arrow.up")
                 Label(Store.rate(Int64(net.down)), systemImage: "arrow.down")
@@ -188,8 +188,6 @@ struct MacTab: View {
     private func temperature(_ s: Sensors) -> Text {
         Text("\(Int(s.cpuTemp.rounded()))°C").foregroundStyle(s.cpuTemp >= 95 ? Theme.bad : s.cpuTemp >= 80 ? Theme.warning : .secondary)
     }
-
-    private func mbps(_ bits: Double) -> String { "\(Int((bits / 1_000_000).rounded())) Mbps" }
 
     private func batterySymbol(_ b: Battery) -> String {
         if b.charging { return "battery.100percent.bolt" }
@@ -473,6 +471,67 @@ private struct FreeUpList: View {
     }
 }
 
+/// The connection's addresses, router and DNS, and the last speed test.
+private struct NetworkDetail: View {
+    let store: Store
+
+    private var monitor: Monitor { store.monitor }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let connection = monitor.connection {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        SectionTitle(title: "Connection")
+                        Spacer()
+                        Button("Network Settings") {
+                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Network-Settings.extension")!)
+                        }
+                        .buttonStyle(.zcLink).font(.caption)
+                    }
+                    ListCard {
+                        ValueRow(title: "Service", value: connection.service == connection.interface
+                                 ? connection.interface : "\(connection.service) (\(connection.interface))")
+                        ForEach(connection.addresses, id: \.self) { address in
+                            ValueRow(title: address.contains(":") ? "IPv6 address" : "IP address", value: address)
+                        }
+                        if let mask = connection.subnetMask { ValueRow(title: "Subnet mask", value: mask) }
+                        if let router = connection.router { ValueRow(title: "Router", value: router) }
+                        if !connection.dns.isEmpty { ValueRow(title: "DNS", value: connection.dns.joined(separator: ", ")) }
+                        if !connection.searchDomains.isEmpty {
+                            ValueRow(title: "Search domains", value: connection.searchDomains.joined(separator: ", "))
+                        }
+                    }
+                    .textSelection(.enabled)
+                }
+            } else {
+                Text(monitor.connectionRead ? "Not connected" : "…").foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    SectionTitle(title: "Speed")
+                    Spacer()
+                    if monitor.testingSpeed {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button(monitor.speed == nil ? "Test Speed" : "Test Again") { Task { await store.testSpeed() } }
+                            .buttonStyle(.zcLink).font(.caption)
+                    }
+                }
+                ListCard {
+                    ValueRow(title: "Download", value: monitor.speed.map { mbps($0.down) } ?? "–")
+                    ValueRow(title: "Upload", value: monitor.speed.map { mbps($0.up) } ?? "–")
+                    if let latency = monitor.speed?.latency {
+                        ValueRow(title: "Latency", value: "\(Int(latency.rounded())) ms", warn: latency >= 100)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private func mbps(_ bits: Double) -> String { "\(Int((bits / 1_000_000).rounded())) Mbps" }
+
 /// What macOS and the battery itself say about its wear and charge.
 private struct BatteryDetail: View {
     let battery: Battery
@@ -513,9 +572,10 @@ private struct ValueRow: View {
 
     var body: some View {
         HStack {
-            Text(title)
+            Text(title).fixedSize()
             Spacer()
             Text(value).font(.callout.monospacedDigit()).foregroundStyle(warn ? Theme.warning : .secondary)
+                .multilineTextAlignment(.trailing)
         }
         .modifier(Hover())
     }

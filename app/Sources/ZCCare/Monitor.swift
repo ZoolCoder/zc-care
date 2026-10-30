@@ -5,7 +5,8 @@ import ZCCareCore
 /// Samples the Mac's vitals every two seconds while the Mac tab or the menu
 /// bar's readings show: rates from the kernel each time and the disk every
 /// ten seconds. For the Mac tab only, sensors every ten seconds, and devices
-/// and battery health, which system_profiler is slow to give, each minute.
+/// and battery health, which system_profiler is slow to give, each minute,
+/// and the connection's addresses each time.
 /// Each sample lands as one change, and only when something moved, so the
 /// panel redraws at most once a tick.
 @MainActor @Observable
@@ -30,6 +31,12 @@ final class Monitor {
     /// Volumes being ejected, by path.
     var ejecting: Set<String> = []
     var speed: SpeedTest?
+    /// The primary service's addresses, router and DNS, for the Network
+    /// detail.
+    var connection: Connection?
+    /// False until the panel's first read, when no connection still means
+    /// unknown rather than offline.
+    var connectionRead = false
     var testingSpeed = false
     /// What each Free Up folder takes, once scanned.
     var junk: [String: Int64] = [:]
@@ -49,8 +56,13 @@ final class Monitor {
 
     func start(_ reader: Reader = .panel) {
         readers.insert(reader)
-        // The tab opening reads the slow parts at once.
-        if reader == .panel { tick = 0 }
+        // The tab opening reads the slow parts at once, and the connection
+        // before them, so the Network detail never shows the last one.
+        if reader == .panel {
+            tick = 0
+            connection = sampler.connection()
+            connectionRead = true
+        }
         guard loop == nil else { return }
         loop = Task { [weak self] in
             while !Task.isCancelled {
@@ -62,6 +74,7 @@ final class Monitor {
 
     func stop(_ reader: Reader = .panel) {
         readers.remove(reader)
+        if reader == .panel { connectionRead = false }
         guard readers.isEmpty else { return }
         loop?.cancel()
         loop = nil
@@ -81,6 +94,7 @@ final class Monitor {
         // Keeps the last rate through a read that gives none, so the row
         // does not blink.
         v.diskIO = panel ? sampler.diskIO() ?? v.diskIO : nil
+        if panel, case let now = sampler.connection(), now != connection { connection = now }
         if tick % 5 == 0 {
             v.disk = sampler.disk()
             if panel, let macmon, let r = try? await ProcessRunner(timeout: 15).run(macmon, ["pipe", "-s", "1", "-i", "200"], env: [:]) {
