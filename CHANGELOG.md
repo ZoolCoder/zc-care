@@ -80,6 +80,8 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's network tile opens a Network detail with the connection's
+  service, addresses, router and DNS, and the speed test.
 - The panel's Disk detail shows how fast the drives read and write.
 - The panel's CPU detail shows each kind of core, super, performance and efficiency, with
   their load and clock, and a bar for each core, when macmon is installed.
