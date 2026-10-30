@@ -448,7 +448,7 @@ final class Store {
     /// The CLI, without a config until there is one; nil when zc-care is
     /// missing.
     var setupCLI: CareCLI? {
-        careCLI ?? binary.map { CareCLI(binary: $0, config: "", env: env) }
+        careCLI ?? binary.map { CareCLI(binary: $0, config: "", env: env, reader: ProcessRunner(timeout: 300)) }
     }
 
     /// Writes the starter config for who the Mac is for, then reads the
@@ -459,7 +459,16 @@ final class Store {
         defer { busy = nil }
         await connected()
         guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
-        let result = try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac)
+        let made = await cancellable { () -> Result<InitResult, Error> in
+            do {
+                return .success(try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac))
+            } catch is CancellationError {
+                return .failure(CLIError(message: Store.cancelled))
+            } catch {
+                return .failure(error)
+            }
+        }
+        let result = try made.get()
         UserDefaults.standard.set(result.config, forKey: Keys.config)
         await connect()
         return result
@@ -670,6 +679,11 @@ final class Store {
         }
         busy = nil
         let targets = packageTargets
+        guard !targets.isEmpty else {
+            // An empty target list would plan the whole config.
+            message = Message(text: "No target declares apps to install.", failed: true)
+            return false
+        }
         message = nil
         await change("Installing apps", confirm: false) {
             (try await $0.plan(targets: targets, savingTo: self.planFile), false)

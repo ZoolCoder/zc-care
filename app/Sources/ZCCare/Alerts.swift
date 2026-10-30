@@ -7,17 +7,19 @@ enum Alerts {
     /// Lists every change in the plan; deletions get a warning of their own.
     static func confirm(plan: PlanDoc) -> Bool {
         let alert = NSAlert()
+        // What undo cannot take back comes first and marked, so the cut at 25 never hides it.
         let changes = plan.actions.filter { $0.manual != true }
+            .sorted { ($0.op == "DELETE" || $0.destructive == true) && !($1.op == "DELETE" || $1.destructive == true) }
         alert.messageText = changes.count == 1 ? "Make this change?" : "Make these \(changes.count) changes?"
-        let lines = changes.prefix(25).map { "\($0.op)  \($0.resource)" }
+        let lines = changes.prefix(25).map { "\($0.destructive == true && $0.op != "DELETE" ? "⚠︎ " : "")\($0.op)  \($0.resource)" }
         var text = lines.joined(separator: "\n")
         if changes.count > lines.count { text += "\n… and \(changes.count - lines.count) more" }
         if plan.deletes {
             alert.alertStyle = .critical
-            text = "This plan deletes things.\n\n" + text
+            text = "This plan deletes things, overwrites edits made outside zc-care or runs scripts; undo cannot take that back.\n\n" + text
         }
         alert.informativeText = text
-        alert.addButton(withTitle: plan.deletes ? "Delete and Apply" : "Apply")
+        alert.addButton(withTitle: plan.deletes ? "Apply Anyway" : "Apply")
         alert.addButton(withTitle: "Cancel")
         return run(alert) == .alertFirstButtonReturn
     }

@@ -1119,7 +1119,7 @@ final class Care {
         case .remove(let target, let resource):
             if let cli = store.cli {
                 failure = await store.cancellable {
-                    await self.store.failure("remove failed") { try await cli.run(["remove", "-target", target, resource]) }
+                    await self.store.failure("remove failed") { try await cli.run(["remove", "-yes", "-target", target, resource]) }
                 }
             } else {
                 failure = "zc-care is not installed"
@@ -1373,6 +1373,10 @@ final class Care {
         guard Alerts.confirm("Adopt \(app.name) as cask \(token)?",
                              "Homebrew takes over the app in /Applications, and zc-care adds cask:\(token) to the \(target) target.",
                              button: "Adopt") else { return }
+        guard store.busy == nil else {
+            store.message = Store.Message(text: "\(app.name) was not adopted: another change is running.", failed: true)
+            return
+        }
         store.busy = "Adopting \(app.name)"
         defer { store.busy = nil }
         let installFailure = await store.cancellable {

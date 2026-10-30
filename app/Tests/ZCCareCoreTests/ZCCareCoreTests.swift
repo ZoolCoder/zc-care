@@ -313,3 +313,23 @@ struct EchoEnvRunner: Runner {
     #expect(watch.alerts(for: v, now: now).isEmpty)
     #expect(watch.alerts(for: v, now: now.addingTimeInterval(6 * 3600)).map(\.id) == ["vitals disk"])
 }
+
+@Test func overwritesAndScriptsCountAsDeleting() throws {
+    let doc = try JSONDecoder().decode(PlanDoc.self, from: Data("""
+    {"changes": 1, "manual": 0, "actions": [
+      {"op": "UPDATE", "target": "base", "resource": "dotfile:.zshrc", "destructive": true}
+    ]}
+    """.utf8))
+    #expect(doc.deletes)
+    #expect(!PlanDoc(changes: 1, manual: 0, actions: [PlanAction(op: "UPDATE", target: "base", resource: "x")]).deletes)
+}
+
+@Test func aFailedPlanThrowsAndLeavesNoFileToApply() async throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("plan-\(UUID().uuidString).json")
+    try Data("{}".utf8).write(to: file)
+    let fake = FakeRunner(outputs: ["plan": CommandResult(status: 1, stdout: Data(#"{"changes": 0, "manual": 0, "actions": []}"#.utf8),
+                                                          stderr: "error: config invalid")])
+    let ws = CareCLI(binary: "/zc", config: "/c.yaml", env: [:], runner: fake)
+    await #expect(throws: CLIError.self) { try await ws.plan(savingTo: file.path) }
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+}

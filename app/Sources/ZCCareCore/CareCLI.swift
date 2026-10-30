@@ -303,7 +303,15 @@ public struct CareCLI: Sendable {
         if upgrade { args.append("-upgrade") }
         for t in targets { args += ["-target", t] }
         for r in only { args += ["-only", r] }
-        return try await json(args)
+        // A failed plan can leave the last one's file behind; apply must never get it.
+        try? FileManager.default.removeItem(atPath: file)
+        let r = try await read(args)
+        guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "plan exited \(r.status)") }
+        do {
+            return try JSONDecoder().decode(PlanDoc.self, from: r.stdout)
+        } catch {
+            throw CLIError(message: "zc-care printed a plan this app cannot read.")
+        }
     }
 
     /// Applies a saved plan. -yes: the owner confirmed the plan in the app,
