@@ -51,8 +51,19 @@ public struct IgnoreList: Sendable, Equatable {
         if covers(folder) {
             return Set((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? [])
         }
-        return Set(paths.compactMap { path in
+        let inside = Set(paths.compactMap { path in
             Self.relative(path, to: folder)?.split(separator: "/").first.map(String.init)
+        })
+        return paths.isEmpty ? inside : inside.union(linked(in: folder))
+    }
+
+    /// Links directly inside `folder` to something on the list: the list
+    /// holds the resolved path, which names nothing in the folder.
+    private func linked(in folder: String) -> Set<String> {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []
+        return Set(names.filter { name in
+            let url = URL(fileURLWithPath: folder).appendingPathComponent(name)
+            return (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true && touches(url)
         })
     }
 

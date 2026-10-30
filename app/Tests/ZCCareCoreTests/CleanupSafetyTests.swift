@@ -99,11 +99,11 @@ private func age(_ url: URL, days: Double) throws {
 @Test func putBackCreatesMissingFoldersPrivately() throws {
     let dir = try tempDir()
     defer { try? FileManager.default.removeItem(at: dir) }
-    let binned = dir.appendingPathComponent("Trash/a.txt")
+    let binned = dir.appendingPathComponent(".Trash/a.txt")
     try write(binned)
     let original = dir.appendingPathComponent("gone/deeper/a.txt")
     let item = Trashed(original: original, inTrash: binned)
-    #expect(Trashed.putBack([item]).isEmpty)
+    #expect(Trashed.putBack([item], home: dir.path).isEmpty)
     let mode = try FileManager.default.attributesOfItem(atPath: original.deletingLastPathComponent().path)[.posixPermissions] as? Int
     #expect(mode == 0o700)
 }

@@ -46,13 +46,17 @@ struct RecentItemsSection: View {
 
     private func clear(_ chosen: [RecentList]) async {
         guard care.store.busy == nil else { return }
+        let urls = chosen.flatMap(\.files).filter { !care.store.ignoreList.touches($0) }
+        guard !urls.isEmpty else {
+            care.store.message = Store.Message(text: "Those recent items lists are on the ignore list, so they stay.", failed: true)
+            return
+        }
         let names = chosen.map(\.name).joined(separator: ", ")
         guard Alerts.confirm("Clear \(chosen.count == 1 ? names : "every recent items list")?",
                              "macOS forgets what was opened lately in \(names). Documents and apps stay where they are.",
                              button: "Clear") else { return }
         care.store.busy = "Clearing recent items"
         defer { care.store.busy = nil }
-        let urls = chosen.flatMap(\.files)
         let permanently = care.store.deletesPermanently
         let removal = await Task.detached { Removal.remove(urls, permanently: permanently) }.value
         // The lists live in sharedfilelistd's memory too; it rereads them when it starts again.

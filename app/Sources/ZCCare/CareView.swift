@@ -255,7 +255,7 @@ private struct Sidebar: View {
         case .activity:
             let n = care.recommendations.count
             return n > 0 ? "\(n)" : nil
-        case .cleanup: return care.junk + care.ai > 0 ? Store.bytes(care.junk + care.ai) : nil
+        case .cleanup: return care.junk + care.aiBeyondJunk > 0 ? Store.bytes(care.junk + care.aiBeyondJunk) : nil
         case .clutter: return care.clutter > 0 ? Store.bytes(care.clutter) : nil
         case .developer: return care.developer > 0 ? Store.bytes(care.developer) : nil
         case .apps:

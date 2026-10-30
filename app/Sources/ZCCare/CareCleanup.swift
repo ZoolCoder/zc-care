@@ -14,7 +14,7 @@ struct CleanupView: View {
                    action: ("Rescan", { Task { await care.enter(.cleanup) } }))
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("There are \(Store.bytes(care.junk + care.ai)) of junk files on your Mac.")
+                    Text("There are \(Store.bytes(care.junk + care.aiBeyondJunk)) of junk files on your Mac.")
                         .font(.system(size: 26, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)

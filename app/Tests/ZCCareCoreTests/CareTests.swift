@@ -797,7 +797,7 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
 
 @Test func putBackMovesTrashedItemsHome() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    let trash = root.appendingPathComponent("Trash")
+    let trash = root.appendingPathComponent(".Trash")
     try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let home = root.appendingPathComponent("Downloads/report.pdf")
@@ -806,14 +806,14 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
 
     var entry = ActivityEntry(kind: .files, title: "report.pdf", bytes: 1,
                               trashed: [Trashed(original: home, inTrash: binned)])
-    #expect(entry.canPutBack)
-    #expect(Trashed.putBack(entry.trashed ?? []).isEmpty)
+    #expect(entry.canPutBack(home: root.path))
+    #expect(Trashed.putBack(entry.trashed ?? [], home: root.path).isEmpty)
     #expect(FileManager.default.fileExists(atPath: home.path))
-    #expect(!entry.canPutBack)
+    #expect(!entry.canPutBack(home: root.path))
 
     try FileManager.default.moveItem(at: home, to: binned)
     entry.putBack = .now
-    #expect(!entry.canPutBack)
+    #expect(!entry.canPutBack(home: root.path))
 }
 
 @Test func putBackNeverOverwrites() throws {
@@ -821,13 +821,14 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let home = root.appendingPathComponent("a.txt")
-    let binned = root.appendingPathComponent("a 2.txt")
+    let binned = root.appendingPathComponent(".Trash/a 2.txt")
+    try FileManager.default.createDirectory(at: binned.deletingLastPathComponent(), withIntermediateDirectories: true)
     try Data("new".utf8).write(to: home)
     try Data("old".utf8).write(to: binned)
 
     let entry = ActivityEntry(kind: .files, title: "a.txt", bytes: 3, trashed: [Trashed(original: home, inTrash: binned)])
-    #expect(!entry.canPutBack)
-    #expect(Trashed.putBack(entry.trashed ?? []) == ["a.txt"])
+    #expect(!entry.canPutBack(home: root.path))
+    #expect(Trashed.putBack(entry.trashed ?? [], home: root.path) == ["a.txt"])
     #expect(try String(contentsOf: home, encoding: .utf8) == "new")
 }
 

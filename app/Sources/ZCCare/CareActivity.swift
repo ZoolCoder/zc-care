@@ -213,6 +213,7 @@ private struct Recent: View {
     let log: ActivityLog
 
     var body: some View {
+        let fullDisk = Access.fullDisk
         VStack(alignment: .leading, spacing: 10) {
             Text("Recent Activity").font(.headline)
             if log.entries.isEmpty {
@@ -229,7 +230,7 @@ private struct Recent: View {
                     }
                     Spacer()
                     if e.bytes > 0 { Text(Store.bytes(e.bytes)).font(.callout.monospacedDigit()).foregroundStyle(.secondary) }
-                    if e.canPutBack {
+                    if Store.mayPutBack(e, fullDisk: fullDisk) {
                         Button("Put Back") { store.putBack(e) }
                             .controlSize(.small)
                             .disabled(store.busy != nil)

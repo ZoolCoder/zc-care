@@ -31,7 +31,7 @@ private func write(_ url: URL, bytes: Int) throws {
 @Test func partialPutBackKeepsRemainingRetriable() throws {
     let root = try tempDir()
     defer { try? FileManager.default.removeItem(at: root) }
-    let trash = root.appendingPathComponent("Trash")
+    let trash = root.appendingPathComponent(".Trash")
     let a = root.appendingPathComponent("a.txt"), b = root.appendingPathComponent("b.txt")
     let binnedA = trash.appendingPathComponent("a.txt"), binnedB = trash.appendingPathComponent("b.txt")
     try write(binnedA, bytes: 4096)
@@ -39,18 +39,91 @@ private func write(_ url: URL, bytes: Int) throws {
     try Data("new".utf8).write(to: b)
     var entry = ActivityEntry(kind: .files, title: "two", bytes: 8192,
                               trashed: [Trashed(original: a, inTrash: binnedA), Trashed(original: b, inTrash: binnedB)])
-    #expect(entry.canPutBack)
-    #expect(entry.putBackFromTrash() == ["b.txt"])
+    #expect(entry.canPutBack(home: root.path))
+    #expect(entry.putBackFromTrash(home: root.path) == ["b.txt"])
     #expect(FileManager.default.fileExists(atPath: a.path))
     #expect(entry.putBack == nil)
     #expect(entry.trashed?.map(\.original) == [b.path])
     #expect(entry.bytes < 8192)
-    #expect(!entry.canPutBack)
+    #expect(!entry.canPutBack(home: root.path))
 
     try FileManager.default.removeItem(at: b)
-    #expect(entry.canPutBack)
-    #expect(entry.putBackFromTrash().isEmpty)
+    #expect(entry.canPutBack(home: root.path))
+    #expect(entry.putBackFromTrash(home: root.path).isEmpty)
     #expect(entry.putBack != nil)
+}
+
+@Test func putBackRefusesAnotherItemThatTookTheTrashName() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let original = root.appendingPathComponent("Downloads/Report.pdf")
+    let binned = root.appendingPathComponent(".Trash/Report.pdf")
+    try write(binned, bytes: 4096)
+    let record = Trashed(original: original, inTrash: binned)
+    #expect(record.canRestore(home: root.path))
+
+    // The Trash is emptied, and another Report.pdf lands under the same name.
+    try FileManager.default.removeItem(at: binned)
+    try write(binned, bytes: 4096)
+    #expect(!record.canRestore(home: root.path))
+}
+
+@Test func putBackMovesOnlyOutOfATrashFolder() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let elsewhere = root.appendingPathComponent("Documents/Report.pdf")
+    try write(elsewhere, bytes: 4096)
+    let record = Trashed(original: root.appendingPathComponent("Downloads/Report.pdf"), inTrash: elsewhere)
+    #expect(!record.canRestore(home: root.path))
+}
+
+@Test func putBackRefusesAForgedRecord() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let binned = root.appendingPathComponent(".Trash/chat.db")
+    try write(binned, bytes: 4096)
+    let original = root.appendingPathComponent("Public/chat.db")
+    var record = Trashed(original: original, inTrash: binned)
+    #expect(record.canRestore(home: root.path))
+
+    // A record without file numbers, as an older log or another program writes it.
+    var legacy = record
+    legacy.inode = nil
+    #expect(!legacy.canRestore(home: root.path))
+
+    // A folder named .Trash elsewhere that links into a protected folder.
+    let messages = root.appendingPathComponent("Library/Messages/chat.db")
+    try write(messages, bytes: 4096)
+    let decoy = root.appendingPathComponent("tmp/.Trash")
+    try FileManager.default.createDirectory(at: decoy.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: decoy, withDestinationURL: messages.deletingLastPathComponent())
+    let lured = Trashed(original: original, inTrash: decoy.appendingPathComponent("chat.db"))
+    #expect(lured.inode != nil)
+    #expect(!lured.canRestore(home: root.path))
+
+    // A way back through a link, or into the privacy database's folder.
+    record.inTrash = binned.path
+    let link = root.appendingPathComponent("Link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root.appendingPathComponent("Elsewhere"))
+    record.original = link.appendingPathComponent("chat.db").path
+    #expect(!record.canRestore(home: root.path))
+    record.original = root.appendingPathComponent("Library/Application Support/com.apple.TCC/TCC.db").path
+    #expect(!record.canRestore(home: root.path))
+    record.original = root.path + "/Public/../Library/chat.db"
+    #expect(!record.canRestore(home: root.path))
+}
+
+@Test func ignoredLinkTargetKeepsTheLinkInAJunkFolder() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let caches = home.appendingPathComponent("Library/Caches")
+    let target = home.appendingPathComponent("SSD/JetBrains")
+    try write(target.appendingPathComponent("index.bin"), bytes: 4096)
+    try write(caches.appendingPathComponent("com.bar/x.bin"), bytes: 4096)
+    try FileManager.default.createSymbolicLink(at: caches.appendingPathComponent("JetBrains"), withDestinationURL: target)
+    var ignore = IgnoreList()
+    ignore.add(caches.appendingPathComponent("JetBrains").path)
+    #expect(ignore.names(in: caches.path) == ["JetBrains"])
 }
 
 @Test func ignoreListIsCaseInsensitiveAndRefusesEmptyPaths() {

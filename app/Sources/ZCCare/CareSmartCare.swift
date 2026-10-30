@@ -42,7 +42,7 @@ struct SmartCareView: View {
     }
 
     private var canRun: Bool {
-        care.scannedAt != nil && (care.junk + care.ai > 0 || !(care.store.snapshot?.outdated.isEmpty ?? true))
+        care.scannedAt != nil && (care.junk + care.aiBeyondJunk > 0 || !(care.store.snapshot?.outdated.isEmpty ?? true))
     }
 
     /// What Run does to files, said before it is pressed: each step asks first.
@@ -52,7 +52,7 @@ struct SmartCareView: View {
     }
 
     private var summary: String {
-        canRun ? "Run cleans up \(Store.bytes(care.junk + care.ai)) and updates \(Store.counted(care.store.snapshot?.outdated.count ?? 0, "package"))."
+        canRun ? "Run cleans up \(Store.bytes(care.junk + care.aiBeyondJunk)) and updates \(Store.counted(care.store.snapshot?.outdated.count ?? 0, "package"))."
             : "Your Mac is in good shape."
     }
 }

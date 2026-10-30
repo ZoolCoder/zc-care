@@ -210,7 +210,9 @@ final class Care {
     }
 
     var monitor: Monitor { store.monitor }
-    var junk: Int64 { monitor.junk.values.reduce(0, +) }
+    /// What Clean All clears: folders cleared by hand only, such as iPhone
+    /// backups, stay out of the total.
+    var junk: Int64 { store.spotsToCleanAll.reduce(0) { $0 + (monitor.junk[$1.id] ?? 0) } }
     /// Large files, old downloads and installers, each once, and what duplicates waste.
     var clutter: Int64 {
         let files = Dictionary((largeFiles + oldDownloads + diskImages).map { ($0.id, $0.size) }, uniquingKeysWith: { a, _ in a })
@@ -232,6 +234,13 @@ final class Care {
     var intelOnly: [InstalledApp] { apps.filter { $0.intelOnly == true } }
     var copies: Set<String> { AppCatalog.copies(apps) }
     var ai: Int64 { aiJunk.reduce(0) { $0 + $1.size } }
+    /// AI clutter outside the folders Clean All clears: Claude's and
+    /// ChatGPT's caches and logs already count in `junk`.
+    var aiBeyondJunk: Int64 { aiOutsideJunk.reduce(0) { $0 + $1.size } }
+    var aiOutsideJunk: [AIJunk] {
+        let roots = store.spotsToCleanAll.map { $0.path + "/" }
+        return aiJunk.filter { j in !j.paths.allSatisfy { p in roots.contains { p.path.hasPrefix($0) } } }
+    }
     var developer: Int64 { dependencies.reduce(0) { $0 + $1.size } + models.reduce(0) { $0 + $1.size } }
     var startup: [LaunchAgent] { agents.filter { $0.enabled && ($0.runAtLoad || $0.keepAlive) } }
 
@@ -374,7 +383,8 @@ final class Care {
     /// Smart Care's Run: cleans up, then updates, each after its question.
     func run() async {
         if junk > 0 { await store.cleanAll() }
-        if ai > 0 { await cleanAI(aiJunk) }
+        // Clean All just cleared the AI caches and logs inside its folders.
+        if aiBeyondJunk > 0 { await cleanAI(aiOutsideJunk) }
         if !(store.snapshot?.outdated.isEmpty ?? true) { await store.updateAll() }
     }
 
@@ -1402,10 +1412,12 @@ final class Care {
             let removal = await remove(urls)
             return (removal.failures.isEmpty ? nil : removal.summary, [])
         }
+        // Read before the move: without Full Disk Access the Trash is closed.
+        let identities = Dictionary(urls.map { ($0, Trashed.identity(of: $0.path)) }, uniquingKeysWith: { a, _ in a })
         return await withCheckedContinuation { continuation in
             NSWorkspace.shared.recycle(urls) { moved, error in
                 continuation.resume(returning: (error?.localizedDescription,
-                                                moved.map { Trashed(original: $0.key, inTrash: $0.value) }))
+                                                moved.map { Trashed(original: $0.key, inTrash: $0.value, identity: identities[$0.key] ?? nil) }))
             }
         }
     }
@@ -1622,6 +1634,17 @@ final class Care {
     /// browser is closed: an open one holds the databases and writes them back.
     func clearBrowser(_ trace: BrowserTrace) async {
         guard store.busy == nil, !removing else { return }
+        var trace = trace
+        let all = trace.paths.count
+        trace.paths.removeAll(where: store.ignoreList.touches)
+        let ignored = all - trace.paths.count
+        // The reload after counts what stayed, ignored items included.
+        let measured = trace.size
+        if ignored > 0 { trace.size = trace.paths.reduce(0) { $0 + DiskUsage.allocated($1) } }
+        guard !trace.paths.isEmpty else {
+            store.message = Store.Message(text: "Everything in \(trace.browser)'s \(trace.kind.lowercased()) is on the ignore list, so it stays.", failed: true)
+            return
+        }
         removing = true
         defer { removing = false }
         let what = "clear \(trace.browser)'s \(trace.kind.lowercased())"
@@ -1634,10 +1657,11 @@ final class Care {
         case BrowserPrivacy.sessions: "\(trace.browser) no longer reopens the tabs and windows it saved; bookmarks stay."
         default: "\(trace.browser) downloads pages again as you visit them."
         }
+        let stays = ignored == 0 ? "" : " \(Store.counted(ignored, "item")) on the ignore list stay."
         guard Alerts.confirm("Clear \(trace.browser)'s \(trace.kind.lowercased())?",
                              (store.deletesPermanently
                                  ? "This permanently deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)); nothing goes to the Trash.\n\n"
-                                 : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect,
+                                 : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect + stays,
                              button: "Clear") else { return }
         // Again: the browser may have opened while the alert was up.
         guard await closed(trace.bundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)), toDo: what),
@@ -1645,10 +1669,10 @@ final class Care {
         store.busy = "Clearing \(trace.browser) \(trace.kind.lowercased())"
         defer { store.busy = nil }
         let permanently = store.deletesPermanently
-        let removal = await Task.detached { BrowserPrivacy.clear(trace, permanently: permanently) }.value
+        let removal = await Task.detached { [trace] in BrowserPrivacy.clear(trace, permanently: permanently) }.value
         await loadBrowserTraces()
         let left = browserTraces?.first { $0.id == trace.id }?.size ?? 0
-        store.record(.privacy, "\(trace.browser) \(trace.kind)", freed: max(trace.size - left, 0), trashed: removal.trashed)
+        store.record(.privacy, "\(trace.browser) \(trace.kind)", freed: max(measured - left, 0), trashed: removal.trashed)
         monitor.readDisk()
         store.message = Store.Message(text: "\(trace.browser) \(trace.kind.lowercased()) cleared" + removal.ending,
                                       failed: removal.stayed > 0)

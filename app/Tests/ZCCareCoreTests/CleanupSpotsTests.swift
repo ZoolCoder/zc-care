@@ -60,6 +60,6 @@ private func write(_ url: URL, _ data: Data) throws {
 
 @Test func iosBackupsStayOutOfCleanAll() {
     let spots = Junk.spots(home: "/h")
-    #expect(spots.filter(\.optional).map(\.id) == ["iosbackups"])
+    #expect(spots.filter(\.optional).map(\.id) == ["pub", "iosbackups"])
     #expect(spots.contains { $0.id == "devicelogs" })
 }

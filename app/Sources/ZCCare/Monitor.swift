@@ -367,10 +367,7 @@ extension Store {
     /// value: the log can move under a row while an alert is up.
     func putBack(_ entry: ActivityEntry) {
         guard busy == nil, activity.entries.contains(entry) else { return }
-        guard entry.canPutBack else {
-            message = Message(text: "\(entry.title) is no longer in the Trash, or something took its place.", failed: true)
-            return
-        }
+        // Without Full Disk Access the Trash cannot be looked into, so ask first.
         guard Access.fullDisk else {
             switch Alerts.trashClosed(entry.title) {
             case .finder:
@@ -378,6 +375,10 @@ extension Store {
             case .grant: Access.openFullDiskSettings()
             case nil: break
             }
+            return
+        }
+        guard entry.canPutBack else {
+            message = Message(text: "\(entry.title) is no longer in the Trash, or something took its place.", failed: true)
             return
         }
         // What stays in the Trash keeps its Put Back for another try.
@@ -393,6 +394,12 @@ extension Store {
             : Message(text: "Could not put back \(stuck.joined(separator: ", ")).", failed: true)
     }
 
+    /// Whether an entry offers Put Back. Without Full Disk Access the Trash
+    /// cannot be looked into: anything trashed offers it, and the click asks.
+    static func mayPutBack(_ entry: ActivityEntry, fullDisk: Bool) -> Bool {
+        fullDisk ? entry.canPutBack : entry.putBack == nil && !(entry.trashed ?? []).isEmpty
+    }
+
     private func busyScanning() {
         message = Message(text: "A scan is still running. Clean up once it finishes.", failed: true)
     }
@@ -401,6 +408,10 @@ extension Store {
     /// whose sizes `picked` gives.
     func clean(_ spot: Junk, only picked: [JunkEntry]? = nil) async {
         guard !monitor.scanning else { return busyScanning() }
+        if let user = await Self.user(of: spot) {
+            message = Message(text: "\(spot.title) stays while \(user) is using it. Clear it once \(user) is done.", failed: true)
+            return
+        }
         let size = monitor.junk[spot.id] ?? 0
         let verb = deletesPermanently ? "permanently deletes" : "moves to the Trash"
         let what = picked.map {
@@ -408,18 +419,23 @@ extension Store {
                 + Alerts.lines($0.map { "\($0.name) (\(Self.bytes($0.size)))" })
         } ?? "This \(verb) \(Self.bytes(size)) in \(spot.path)."
         let aftermath = deletesPermanently ? "It does not go to the Trash." : "My Activity can put it back until the Trash is emptied."
-        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\n\(aftermath)\n\n\(spot.detail)", button: "Clear") else { return }
+        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\n\(aftermath)\n\n\(spot.detail)", button: "Clear"), busy == nil, !monitor.scanning else { return }
         busy = "Clearing \(spot.title)"
         defer { busy = nil }
         let keep = await monitor.keep(spot, open: monitor.runningApps())
         let only = picked.map { Set($0.map(\.name)) }
         let permanently = deletesPermanently
-        let removal = await Task.detached { spot.empty(keeping: keep, only: only, permanently: permanently) }.value
-        let left = await Task.detached { spot.size(keeping: keep) }.value
+        // Measured now with the same keep set: the scan's figure may count
+        // what an app opened since or the ignore list now keeps.
+        let (before, removal, left) = await Task.detached {
+            let before = spot.size(keeping: keep)
+            let removal = spot.empty(keeping: keep, only: only, permanently: permanently)
+            return (before, removal, spot.size(keeping: keep))
+        }.value
         monitor.junk[spot.id] = left
         monitor.readDisk()
-        record(.junk, spot.title, freed: max(size - left, 0), trashed: removal.trashed)
-        message = Message(text: "\(spot.title): freed \(Self.bytes(max(size - left, 0)))"
+        record(.junk, spot.title, freed: max(before - left, 0), trashed: removal.trashed)
+        message = Message(text: "\(spot.title): freed \(Self.bytes(max(before - left, 0)))"
                           + removal.ending, failed: !removal.failures.isEmpty)
     }
 
@@ -457,14 +473,21 @@ extension Store {
         var log = RunLog(title: title, permanent: deletesPermanently)
         var trashed: [Trashed] = []
         let permanently = deletesPermanently
+        let commands = await Monitor.commands()
         for spot in spots {
+            if let user = Self.user(of: spot, commands: commands) {
+                log.add(RunLog.Line(name: spot.title, detail: spot.path, size: 0, failure: "\(user) is using it"))
+                continue
+            }
             let keep = await monitor.keep(spot, open: open)
-            let size = monitor.junk[spot.id] ?? 0
-            let result = await Task.detached { spot.empty(keeping: keep, permanently: permanently) }.value
-            let left = await Task.detached { spot.size(keeping: keep) }.value
+            let (before, result, left) = await Task.detached {
+                let before = spot.size(keeping: keep)
+                let result = spot.empty(keeping: keep, permanently: permanently)
+                return (before, result, spot.size(keeping: keep))
+            }.value
             monitor.junk[spot.id] = left
             trashed += result.trashed
-            log.add(RunLog.Line(name: spot.title, detail: spot.path, size: max(size - left, 0)))
+            log.add(RunLog.Line(name: spot.title, detail: spot.path, size: max(before - left, 0)))
             for failure in result.failures {
                 log.add(RunLog.Line(name: failure.name, detail: spot.path, size: 0, failure: failure.reason.label))
             }
@@ -472,11 +495,33 @@ extension Store {
         return (log, trashed)
     }
 
+    /// Who is using a folder now, when clearing it would pull files out
+    /// from under a build, a simulator or an open attachment.
+    nonisolated static func user(of spot: Junk, commands: [String]) -> String? {
+        let running = { (id: String) in !NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty }
+        switch spot.id {
+        case "xcode", "devicesupport", "simulators", "testdevices":
+            if running("com.apple.dt.Xcode") { return "Xcode" }
+            if running("com.apple.iphonesimulator") { return "Simulator" }
+        case "mail":
+            if running("com.apple.mail") { return "Mail" }
+        case "gradle", "gradlewrapper":
+            if commands.contains(where: { $0.contains("GradleDaemon") }) { return "A Gradle daemon" }
+        default: break
+        }
+        return nil
+    }
+
+    nonisolated static func user(of spot: Junk) async -> String? {
+        user(of: spot, commands: spot.id.hasPrefix("gradle") ? await Monitor.commands() : [])
+    }
+
     /// The Finder empties the Trash: the app cannot read it without Full
     /// Disk Access. macOS asks once to let ZC Care control the Finder.
     func emptyTrash() async {
-        let undoable = activity.entries.filter(\.canPutBack).count
-        let lost = undoable == 0 ? "" : "\n\n\(Self.counted(undoable, "cleanup")) in My Activity can no longer be put back."
+        let fullDisk = Access.fullDisk
+        let undoable = activity.entries.filter { Self.mayPutBack($0, fullDisk: fullDisk) }
+        let lost = undoable.isEmpty ? "" : "\n\n\(Self.counted(undoable.count, "cleanup")) in My Activity can no longer be put back."
         guard busy == nil, Alerts.confirm("Empty the Trash?", "What is in the Trash is deleted for good." + lost,
                                           button: "Empty Trash") else { return }
         busy = "Emptying the Trash"
@@ -486,7 +531,15 @@ extension Store {
             try await ProcessRunner().run("/usr/bin/osascript", ["-e", #"tell application "Finder" to empty trash"#], env: [:])
         }
         monitor.readDisk()
-        if failure == nil { record(.junk, "Trash Bins", freed: max((monitor.vitals.disk?.available ?? 0) - before, 0)) }
+        if failure == nil {
+            // What those cleanups trashed already counts as freed; nothing is left to put back.
+            let counted = undoable.reduce(Int64(0)) { $0 + $1.bytes }
+            for index in activity.entries.indices where activity.entries[index].putBack == nil {
+                activity.entries[index].trashed = nil
+            }
+            try? activity.save(to: Self.activityFile)
+            record(.junk, "Trash Bins", freed: max((monitor.vitals.disk?.available ?? 0) - before - counted, 0))
+        }
         message = failure.map { Message(text: "Trash not emptied. \($0)", failed: true) }
             ?? Message(text: "The Trash is empty.", failed: false)
     }
