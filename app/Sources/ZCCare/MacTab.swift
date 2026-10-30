@@ -1,4 +1,5 @@
 import AppKit
+import Charts
 import SwiftUI
 import ZCCareCore
 
@@ -54,9 +55,11 @@ struct MacTab: View {
                     if !store.monitor.volumes.isEmpty { DriveList(store: store, volumes: store.monitor.volumes) }
                     FreeUpList(store: store)
                 case .memory:
+                    HistoryChart(title: "Memory Used", monitor: monitor, history: \.memoryHistory)
                     if let memory = vitals.memory, memory.total > 0, memory.used > 0 { MemoryList(memory: memory) }
                     TopList(store: store, order: .memory)
                 case .cpu:
+                    HistoryChart(title: "CPU Load", monitor: monitor, history: \.cpuHistory)
                     if let tiers = vitals.sensors?.tiers, !tiers.isEmpty { CoreList(tiers: tiers) }
                     if let sensors = vitals.sensors { SensorList(sensors: sensors) }
                     TopList(store: store, order: .cpu)
@@ -631,6 +634,63 @@ private struct MemoryList: View {
         .accessibilityElement()
         .accessibilityLabel("\(Store.bytes(memory.used, .memory)) of \(Store.bytes(memory.total, .memory)) used")
     }
+}
+
+/// A share, 0 to 1, over the last five minutes or as long as it has been
+/// read, with its peak. It reads the history itself, so a new reading
+/// redraws only the chart.
+private struct HistoryChart: View {
+    let title: String
+    let monitor: Monitor
+    let history: KeyPath<Monitor, Recent>
+
+    var body: some View {
+        let recent = monitor[keyPath: history]
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                SectionTitle(title: title)
+                Spacer()
+                if let peak = recent.peak, recent.values.count >= 2 {
+                    Text("Peak \(percent(peak)) · last \(recent.span)").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            ListCard {
+                // The space stays while the first readings come, so what is
+                // below does not jump.
+                if recent.values.count >= 2 {
+                    chart(recent)
+                } else {
+                    Text("Reading…").font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 64)
+                }
+            }
+        }
+    }
+
+    private func chart(_ recent: Recent) -> some View {
+        Chart {
+            ForEach(Array(recent.values.enumerated()), id: \.offset) { item in
+                AreaMark(x: .value("Reading", item.offset), y: .value("Share", item.element))
+                    .foregroundStyle(Theme.accent.opacity(0.2))
+                LineMark(x: .value("Reading", item.offset), y: .value("Share", item.element))
+                    .foregroundStyle(Theme.accent)
+            }
+        }
+        .chartXScale(domain: 0...(recent.capacity - 1))
+        .chartYScale(domain: 0...1)
+        .chartXAxis(.hidden)
+        .chartYAxis {
+            AxisMarks(values: [0, 0.5, 1]) { value in
+                AxisGridLine()
+                AxisValueLabel { Text(percent(value.as(Double.self) ?? 0)) }
+            }
+        }
+        .frame(height: 64)
+        .accessibilityElement()
+        .accessibilityLabel("\(title) over the last \(recent.span): now \(percent(recent.values.last ?? 0)), peak \(percent(recent.peak ?? 0))")
+    }
+
+    private func percent(_ share: Double) -> String { "\(Int((share * 100).rounded())) %" }
 }
 
 /// Each kind of core with its load and clock, and a bar for each core.

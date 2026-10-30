@@ -305,6 +305,44 @@ public struct Volume: Sendable, Equatable, Identifiable {
     }
 }
 
+/// The latest readings, oldest first, up to a fixed count. A reading that
+/// comes long after the last, after sleep or a stall, starts over, so a
+/// line drawn through them never joins two times as one.
+public struct Recent: Sendable, Equatable {
+    public let capacity: Int
+    public private(set) var values: [Double] = []
+    private var times: [Date] = []
+    public static let maxGap: TimeInterval = 10
+
+    public init(capacity: Int) {
+        self.capacity = max(1, capacity)
+    }
+
+    public mutating func append(_ value: Double, at time: Date) {
+        if let last = times.last, time.timeIntervalSince(last) > Self.maxGap || time < last { clear() }
+        values.append(value)
+        times.append(time)
+        if values.count > capacity {
+            values.removeFirst(values.count - capacity)
+            times.removeFirst(times.count - capacity)
+        }
+    }
+
+    public mutating func clear() {
+        values.removeAll()
+        times.removeAll()
+    }
+
+    public var peak: Double? { values.max() }
+
+    /// The time the readings cover, as "40 s" or "5 min".
+    public var span: String {
+        guard let first = times.first, let last = times.last else { return "0 s" }
+        let seconds = Int(last.timeIntervalSince(first).rounded())
+        return seconds < 60 ? "\(seconds) s" : "\(Int((Double(seconds) / 60).rounded())) min"
+    }
+}
+
 /// Bytes read and written each second, across every drive.
 public struct DiskIO: Sendable, Equatable {
     public var read: Double

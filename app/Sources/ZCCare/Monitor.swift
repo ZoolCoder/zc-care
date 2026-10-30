@@ -34,6 +34,10 @@ final class Monitor {
     /// The primary service's addresses, router and DNS, for the Network
     /// detail.
     var connection: Connection?
+    /// CPU load and the share of memory used over the last five minutes,
+    /// one reading a tick, for the CPU and Memory details.
+    var cpuHistory = Recent(capacity: 150)
+    var memoryHistory = Recent(capacity: 150)
     /// False until the panel's first read, when no connection still means
     /// unknown rather than offline.
     var connectionRead = false
@@ -78,12 +82,23 @@ final class Monitor {
         guard readers.isEmpty else { return }
         loop?.cancel()
         loop = nil
+        // A gap would join two times as one line.
+        cpuHistory.clear()
+        memoryHistory.clear()
     }
 
     private func sample() async {
         var v = vitals
-        if let load = sampler.cpuLoad() { v.cpuLoad = load }
+        let now = Date.now
+        var cpu = cpuHistory, memoryUsed = memoryHistory
+        if let load = sampler.cpuLoad() {
+            v.cpuLoad = load
+            cpu.append(load, at: now)
+        }
         v.memory = sampler.memory()
+        if let memory = v.memory, memory.total > 0, memory.used > 0 {
+            memoryUsed.append(Double(memory.used) / Double(memory.total), at: now)
+        }
         v.network = sampler.network()
         var battery = sampler.battery()
         battery?.health = v.battery?.health
@@ -102,6 +117,9 @@ final class Monitor {
             }
         }
         if panel, tick % 30 == 0 { await readSystemProfile(into: &v) }
+        // Written beside the vitals, so a tick stays one redraw.
+        cpuHistory = cpu
+        memoryHistory = memoryUsed
         if v != vitals { vitals = v }
         // Apart from the copy above, which would bring back a drive ejected
         // while it waited.

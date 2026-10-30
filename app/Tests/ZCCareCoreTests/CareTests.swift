@@ -1154,3 +1154,31 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(Connection(global: nil, ipv4: nil, ipv6: nil, dns: nil, setup: nil) == nil)
     #expect(Connection(global: ["PrimaryInterface": ""], ipv4: nil, ipv6: nil, dns: nil, setup: nil) == nil)
 }
+
+@Test func recentKeepsTheLatestReadings() {
+    let start = Date(timeIntervalSince1970: 1_000_000)
+    var recent = Recent(capacity: 3)
+    #expect(recent.peak == nil)
+    #expect(recent.span == "0 s")
+    for (i, value) in [0.1, 0.9, 0.2, 0.3].enumerated() { recent.append(value, at: start + Double(i) * 2) }
+    #expect(recent.values == [0.9, 0.2, 0.3])
+    #expect(recent.peak == 0.9)
+    #expect(recent.span == "4 s")
+    recent.clear()
+    #expect(recent.values.isEmpty)
+    #expect(Recent(capacity: 0).capacity == 1)
+}
+
+@Test func recentStartsOverAfterAGap() {
+    let start = Date(timeIntervalSince1970: 1_000_000)
+    var recent = Recent(capacity: 200)
+    for i in 0..<150 { recent.append(0.5, at: start + Double(i) * 2) }
+    #expect(recent.span == "5 min")
+    recent.append(0.7, at: start + 298 + Recent.maxGap)
+    #expect(recent.values.count == 151)
+    // Asleep for an hour: the line starts again.
+    recent.append(0.1, at: start + 3600)
+    #expect(recent.values == [0.1])
+    recent.append(0.2, at: start + 3500)
+    #expect(recent.values == [0.2])
+}
