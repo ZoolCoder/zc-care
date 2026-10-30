@@ -40,12 +40,13 @@ final class Store {
     /// The Mac tab's open tile: what Free Up clears, or the busiest apps.
     var macDetail: MacDetail? {
         didSet {
-            monitor.order = macDetail == .memory ? .memory : macDetail == .cpu ? .cpu : nil
+            // Battery lists the busiest apps too: CPU is a large part of what drains it.
+            monitor.order = macDetail == .memory ? .memory : macDetail == .cpu || macDetail == .battery ? .cpu : nil
             if macDetail == .disk, monitor.junk.isEmpty { Task { await monitor.scan() } }
         }
     }
 
-    enum MacDetail: String { case disk, memory, cpu }
+    enum MacDetail: String { case disk, memory, cpu, battery, network, devices }
     /// The target whose items the overview shows, and what they are.
     var expanded: String?
     var targetItems: [String: [Item]] = [:]
@@ -84,6 +85,10 @@ final class Store {
         static let vitalLimits = "vitalLimits"
         static let barStats = "barStats"
         static let deletesPermanently = "deletesPermanently"
+        static let leftoverAlerts = "leftoverAlerts"
+        static let hadFullDisk = "hadFullDiskAccess"
+        static let vitalsPosted = "vitalsPosted"
+        static let alertLog = "alertLog"
     }
 
     /// A reading the menu bar can show beside the mark.
@@ -109,6 +114,10 @@ final class Store {
     private var discovery: Task<Void, Never>?
     private var watcher: Task<Void, Never>?
     private var watch = VitalsWatch()
+    /// When each refresh alert last posted, so one that comes and goes
+    /// posts once a day.
+    private var alertLog = AlertLog()
+    private var leftoverWatch = LeftoverWatch()
     private let planFile = FileManager.default.temporaryDirectory.appendingPathComponent("zccare-plan.json").path
     let notifier = Notifier()
     /// Set by the app delegate, which owns the hotkey.
@@ -129,19 +138,48 @@ final class Store {
     init() {
         ignored = Set(UserDefaults.standard.stringArray(forKey: Keys.ignored) ?? [])
         UserDefaults.standard.register(defaults: [Keys.notifies: true, Keys.hotkey: true, Keys.weeklyScan: true,
-                                                  Keys.vitalsAlerts: true, Keys.barStats: ["cpu", "memory"]])
+                                                  Keys.vitalsAlerts: true, Keys.leftoverAlerts: true,
+                                                  Keys.barStats: ["cpu", "memory"]])
         notifies = UserDefaults.standard.bool(forKey: Keys.notifies)
         hotkey = UserDefaults.standard.bool(forKey: Keys.hotkey)
         weeklyScan = UserDefaults.standard.bool(forKey: Keys.weeklyScan)
         ignoreList = IgnoreList(UserDefaults.standard.stringArray(forKey: Keys.ignoreList) ?? [])
         vitalsAlerts = UserDefaults.standard.bool(forKey: Keys.vitalsAlerts)
+        leftoverAlerts = UserDefaults.standard.bool(forKey: Keys.leftoverAlerts)
         deletesPermanently = UserDefaults.standard.bool(forKey: Keys.deletesPermanently)
         vitalLimits = UserDefaults.standard.data(forKey: Keys.vitalLimits)
             .flatMap { try? JSONDecoder().decode(VitalLimits.self, from: $0) } ?? VitalLimits()
         barStats = Set((UserDefaults.standard.stringArray(forKey: Keys.barStats) ?? []).compactMap(BarStat.init))
         monitor.ignore = ignoreList
         watch.limits = vitalLimits
+        watch.posted = Self.load([String: Date].self, Keys.vitalsPosted) ?? [:]
+        alertLog = Self.load(AlertLog.self, Keys.alertLog) ?? AlertLog()
         if !barStats.isEmpty { monitor.start(.bar) }
+        checkAccess()
+        // A grant made in System Settings shows when the app comes back,
+        // whichever of its windows is open.
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkAccess() }
+        }
+    }
+
+    /// Full Disk Access was on at an earlier check and is off now: macOS
+    /// drops it when an ad hoc signed build is replaced by an update.
+    private(set) var accessLost = false
+
+    func checkAccess() {
+        let granted = Access.fullDisk
+        let had = UserDefaults.standard.bool(forKey: Keys.hadFullDisk)
+        if granted, !had { UserDefaults.standard.set(true, forKey: Keys.hadFullDisk) }
+        let lost = !granted && had
+        if lost != accessLost { accessLost = lost }
+    }
+
+    /// The user would rather go on without it: no more reminders.
+    func forgetAccess() {
+        UserDefaults.standard.set(false, forKey: Keys.hadFullDisk)
+        accessLost = false
     }
 
     /// What the menu bar shows beside the mark, sampled while any shows.
@@ -162,10 +200,16 @@ final class Store {
         Task { notificationsBlocked = !(await notifier.authorize()) }
     }
 
-    /// Notifies of a full disk, memory pressure, heat and battery wear,
-    /// checked each minute whether the panel shows or not.
+    /// Notifies of a full disk, memory pressure, heat, battery wear and a
+    /// full Trash, checked each minute whether the panel shows or not.
     var vitalsAlerts: Bool {
         didSet { UserDefaults.standard.set(vitalsAlerts, forKey: Keys.vitalsAlerts) }
+    }
+
+    /// Notifies when an app leaves the Applications folders and its files
+    /// stay in the Library.
+    var leftoverAlerts: Bool {
+        didSet { UserDefaults.standard.set(leftoverAlerts, forKey: Keys.leftoverAlerts) }
     }
 
     /// Every removal goes to the Trash, where My Activity can put it back,
@@ -195,13 +239,45 @@ final class Store {
             while !Task.isCancelled {
                 guard let self else { return }
                 if notifies, vitalsAlerts {
-                    let vitals = await monitor.watchSample(battery: check % 60 == 0)
-                    notifier.post(watch.alerts(for: vitals))
-                    check += 1
+                    let vitals = await monitor.watchSample(battery: check % 60 == 0, trash: check % 30 == 0,
+                                                             devices: check % 10 == 0, apps: true)
+                    let alerts = watch.alerts(for: vitals)
+                    notifier.post(alerts)
+                    if !alerts.isEmpty { Self.save(watch.posted, Keys.vitalsPosted) }
                 }
+                if notifies, leftoverAlerts {
+                    if check % 5 == 0 { await watchLeftovers() }
+                } else {
+                    // Turned back on, it starts from what is installed then.
+                    leftoverWatch = LeftoverWatch()
+                }
+                check += 1
                 try? await Task.sleep(for: .seconds(60))
             }
         }
+    }
+
+    /// Every five minutes: what an app removed by dragging it to the Trash
+    /// left in the Library.
+    private func watchLeftovers() async {
+        let ignore = ignoreList
+        let home = NSHomeDirectory()
+        let watch = leftoverWatch
+        let alerts = await Task.detached(priority: .utility) {
+            var watch = watch
+            let installed = LeftoverWatch.installed(in: [URL(fileURLWithPath: "/Applications"),
+                                                         URL(fileURLWithPath: home + "/Applications")])
+            let external = Leftovers.externalAppIDs()
+            let alerts = watch.alerts(installed: installed,
+                                      elsewhere: { external.contains($0) || Care.installedOutsideTrash($0) }) { id, _ in
+                Leftovers.orphanPaths(of: id, home: home)
+                    .filter { !ignore.touches($0) }
+                    .reduce(0) { $0 + DiskUsage.allocated(URL(fileURLWithPath: $1)) }
+            }
+            return (watch, alerts)
+        }.value
+        leftoverWatch = alerts.0
+        if notifies, leftoverAlerts { notifier.post(alerts.1) }
     }
 
     /// Files and folders ZC Care never lists, cleans or trashes.
@@ -294,7 +370,9 @@ final class Store {
             return
         }
         setupProblem = nil
-        careCLI = CareCLI(binary: binary, config: config, env: env)
+        // A read that hangs would keep refreshing on for ever; apply may
+        // install for long and is never cut short.
+        careCLI = CareCLI(binary: binary, config: config, env: env, reader: ProcessRunner(timeout: 300))
     }
 
     /// A read asked for while another runs is queued, so a change made in
@@ -321,7 +399,19 @@ final class Store {
         if let expanded { await loadItems(expanded) }
         // The first read has nothing to compare with: what is already
         // outstanding at launch is the badge's to show.
-        if notifies, let old { notifier.post(new.alerts(since: old, ignoring: ignored)) }
+        if notifies, let old {
+            let alerts = alertLog.fresh(new.alerts(since: old, ignoring: ignored))
+            notifier.post(alerts)
+            if !alerts.isEmpty { Self.save(alertLog, Keys.alertLog) }
+        }
+    }
+
+    private static func load<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    }
+
+    private static func save<T: Encodable>(_ value: T, _ key: String) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(value), forKey: key)
     }
 
     /// A remove or an adopt changed the config: what the lists and the
@@ -358,7 +448,7 @@ final class Store {
     /// The CLI, without a config until there is one; nil when zc-care is
     /// missing.
     var setupCLI: CareCLI? {
-        careCLI ?? binary.map { CareCLI(binary: $0, config: "", env: env) }
+        careCLI ?? binary.map { CareCLI(binary: $0, config: "", env: env, reader: ProcessRunner(timeout: 300)) }
     }
 
     /// Writes the starter config for who the Mac is for, then reads the
@@ -369,7 +459,16 @@ final class Store {
         defer { busy = nil }
         await connected()
         guard let cli = setupCLI else { throw CLIError(message: setupProblem ?? "zc-care is missing.") }
-        let result = try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac)
+        let made = await cancellable { () -> Result<InitResult, Error> in
+            do {
+                return .success(try await cli.initConfig(profiles: profiles, role: role, fromMac: fromMac))
+            } catch is CancellationError {
+                return .failure(CLIError(message: Store.cancelled))
+            } catch {
+                return .failure(error)
+            }
+        }
+        let result = try made.get()
         UserDefaults.standard.set(result.config, forKey: Keys.config)
         await connect()
         return result
@@ -390,19 +489,29 @@ final class Store {
             let r = try await run()
             return r.status == 0 ? nil : (ZCCareCore.lastLine(r.stderr) ?? fallback)
         } catch is CancellationError {
-            return "Cancelled."
+            return Self.cancelled
         } catch {
             return error.localizedDescription
         }
     }
 
+    /// Cancel stops osascript, but the root shell it started cannot be
+    /// signalled and may still finish.
+    static let cancelled = "Cancelled.", stoppedWaiting = "Stopped waiting; the administrator step may still finish."
+
     /// Runs the command as root behind the password dialog; why it failed, if it did.
     private func asRoot(_ command: String) async -> String? {
-        await cancellable {
+        let failed = await cancellable {
             await self.failure("osascript failed") {
                 try await ProcessRunner().run("/usr/bin/osascript", ["-e", adminScript(command)], env: [:])
             }
         }
+        return failed == Self.cancelled ? Self.stoppedWaiting : failed
+    }
+
+    private func outcome(_ title: String, _ failed: String?) -> Message {
+        guard let failed else { return Message(text: "\(title): fixed.", failed: false) }
+        return Message(text: failed == Self.stoppedWaiting ? "\(title): \(failed)" : "\(title): not changed. \(failed)", failed: true)
     }
 
     /// Runs exactly the steps the owner confirmed, behind one password
@@ -417,8 +526,7 @@ final class Store {
         busy = "Securing this Mac"
         defer { busy = nil }
         let failed = await asRoot(command)
-        message = failed.map { Message(text: "This Mac: not changed. \($0)", failed: true) }
-            ?? Message(text: "This Mac: fixed.", failed: false)
+        message = outcome("This Mac", failed)
         await refresh()
     }
 
@@ -571,6 +679,11 @@ final class Store {
         }
         busy = nil
         let targets = packageTargets
+        guard !targets.isEmpty else {
+            // An empty target list would plan the whole config.
+            message = Message(text: "No target declares apps to install.", failed: true)
+            return false
+        }
         message = nil
         await change("Installing apps", confirm: false) {
             (try await $0.plan(targets: targets, savingTo: self.planFile), false)
@@ -587,7 +700,7 @@ final class Store {
         else { return }
         busy = "\(action.rawValue.capitalized) \(item.name)"
         defer { busy = nil }
-        let r = try? await ProcessRunner().run(program, args, env: env)
+        let r = try? await ProcessRunner(timeout: 120).run(program, args, env: env)
         message = r?.status == 0
             ? Message(text: "\(item.name): \(action == .run ? "started" : action.rawValue + " done").", failed: false)
             : Message(text: "\(item.name): \(lastLine(of: r) ?? "\(action.rawValue) failed").", failed: true)
@@ -653,8 +766,7 @@ final class Store {
             busy = "Fixing \(check.title)"
             defer { busy = nil }
             let failed = await asRoot(command)
-            message = failed.map { Message(text: "\(check.title): not changed. \($0)", failed: true) }
-                ?? Message(text: "\(check.title): fixed.", failed: false)
+            message = outcome(check.title, failed)
             await refresh()
         case .settings(let url, let what):
             NSWorkspace.shared.open(url)

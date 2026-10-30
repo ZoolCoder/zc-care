@@ -43,8 +43,13 @@ public enum CareSchedule {
     }
 
     /// Alert ids start with "care", so a click opens the Care window.
-    public static func alerts(junk: Int64, outdated: Int, findings: Int) -> [Alert] {
+    public static func alerts(junk: Int64, outdated: Int, findings: Int, drive: DiskHealth? = nil) -> [Alert] {
         var alerts: [Alert] = []
+        // First: of everything here, only this can lose files.
+        if let drive, drive.verdict == .failing {
+            alerts.append(Alert(id: "care drive", title: "Back up now: the startup drive is failing",
+                                body: drive.concerns.first ?? "The drive reports a problem."))
+        }
         if junk >= threshold {
             alerts.append(Alert(id: "care junk", title: "\(bytes(junk)) of junk to clear",
                                 body: "Smart Care found caches, logs and build output to clean up."))

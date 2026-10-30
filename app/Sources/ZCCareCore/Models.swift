@@ -150,7 +150,9 @@ public struct PlanDoc: Decodable, Sendable, Equatable {
         self.actions = actions
     }
 
-    public var deletes: Bool { actions.contains { $0.op == "DELETE" } }
+    /// Deletes, overwrites an edit made outside zc-care, or runs a script:
+    /// what undo cannot take back.
+    public var deletes: Bool { actions.contains { $0.op == "DELETE" || $0.destructive == true } }
 }
 
 public struct PlanAction: Decodable, Sendable, Equatable, Identifiable {
@@ -159,12 +161,14 @@ public struct PlanAction: Decodable, Sendable, Equatable, Identifiable {
     public var resource: String
     public var detail: String?
     public var manual: Bool?
+    public var destructive: Bool?
 
-    public init(op: String, target: String, resource: String, detail: String? = nil) {
+    public init(op: String, target: String, resource: String, detail: String? = nil, destructive: Bool? = nil) {
         self.op = op
         self.target = target
         self.resource = resource
         self.detail = detail
+        self.destructive = destructive
     }
 
     public var id: String { op + " " + target + " " + resource }

@@ -9,7 +9,8 @@ struct AndroidSection: View {
     @State private var items: [AndroidItem] = []
 
     var body: some View {
-        Group {
+        // A stack, not a Group: SwiftUI starts no task on a Group with nothing in it.
+        VStack(spacing: 0) {
             if !items.isEmpty { section }
         }
         // Once on appear and once when a scan ends, not when it starts.

@@ -38,8 +38,14 @@ public struct Removal: Sendable, Equatable {
         var moved: [Trashed] = []
         var removal = each(urls) { url in
             var binned: NSURL?
-            try FileManager.default.trashItem(at: url, resultingItemURL: &binned)
-            if let binned { moved.append(Trashed(original: url, inTrash: binned as URL)) }
+            let identity = Trashed.prepare(url.path)
+            do {
+                try FileManager.default.trashItem(at: url, resultingItemURL: &binned)
+            } catch {
+                Trashed.untag(url.path)
+                throw error
+            }
+            if let binned { moved.append(Trashed(original: url, inTrash: binned as URL, identity: identity)) }
         }
         removal.trashed = moved
         return removal

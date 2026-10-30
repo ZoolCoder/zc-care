@@ -8,7 +8,8 @@ struct SimulatorRuntimesSection: View {
     @State private var runtimes: [SimulatorRuntime] = []
 
     var body: some View {
-        Group {
+        // A stack, not a Group: SwiftUI starts no task on a Group with nothing in it.
+        VStack(spacing: 0) {
             if !runtimes.isEmpty { section }
         }
         // Once on appear and once when a scan ends, not when it starts.

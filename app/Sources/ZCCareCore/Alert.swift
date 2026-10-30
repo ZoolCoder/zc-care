@@ -1,5 +1,23 @@
 import Foundation
 
+/// When each alert was last posted, so one that comes and goes between
+/// refreshes, or comes back after a relaunch, posts once a day at most.
+public struct AlertLog: Codable, Sendable, Equatable {
+    public var posted: [String: Date] = [:]
+    public static let quiet: TimeInterval = 86400
+
+    public init() {}
+
+    /// The alerts not posted in the last day, which it records as posted;
+    /// older entries are forgotten.
+    public mutating func fresh(_ alerts: [Alert], now: Date = .now) -> [Alert] {
+        posted = posted.filter { now.timeIntervalSince($0.value) < Self.quiet }
+        let fresh = alerts.filter { posted[$0.id] == nil }
+        for a in fresh { posted[a.id] = now }
+        return fresh
+    }
+}
+
 /// Something a refresh found that the one before did not: worth a
 /// notification once, not on every refresh.
 public struct Alert: Sendable, Equatable {
@@ -11,6 +29,18 @@ public struct Alert: Sendable, Equatable {
         self.id = id
         self.title = title
         self.body = body
+    }
+
+    /// The id of one notification summing up these alerts: `more` and
+    /// their ids, one per line.
+    public static func summary(of ids: [String]) -> String {
+        (["more"] + ids).joined(separator: "\n")
+    }
+
+    /// The alert ids a summary's id holds; nil for any other id.
+    public static func summed(_ id: String) -> [String]? {
+        guard id.hasPrefix("more\n") else { return nil }
+        return id.split(separator: "\n").dropFirst().map(String.init)
     }
 }
 

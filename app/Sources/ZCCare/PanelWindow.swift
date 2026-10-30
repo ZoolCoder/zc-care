@@ -56,6 +56,7 @@ final class PanelWindow: NSObject, NSWindowDelegate {
         panel.delegate = self
         // The panel draws its own background: no blur behind it to keep live.
         let root = PanelView(store: store)
+            .environment(\.panelHost, .window)
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.12)))
         // The window follows the view's size as tabs and sections change.
@@ -75,9 +76,9 @@ final class PanelWindow: NSObject, NSWindowDelegate {
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard let panel else { return }
         if !panel.occlusionState.contains(.visible) {
-            store.monitor.stop()
+            store.monitor.stop(host: .window)
         } else if store.tab == .mac {
-            store.monitor.start()
+            store.monitor.start(host: .window)
         }
     }
 

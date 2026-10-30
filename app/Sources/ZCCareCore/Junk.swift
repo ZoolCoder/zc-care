@@ -52,7 +52,7 @@ public struct Junk: Sendable, Equatable, Identifiable {
             Junk(id: "cocoapods", title: "CocoaPods cache", detail: "Pods downloaded for iOS projects.",
                  path: home + "/Library/Caches/CocoaPods"),
             Junk(id: "pub", title: "Dart and Flutter pub cache", detail: "Hosted packages pub downloads again; a tool from dart pub global activate needs activating again.",
-                 path: home + "/.pub-cache/hosted"),
+                 path: home + "/.pub-cache/hosted", optional: true),
             Junk(id: "gradlewrapper", title: "Gradle wrapper distributions", detail: "Gradle versions the wrapper downloads again when a project needs one.",
                  path: home + "/.gradle/wrapper/dists"),
             Junk(id: "pnpm", title: "pnpm store", detail: "Packages pnpm downloads again when needed; clear it while no install runs.",

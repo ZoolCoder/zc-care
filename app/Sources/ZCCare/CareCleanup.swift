@@ -14,7 +14,7 @@ struct CleanupView: View {
                    action: ("Rescan", { Task { await care.enter(.cleanup) } }))
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("There are \(Store.bytes(care.junk + care.ai)) of junk files on your Mac.")
+                    Text("There are \(Store.bytes(care.junk + care.aiBeyondJunk)) of junk files on your Mac.")
                         .font(.system(size: 26, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -294,7 +294,7 @@ struct CloudCleanupView: View {
     var body: some View {
         let scans = care.cloud ?? []
         VStack(spacing: 0) {
-            CareHeader(title: "Cloud Cleanup", subtitle: subtitle(scans), busy: care.scanningCloud,
+            CareHeader(title: "Cloud Cleanup", subtitle: subtitle(scans), busy: care.scanningCloud || care.store.busy != nil,
                    action: ("Rescan", { Task { await care.scanCloud() } }))
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -324,7 +324,7 @@ struct CloudCleanupView: View {
                                     }
                                     .controlSize(.small)
                                     .help("Show in Finder")
-                                    Button("Remove Download") { care.removeDownload(file, from: scan.drive) }
+                                    Button("Remove Download") { Task { await care.removeDownload(file, from: scan.drive) } }
                                         .controlSize(.small)
                                         .disabled(care.store.busy != nil)
                                 }

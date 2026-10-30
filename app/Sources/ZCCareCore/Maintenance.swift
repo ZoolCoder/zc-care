@@ -15,6 +15,8 @@ public struct MaintenanceTask: Sendable, Equatable, Identifiable {
     /// How often Smart Care suggests it; nil for a task run only when
     /// something is wrong.
     public var every: TimeInterval?
+    /// Set over the login environment for each step.
+    public var env: [String: String] = [:]
 }
 
 public enum Maintenance {
@@ -35,14 +37,26 @@ public enum Maintenance {
             MaintenanceTask(id: "spotlight", title: "Reindex Spotlight",
                             detail: "Rebuilds the search index; search is slow for a while after.",
                             symbol: "magnifyingglass", steps: [["/usr/bin/mdutil", "-E", "/"]], admin: true),
+            // Read-only: First Aid repairs, and only from Disk Utility.
+            MaintenanceTask(id: "verify", title: "Verify Startup Disk",
+                            detail: "Checks the startup disk's file system for damage; nothing is changed. Takes a few minutes.",
+                            symbol: "internaldrive.fill", steps: [["/usr/sbin/diskutil", "verifyVolume", "/"]]),
             MaintenanceTask(id: "launchservices", title: "Repair Open With Menus",
                             detail: "Drops apps that are gone and registers those in /Applications again.",
                             symbol: "contextualmenu.and.cursorarrow",
                             steps: [[lsregister, "-gc"], [lsregister, "-r", "/Applications"]], every: 30 * day),
+            MaintenanceTask(id: "quicklook", title: "Reset Quick Look",
+                            detail: "Clears stale thumbnails and previews, and reloads preview plug-ins.",
+                            symbol: "eye.fill", steps: [["/usr/bin/qlmanage", "-r", "cache"], ["/usr/bin/qlmanage", "-r"]]),
+            // Only this user's caches: the system ones need a restart in Safe Mode.
+            MaintenanceTask(id: "fonts", title: "Clear Font Caches",
+                            detail: "Fixes garbled or missing fonts; apps rebuild the caches as they open.",
+                            symbol: "textformat", steps: [["/usr/bin/atsutil", "databases", "-removeUser"]]),
         ]
         if let brew {
             tasks.append(MaintenanceTask(id: "brew", title: "Clean Up Homebrew", detail: "Removes old versions and every cached download.",
-                                         symbol: "mug.fill", steps: [[brew, "cleanup", "--prune=all"]], every: 14 * day))
+                                         symbol: "mug.fill", steps: [[brew, "cleanup", "--prune=all"]], every: 14 * day,
+                                         env: Homebrew.quiet))
         }
         if xcode {
             tasks.append(MaintenanceTask(id: "simulators", title: "Delete Unavailable Simulators",
@@ -125,12 +139,16 @@ extension Leftovers {
     /// could be a helper of, answers to. Apple's own are left out, and so is
     /// what a vendor with an app still installed shares between its apps,
     /// such as com.microsoft.shared: `vendors` holds those apps' vendors.
-    public static func orphans(home: String, vendors: Set<String> = [], isInstalled: (String) -> Bool) -> [Orphan] {
+    /// An id in `removed` belongs to an app seen leaving the Applications
+    /// folders, so it is listed whatever its vendor, unless it is installed.
+    public static func orphans(home: String, vendors: Set<String> = [], removed: Set<String> = [],
+                               isInstalled: (String) -> Bool) -> [Orphan] {
         var byID: [String: [String]] = [:]
         for folder in folders {
             let path = home + "/Library/" + folder
             for name in (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [] {
-                guard let id = bundleID(name), !isApple(id), !vendors.contains(vendor(id)), !owned(id, isInstalled) else { continue }
+                guard let id = bundleID(name), !isApple(id),
+                      isLeftover(id, vendors: vendors, removed: removed, isInstalled: isInstalled) else { continue }
                 byID[id, default: []].append(path + "/" + name)
             }
         }
@@ -139,6 +157,40 @@ extension Leftovers {
                    size: paths.reduce(0) { $0 + DiskUsage.allocated(URL(fileURLWithPath: $1)) })
         }
         .sorted { $0.size > $1.size }
+    }
+
+    /// What one app left in the folders `orphans` reads, the same entries it
+    /// would list for that id; nothing for Apple's own.
+    public static func orphanPaths(of id: String, home: String) -> [String] {
+        guard !isApple(id) else { return [] }
+        return folders.flatMap { folder in
+            let path = home + "/Library/" + folder
+            return ((try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [])
+                .filter { bundleID($0) == id }.map { path + "/" + $0 }
+        }
+    }
+
+    /// The picked leftovers `orphans` would still list, each with only those
+    /// of its reviewed paths still there.
+    public static func stillOrphaned(_ picked: [Orphan], vendors: Set<String> = [], removed: Set<String> = [],
+                                     isInstalled: (String) -> Bool) -> [Orphan] {
+        picked.filter { isLeftover($0.bundleID, vendors: vendors, removed: removed, isInstalled: isInstalled) }.compactMap { orphan in
+            var orphan = orphan
+            orphan.paths = orphan.paths.filter { FileManager.default.fileExists(atPath: $0) }
+            return orphan.paths.isEmpty ? nil : orphan
+        }
+    }
+
+    /// No app owns the id, and no installed app of its vendor may share it,
+    /// unless that app was just removed.
+    static func isLeftover(_ id: String, vendors: Set<String>, removed: Set<String>, isInstalled: (String) -> Bool) -> Bool {
+        !owned(id, isInstalled) && (removed.contains(id) || !vendors.contains(vendor(id)))
+    }
+
+    /// Whether a path lies in a Trash: the home folder's or a volume's.
+    public static func inTrash(_ path: String) -> Bool {
+        let parts = (path as NSString).pathComponents
+        return parts.contains(".Trash") || parts.contains(".Trashes")
     }
 
     /// Bundle ids of the apps Launch Services may not know: Setapp's and

@@ -209,15 +209,29 @@ public struct CareCLI: Sendable {
     public var config: String
     public var env: [String: String]
     var runner: any Runner
+    /// Runs the reads: status, doctor, list, drift, history and plan. Give it
+    /// a timeout, so one that hangs cannot keep the app refreshing for ever;
+    /// apply, add and remove go through runner, which may install for long.
+    var reader: any Runner
 
-    public init(binary: String, config: String, env: [String: String], runner: any Runner = ProcessRunner()) {
+    public init(binary: String, config: String, env: [String: String], runner: any Runner = ProcessRunner(),
+                reader: (any Runner)? = nil) {
         self.binary = binary
         self.config = config
         self.env = env
         self.runner = runner
+        self.reader = reader ?? runner
     }
 
     public func run(_ args: [String]) async throws -> CommandResult {
+        try await run(args, with: runner)
+    }
+
+    func read(_ args: [String]) async throws -> CommandResult {
+        try await run(args, with: reader)
+    }
+
+    private func run(_ args: [String], with runner: any Runner) async throws -> CommandResult {
         var env = env
         env["ZC_CARE_CONFIG"] = config
         return try await runner.run(binary, args, env: env)
@@ -226,7 +240,7 @@ public struct CareCLI: Sendable {
     /// Runs the command and decodes its JSON. The doctor exits non-zero when
     /// a check fails, so a document on stdout counts more than the status.
     func json<T: Decodable>(_ args: [String]) async throws -> T {
-        let r = try await run(args)
+        let r = try await read(args)
         if let doc = try? JSONDecoder().decode(T.self, from: r.stdout) {
             return doc
         }
@@ -243,13 +257,13 @@ public struct CareCLI: Sendable {
     /// The last saved drift. It never fails the snapshot: no check has run
     /// until the launchd agent is loaded.
     public func drift() async -> Drift? {
-        guard let r = try? await run(["drift", "-last", "-json"]), r.status == 0 else { return nil }
+        guard let r = try? await read(["drift", "-last", "-json"]), r.status == 0 else { return nil }
         return try? Self.dated.decode(Drift.self, from: r.stdout)
     }
 
     /// What was applied, newest first.
     public func history(limit: Int = 50) async throws -> [HistoryEntry] {
-        let r = try await run(["history", "-json", "-n", String(limit)])
+        let r = try await read(["history", "-json", "-n", String(limit)])
         guard let doc = try? Self.dated.decode([HistoryEntry].self, from: r.stdout) else {
             throw CLIError(message: lastLine(r.stderr) ?? "history exited \(r.status)")
         }
@@ -289,7 +303,15 @@ public struct CareCLI: Sendable {
         if upgrade { args.append("-upgrade") }
         for t in targets { args += ["-target", t] }
         for r in only { args += ["-only", r] }
-        return try await json(args)
+        // A failed plan can leave the last one's file behind; apply must never get it.
+        try? FileManager.default.removeItem(atPath: file)
+        let r = try await read(args)
+        guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "plan exited \(r.status)") }
+        do {
+            return try JSONDecoder().decode(PlanDoc.self, from: r.stdout)
+        } catch {
+            throw CLIError(message: "zc-care printed a plan this app cannot read.")
+        }
     }
 
     /// Applies a saved plan. -yes: the owner confirmed the plan in the app,

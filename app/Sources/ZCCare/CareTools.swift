@@ -80,8 +80,11 @@ struct MyTools: View {
                  symbol: "xmark.app.fill", colors: Tint.blue) { care.open(.apps) },
             Tool(title: "App Leftovers", detail: "Clear what apps you removed left behind.",
                  symbol: "puzzlepiece.extension.fill", colors: Tint.blue) { care.open(.apps) },
-            Tool(title: "App Updater", detail: "Update every outdated Homebrew package.",
-                 symbol: "arrow.up.circle.fill", colors: Tint.blue, button: "Update") { Task { await care.store.updateAll() } },
+            Tool(title: "App Updater", detail: "Find newer versions from each app's own feed, the App Store and Homebrew.",
+                 symbol: "arrow.up.circle.fill", colors: Tint.blue, isNew: true) {
+                care.showUpdates = true
+                care.open(.apps)
+            },
             Tool(title: "Maintenance Tasks", detail: "Free RAM, flush DNS, reindex Spotlight and more.",
                  symbol: "wrench.and.screwdriver.fill", colors: Tint.orange) { care.open(.performance) },
             Tool(title: "Login Items", detail: "Choose what starts with your Mac.", symbol: "power", colors: Tint.orange) { care.open(.performance) },

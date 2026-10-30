@@ -92,6 +92,10 @@ final class Care {
     /// Nil until looked for: what removed apps left in the Library.
     var orphans: [Orphan]?
     var loadingOrphans = false
+    /// Nil until read: the installer packages macOS keeps a receipt of.
+    var receipts: [PackageReceipt]?
+    var loadingReceipts = false
+    var receiptsUnread = false
     var maintenance: [MaintenanceTask] = []
     var scanningFiles = false
     /// Hashing for duplicates outlasts the rest of the file scan.
@@ -102,6 +106,33 @@ final class Care {
     var backgroundItems: [BackgroundItem] = []
     var assessments: [String: Assessment] = [:]
     var gatekeeper: Bool?
+    var securityChecks: [SecurityCheck] = []
+    /// Apps whose own update feed offers a newer release, and those whose
+    /// feed could not be read; nil until checked.
+    var feedUpdates: [AppUpdate]?
+    var feedFailures: [String] = []
+    var feedUnreadable: [String] = []
+    var updatesCheckedAt: Date?
+    var checkingUpdates = false
+    /// The startup disk's health, its APFS volumes, the space macOS can
+    /// purge on its own and the local Time Machine snapshots; nil until read.
+    var diskHealth: DiskHealth?
+    var containerSpace: ContainerSpace?
+    var purgeable: Int64?
+    var localSnapshots: [String] = []
+    var loadingDisk = false
+    /// Set to open Applications on its Updates list.
+    var showUpdates = false
+    /// Set to open Applications on its Leftovers list.
+    var showLeftovers = false
+    /// Apps a notification said were removed: Leftovers lists what they
+    /// left even when their vendor has another app installed.
+    var removedIDs: Set<String> = []
+    /// Asks Space Lens to open on the startup disk rather than the home folder.
+    var showStartupDisk = false
+    /// When the startup disk was last read, failed or not.
+    var diskReadAt: Date?
+    var protectionCheckedAt: Date?
     /// Nil until read; the TCC databases need Full Disk Access.
     var permissions: [Permission]?
     /// Why the permissions could not be read, when it was not Full Disk Access.
@@ -134,6 +165,8 @@ final class Care {
     /// Duplicates are looked for from this size up: hashing smaller files
     /// costs more than they waste.
     nonisolated static let duplicateFile: Int64 = 10_000_000
+    /// Past this many groups a list is too long to review.
+    static let duplicateGroups = 500
     /// Mail attachments under this are not worth the row.
     nonisolated static let mailAttachment: Int64 = 1_000_000
 
@@ -177,19 +210,37 @@ final class Care {
     }
 
     var monitor: Monitor { store.monitor }
-    var junk: Int64 { monitor.junk.values.reduce(0, +) }
+    /// What Clean All clears: folders cleared by hand only, such as iPhone
+    /// backups, stay out of the total.
+    var junk: Int64 { store.spotsToCleanAll.reduce(0) { $0 + (monitor.junk[$1.id] ?? 0) } }
     /// Large files, old downloads and installers, each once, and what duplicates waste.
     var clutter: Int64 {
         let files = Dictionary((largeFiles + oldDownloads + diskImages).map { ($0.id, $0.size) }, uniquingKeysWith: { a, _ in a })
         return files.values.reduce(0, +) + duplicates.reduce(0) { $0 + $1.wasted }
     }
-    var adoptable: [InstalledApp] {
-        apps.filter { $0.declared == nil && $0.source == .other && casks[$0.url.lastPathComponent] != nil }
+    var adoptable: [InstalledApp] { apps.filter(canAdopt) }
+    /// Homebrew adopts a copy in /Applications only; one in ~/Applications
+    /// would get a second, new copy beside it.
+    func canAdopt(_ app: InstalledApp) -> Bool {
+        app.inApplications && app.declared == nil && app.source == .other && casks[app.url.lastPathComponent] != nil
     }
     var untrusted: [InstalledApp] { apps.filter { assessments[$0.id].map { !$0.trusted } ?? false } }
-    var undeclared: [InstalledApp] { apps.filter { $0.declared == nil } }
+    /// A second copy in ~/Applications is flagged as such, not as missing from the Brewfile.
+    var undeclared: [InstalledApp] {
+        let copies = copies
+        return apps.filter { $0.declared == nil && !(copies.contains($0.id) && !$0.inApplications) }
+    }
     var unused: [InstalledApp] { apps.filter { $0.unused() } }
+    var intelOnly: [InstalledApp] { apps.filter { $0.intelOnly == true } }
+    var copies: Set<String> { AppCatalog.copies(apps) }
     var ai: Int64 { aiJunk.reduce(0) { $0 + $1.size } }
+    /// AI clutter outside the folders Clean All clears: Claude's and
+    /// ChatGPT's caches and logs already count in `junk`.
+    var aiBeyondJunk: Int64 { aiOutsideJunk.reduce(0) { $0 + $1.size } }
+    var aiOutsideJunk: [AIJunk] {
+        let roots = store.spotsToCleanAll.map { $0.path + "/" }
+        return aiJunk.filter { j in !j.paths.allSatisfy { p in roots.contains { p.path.hasPrefix($0) } } }
+    }
     var developer: Int64 { dependencies.reduce(0) { $0 + $1.size } + models.reduce(0) { $0 + $1.size } }
     var startup: [LaunchAgent] { agents.filter { $0.enabled && ($0.runAtLoad || $0.keepAlive) } }
 
@@ -247,7 +298,8 @@ final class Care {
         async let agents: Void = loadAgents()
         async let developer: Void = scanDeveloper()
         async let ai: Void = scanAI()
-        _ = await (junk, state, files, apps, agents, developer, ai)
+        async let disk: Void = loadDisk()
+        _ = await (junk, state, files, apps, agents, developer, ai, disk)
         scannedAt = .now
         fresh = true
         save()
@@ -325,13 +377,14 @@ final class Care {
         await scan()
         guard store.notifies else { return }
         store.notifier.post(CareSchedule.alerts(junk: junk, outdated: store.snapshot?.outdated.count ?? 0,
-                                                findings: store.findings.count))
+                                                findings: store.findings.count, drive: diskHealth))
     }
 
     /// Smart Care's Run: cleans up, then updates, each after its question.
     func run() async {
         if junk > 0 { await store.cleanAll() }
-        if ai > 0 { await cleanAI(aiJunk) }
+        // Clean All just cleared the AI caches and logs inside its folders.
+        if aiBeyondJunk > 0 { await cleanAI(aiOutsideJunk) }
         if !(store.snapshot?.outdated.isEmpty ?? true) { await store.updateAll() }
     }
 
@@ -350,7 +403,7 @@ final class Care {
         }
         let downloads = URL(fileURLWithPath: home + "/Downloads")
         let installers = [downloads, URL(fileURLWithPath: home + "/Desktop")]
-        let same = Task.detached(priority: .utility) { Duplicates.groups(paths: paths, home: home, minimum: Self.duplicateFile) }
+        let same = Task.detached(priority: .utility) { Duplicates.groups(paths: paths, home: home, minimum: Self.duplicateFile, limit: .max) }
         async let large = Task.detached { LargeFiles.files(paths: paths, home: home, minimum: Self.largeFile) }.value
         async let old = Task.detached { OldDownloads.files(in: downloads) }.value
         async let images = Task.detached { DiskImages.files(in: installers) }.value
@@ -364,11 +417,12 @@ final class Care {
         scanningFiles = false
         findingDuplicates = true
         defer { findingDuplicates = false }
-        duplicates = store.ignoreList.keep(await same.value).compactMap { group in
+        // Capped once ignored and vanished copies are out, so they take no place.
+        duplicates = Array(store.ignoreList.keep(await same.value).compactMap { group in
             var group = group
             group.files.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
             return group.files.count > 1 ? group : nil
-        }
+        }.prefix(Self.duplicateGroups))
     }
 
     /// The paths Spotlight finds; nil, with why in a message, when mdfind fails.
@@ -435,10 +489,24 @@ final class Care {
             return false
         }
         // By id too: a copy running from elsewhere uses the same settings.
+        // A login item or helper inside the bundle counts as the app.
+        let inside = app.url.standardizedFileURL.path + "/"
         let running = NSWorkspace.shared.runningApplications.filter {
             $0.bundleURL?.standardizedFileURL == app.url.standardizedFileURL || ($0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleID)
+                || $0.bundleURL?.standardizedFileURL.path.hasPrefix(inside) == true
+                || $0.executableURL?.standardizedFileURL.path.hasPrefix(inside) == true
         }
         return await closed(running, toDo: what)
+    }
+
+    /// Updates a Homebrew cask or App Store app after offering to quit it:
+    /// its bundle is replaced, which a running app may not survive.
+    func update(_ item: Item, app: InstalledApp?) async {
+        // ZC Care's own cask updates as before: it cannot quit itself here.
+        if let app, app.bundleID != Bundle.main.bundleIdentifier {
+            guard store.busy == nil, await closed(app, toDo: "update \(app.name)") else { return }
+        }
+        await store.update(item)
     }
 
     /// Shows how a run went, and logs what went for My Activity.
@@ -503,7 +571,14 @@ final class Care {
         return output
     }
 
-    func trash(_ file: LargeFile) async {
+    /// `within` names the folder a Space Lens pick must still be safe in:
+    /// its saved tree may be days old, and a part of the path a symlink since.
+    func trash(_ file: LargeFile, within home: String? = nil) async {
+        // Mail keeps indexing its attachments while it runs.
+        if file.url.path.hasPrefix(NSHomeDirectory() + "/Library/Mail/") {
+            await trashMailAttachments([file])
+            return
+        }
         guard store.busy == nil, !removing, allowed([file.url]) else { return }
         removing = true
         defer { removing = false }
@@ -518,9 +593,19 @@ final class Care {
                 return
             }
         }
+        // Space Lens sizes come from its saved scan; the folder may have grown since.
+        var file = file
+        if home != nil {
+            let url = file.url
+            file.size = await Task.detached(priority: .userInitiated) { DiskUsage.allocated(url) }.value
+        }
         guard store.busy == nil, Alerts.confirm(store.removeQuestion(file.name),
                                                 "\(Store.bytes(file.size)) in \(file.url.deletingLastPathComponent().path).",
                                                 button: store.removeButton) else { return }
+        if let home, !SpaceLens.canTrash(file.url.path, home: home) {
+            store.message = Store.Message(text: "\(file.name) moved or became a link since the scan; Rescan first. Nothing was removed.", failed: true)
+            return
+        }
         store.busy = "Removing \(file.name)"
         defer { store.busy = nil }
         let removal = await remove([file.url])
@@ -567,7 +652,9 @@ final class Care {
     }
 
     func keepOldest(_ group: DuplicateGroup) async {
-        guard store.busy == nil else { return }
+        guard store.busy == nil, !removing else { return }
+        removing = true
+        defer { removing = false }
         let keeper = group.keeper
         let others = await stillSame(group)
         guard !others.isEmpty else {
@@ -707,14 +794,17 @@ final class Care {
         guard store.busy == nil, !removing, !folders.isEmpty, allowed(folders.map(\.url)) else { return }
         removing = true
         defer { removing = false }
-        // A project may have started since the scan, or have a shell open in it.
+        // A project may have started since the scan, have a shell open in it,
+        // or have been worked on again since a list restored from days ago.
         guard let cwds = await workingDirectories() else { return }
+        let resumed = await Task.detached(priority: .userInitiated) { ProjectDependencies.touched(folders) }.value
         let running = ProjectDependencies.running(folders, commands: await Monitor.commands())
             + folders.filter { !OpenFile.workingIn($0.url.deletingLastPathComponent().path, cwds).isEmpty }
+            + resumed
         if !running.isEmpty {
             let ids = Set(running.map(\.id))
             dependencies.removeAll { ids.contains($0.id) }
-            store.message = Store.Message(text: "\(Store.counted(ids.count, "project")) in use now; "
+            store.message = Store.Message(text: "\(Store.counted(ids.count, "project")) in use or worked on since the scan; "
                                               + "\(ids.count == 1 ? "its" : "their") dependencies stay.", failed: false)
             return
         }
@@ -734,14 +824,34 @@ final class Care {
     }
 
     func trash(_ model: AIModel) async {
-        guard store.busy == nil, allowed(model.paths), Alerts.confirm(store.removeQuestion(model.name),
-                                                "\(Store.bytes(model.size)) of \(model.source.rawValue) model files. "
-                                                    + "Pulling the model again downloads it.",
-                                                button: store.removeButton) else { return }
+        guard store.busy == nil, !removing, allowed(model.paths) else { return }
+        removing = true
+        defer { removing = false }
+        guard await !openInApp(model.paths), store.busy == nil,
+              Alerts.confirm(store.removeQuestion(model.name),
+                             "\(Store.bytes(model.size)) of \(model.source.rawValue) model files. "
+                                 + "Pulling the model again downloads it.",
+                             button: store.removeButton) else { return }
         store.busy = "Removing \(model.name)"
         defer { store.busy = nil }
-        let (failure, trashed) = await recycle(model.paths)
-        recordRemoval(.developer, model.name, freed: model.size, failure: failure, trashed: trashed)
+        // The list may be days old: a model pulled since can share a blob
+        // this one owned then, so only what it still owns alone goes.
+        let home = NSHomeDirectory()
+        let fresh = await Task.detached(priority: .userInitiated) { AIModels.find(home: home) }.value
+        guard let paths = AIModels.stillOwned(model, in: fresh) else {
+            models = fresh
+            applyIgnoreList()
+            store.message = Store.Message(text: "\(model.name) is gone or changed since the scan; Rescan first. Nothing was removed.", failed: true)
+            return
+        }
+        // A pull may be taking a blob this model owns alone into a new one.
+        if await Monitor.commands().contains(where: AIModels.isOllamaWriting) {
+            store.message = Store.Message(text: "Ollama is pulling or creating a model; try again when it is done. Nothing was removed.", failed: true)
+            return
+        }
+        let freed = await Task.detached { paths.reduce(Int64(0)) { $0 + DiskUsage.allocated($1) } }.value
+        let (failure, trashed) = await recycle(paths)
+        recordRemoval(.developer, model.name, freed: freed, failure: failure, trashed: trashed)
         if let failure {
             store.message = Store.Message(text: "\(model.name): \(failure)", failed: true)
         } else {
@@ -757,6 +867,8 @@ final class Care {
         let symbol: String
         let title: String
         let module: Module
+        /// Picks the view inside the module the title names.
+        var prepare: (@MainActor (Care) -> Void)?
         var id: String { title }
     }
 
@@ -766,10 +878,20 @@ final class Care {
         if scannedAt.map({ Date.now.timeIntervalSince($0) > 7 * 86400 }) ?? true {
             r.append(Recommendation(symbol: "sparkles", title: "Run Smart Care: no scan this week", module: .smartCare))
         }
+        if let health = diskHealth, health.verdict == .failing || health.verdict == .watch {
+            r.append(Recommendation(symbol: "internaldrive.fill", title: health.verdict == .failing ? "Back up now: the startup drive is failing"
+                                    : "Check the startup drive's health", module: .spaceLens) { $0.showStartupDisk = true })
+        }
         if junk > 500_000_000 { r.append(Recommendation(symbol: "trash.fill", title: "Clean \(Store.bytes(junk)) of system junk", module: .cleanup)) }
         if ai > 200_000_000 { r.append(Recommendation(symbol: "brain.head.profile", title: "Clear \(Store.bytes(ai)) of AI clutter", module: .cleanup)) }
         let outdated = store.snapshot?.outdated.count ?? 0
         if outdated > 0 { r.append(Recommendation(symbol: "arrow.down.circle.fill", title: "Update " + Store.counted(outdated, "package"), module: .apps)) }
+        let feeds = shownFeedUpdates.filter(\.supported).count
+        if feeds > 0 {
+            r.append(Recommendation(symbol: "arrow.triangle.2.circlepath", title: "Open \(Store.counted(feeds, "app")) with an update", module: .apps) {
+                $0.showUpdates = true
+            })
+        }
         let findings = store.findings.count
         if findings > 0 { r.append(Recommendation(symbol: "stethoscope", title: findings == 1 ? "Look at 1 health finding" : "Look at \(findings) health findings", module: .smartCare)) }
         if !untrusted.isEmpty {
@@ -780,6 +902,9 @@ final class Care {
             r.append(Recommendation(symbol: "shippingbox.fill", title: "Remove \(Store.bytes(idle)) of idle dependencies", module: .developer))
         }
         if clutter > 1_000_000_000 { r.append(Recommendation(symbol: "doc.on.doc.fill", title: "Review \(Store.bytes(clutter)) of large files", module: .clutter)) }
+        let copies = copies
+        let twice = Set(apps.filter { copies.contains($0.id) }.compactMap(\.bundleID)).count
+        if twice > 0 { r.append(Recommendation(symbol: "square.on.square", title: "Remove the extra copy of \(Store.counted(twice, "app"))", module: .apps)) }
         if !unused.isEmpty { r.append(Recommendation(symbol: "square.grid.2x2.fill", title: "Uninstall \(Store.counted(unused.count, "unused app"))", module: .apps)) }
         let broken = agents.filter(\.broken).count
         if broken > 0 { r.append(Recommendation(symbol: "bolt.slash.fill", title: "Remove " + Store.counted(broken, "broken launch agent"), module: .performance)) }
@@ -848,7 +973,11 @@ final class Care {
     func trashMailAttachments(_ files: [LargeFile]) async {
         guard store.busy == nil, !removing else { return }
         let mail = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.mail")
-        guard await closed(mail, toDo: "remove \(Store.counted(files.count, "attachment"))") else { return }
+        removing = true
+        let quit = await closed(mail, toDo: "remove \(Store.counted(files.count, "attachment"))")
+        // trashFiles takes the flag again before its first wait.
+        removing = false
+        guard quit else { return }
         await trashFiles(files, title: "Mail Attachments")
     }
 
@@ -901,7 +1030,12 @@ final class Care {
         self.items = items
         if casks.isEmpty { casks = await Task.detached { Self.readCaskIndex() }.value }
         let folder = URL(fileURLWithPath: "/Applications")
-        let found = await Task.detached { AppCatalog.apps(in: folder, caskApps: caskApps, items: items) }.value
+        let home = URL(fileURLWithPath: NSHomeDirectory() + "/Applications")
+        let found = await Task.detached {
+            (AppCatalog.apps(in: folder, caskApps: caskApps, items: items)
+                + AppCatalog.apps(in: home, caskApps: caskApps, items: items, managed: false))
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }.value
         externalIDs = await Task.detached { Leftovers.externalAppIDs() }.value
         let old = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         apps = found.map { app in
@@ -909,6 +1043,7 @@ final class Care {
             app.size = old[app.id]?.size
             app.lastUsed = old[app.id]?.lastUsed
             app.added = old[app.id]?.added
+            app.intelOnly = old[app.id]?.intelOnly
             return app
         }
         applyIgnoreList()
@@ -921,10 +1056,11 @@ final class Care {
             let item = NSMetadataItem(url: url)
             let used = item?.value(forAttribute: "kMDItemLastUsedDate") as? Date
             let added = item?.value(forAttribute: "kMDItemDateAdded") as? Date
-            return (url.path, DiskUsage.allocated(url), used, added)
-        } each: { id, size, used, added in
+            return (url.path, DiskUsage.allocated(url), used, added, Architectures.intelOnly(url))
+        } each: { id, size, used, added, intel in
             guard let i = apps.firstIndex(where: { $0.id == id }) else { return }
             apps[i].size = size
+            apps[i].intelOnly = intel
             apps[i].lastUsed = running.contains(URL(fileURLWithPath: id).standardizedFileURL.path) ? .now : used
             apps[i].added = added
         }
@@ -932,18 +1068,30 @@ final class Care {
 
     /// Apps in /Applications plus Setapp's and other volumes': a sibling there keeps its agents.
     var installedIDs: Set<String> { Set(apps.compactMap(\.bundleID)).union(externalIDs) }
+    var installedNames: Set<String> { Set(apps.map(\.name)) }
 
     /// Removes the app and what it left in the Library. A Brewfile app goes
     /// through zc-care remove, which drops it from the manifest too;
     /// the rest go to the Trash, where they can be put back.
-    func uninstall(_ app: InstalledApp) async {
-        guard store.busy == nil, !removing, allowed([app.url]) else { return }
+    /// How one uninstall ended, so a run over several apps knows whether
+    /// to go on and what to report at the end.
+    enum UninstallOutcome { case declined, busy, skipped, failed, done }
+
+    @discardableResult
+    func uninstall(_ app: InstalledApp) async -> UninstallOutcome {
+        guard store.busy == nil, !removing else { return .busy }
+        guard allowed([app.url]) else { return .skipped }
         removing = true
         defer { removing = false }
-        guard await closed(app, toDo: "uninstall \(app.name)"), store.busy == nil else { return }
-        // What the ignore list names stays behind; the rest still goes.
-        let leftovers = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
-            .filter { !store.ignoreList.touches($0) }
+        guard await closed(app, toDo: "uninstall \(app.name)") else { return .skipped }
+        guard store.busy == nil else { return .busy }
+        // What the ignore list names stays behind; the rest still goes. With
+        // another copy installed, its settings and data are that copy's too,
+        // whether the list shows it or only Launch Services knows it.
+        let other = await Task.detached { Self.otherCopy(of: app) }.value
+        let leftovers = copies.contains(app.id) || other != nil ? []
+            : Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs, names: installedNames)
+                .filter { !store.ignoreList.touches($0) }
         let method = Uninstall.method(declared: app.declared, source: app.source)
         var how: String
         switch method {
@@ -952,11 +1100,17 @@ final class Care {
         case .trash: how = store.deletesPermanently ? "The app is deleted for good." : "The app moves to the Trash."
         }
         if !leftovers.isEmpty {
-            how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n") + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath })
+            how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n")
+                + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath }, max: 24)
+        } else if let other {
+            how += "\n\nIts settings and data stay: another copy is at \((other.path as NSString).abbreviatingWithTildeInPath)."
         }
+        guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall") else { return .declined }
+        // Another copy runs the same agents; they stay with it.
+        if !copies.contains(app.id), other == nil { await bootOutBundledAgents(of: app) }
         // Again: the app may have opened while the alert was up.
-        guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall"),
-              await closed(app, toDo: "uninstall \(app.name)"), store.busy == nil else { return }
+        guard await closed(app, toDo: "uninstall \(app.name)") else { return .skipped }
+        guard store.busy == nil else { return .busy }
         store.busy = "Uninstalling \(app.name)"
         defer { store.busy = nil }
         var failure: String?
@@ -965,7 +1119,7 @@ final class Care {
         case .remove(let target, let resource):
             if let cli = store.cli {
                 failure = await store.cancellable {
-                    await self.store.failure("remove failed") { try await cli.run(["remove", "-target", target, resource]) }
+                    await self.store.failure("remove failed") { try await cli.run(["remove", "-yes", "-target", target, resource]) }
                 }
             } else {
                 failure = "zc-care is not installed"
@@ -974,7 +1128,7 @@ final class Care {
             if let brew = store.program("brew") {
                 failure = await store.cancellable {
                     await self.store.failure("brew uninstall failed") {
-                        try await ProcessRunner().run(brew, ["uninstall", "--cask", token], env: self.store.loginEnv)
+                        try await ProcessRunner().run(brew, ["uninstall", "--cask", token], env: self.store.loginEnv.merging(Homebrew.quiet) { $1 })
                     }
                 }
             } else {
@@ -1008,12 +1162,58 @@ final class Care {
             store.message = Store.Message(text: "\(app.name) is uninstalled.", failed: false)
         }
         monitor.readDisk()
+        return failure == nil && leftoverFailure == nil ? .done : .failed
+    }
+
+    /// Uninstalls each app in turn, each asking first. No, or something
+    /// else taking over, stops the rest; one message sums up the run so a
+    /// later app's success does not hide an earlier failure.
+    func uninstall(_ chosen: [InstalledApp]) async {
+        let before = apps.count
+        var done = 0
+        var problems: [String] = []
+        var stopped = false
+        for app in chosen {
+            let outcome = await uninstall(app)
+            if outcome == .done { done += 1 }
+            if outcome == .failed || outcome == .skipped, let message = store.message, message.failed { problems.append(message.text) }
+            if outcome == .declined || outcome == .busy { stopped = true; break }
+        }
+        // An app gone, even with files that stayed, changes what counts as left over.
+        if apps.count < before { orphans = nil }
+        guard chosen.count > 1 else { return }
+        var text = "\(Store.counted(done, "app")) uninstalled"
+        if stopped { text += ", the rest left alone" }
+        if !problems.isEmpty { text += ". " + problems.joined(separator: " ") }
+        store.message = Store.Message(text: text + (problems.isEmpty ? "." : ""), failed: !problems.isEmpty)
     }
 
     /// Stops the agents so they do not run on from the Trash.
     private func bootOut(_ agents: [String]) async {
         for agent in agents {
             _ = try? await ProcessRunner(timeout: 10).run("/bin/launchctl", ["bootout", "gui/\(getuid())", agent], env: [:])
+        }
+    }
+
+    /// Another copy of the app Launch Services knows, outside the Trash:
+    /// one in a subfolder, on another volume or on the ignore list. A
+    /// mounted installer disk image is read-only and does not count.
+    nonisolated static func otherCopy(of app: InstalledApp) -> URL? {
+        guard let id = app.bundleID else { return nil }
+        let own = app.url.resolvingSymlinksInPath().path
+        return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id).first {
+            $0.resolvingSymlinksInPath().path != own && !Leftovers.inTrash($0.path) && FileManager.default.fileExists(atPath: $0.path)
+                && (try? $0.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) != true
+        }
+    }
+
+    /// Stops the agents the app runs from inside its bundle, so a helper
+    /// launchd keeps alive neither comes back after Quit nor writes its
+    /// files back once they are gone.
+    private func bootOutBundledAgents(of app: InstalledApp) async {
+        let labels = await Task.detached { Leftovers.bundledAgents(in: app.url, bundleID: app.bundleID) }.value
+        for label in labels {
+            _ = try? await ProcessRunner(timeout: 10).run("/bin/launchctl", ["bootout", "gui/\(getuid())/\(label)"], env: [:])
         }
     }
 
@@ -1024,7 +1224,7 @@ final class Care {
         removing = true
         defer { removing = false }
         guard await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
-        let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
+        let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs, names: installedNames)
             .filter { !store.ignoreList.touches($0) }
         guard !data.isEmpty else {
             store.message = Store.Message(text: "\(app.name) keeps no settings or data to reset.", failed: false)
@@ -1033,8 +1233,10 @@ final class Care {
         let urls = data.map(URL.init(fileURLWithPath:))
         guard Alerts.confirm("Reset \(app.name)?",
                                             "It opens as on its first launch. " + (store.deletesPermanently ? "These are deleted for good:\n" : "These move to the Trash:\n")
-                                                + Alerts.lines(data.map { ($0 as NSString).abbreviatingWithTildeInPath }),
-                                            button: "Reset"), await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
+                                                + Alerts.lines(data.map { ($0 as NSString).abbreviatingWithTildeInPath }, max: 24),
+                                            button: "Reset") else { return }
+        await bootOutBundledAgents(of: app)
+        guard await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
         store.busy = "Resetting \(app.name)"
         defer { store.busy = nil }
         await bootOut(Leftovers.agents(in: data))
@@ -1054,28 +1256,52 @@ final class Care {
     /// Library entries named for apps Launch Services no longer knows. A
     /// launch agent or a running process with the id is no leftover: tools
     /// without an app bundle keep their settings under it too.
+    /// Launch Services still knows an app in the Trash until it is emptied:
+    /// only a copy outside it counts.
+    nonisolated static func installedOutsideTrash(_ id: String) -> Bool {
+        // Launch Services also keeps records of bundles deleted since.
+        NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id)
+            .contains { !Leftovers.inTrash($0.path) && FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// What tells a leftover from an app's own files: apps on other volumes
+    /// and in Setapp, the vendors of installed apps, and whether an id is
+    /// running, a launch agent's, or installed outside the Trash.
+    nonisolated static func owners(home: String, running: Set<String>)
+        -> (external: Set<String>, vendors: Set<String>, owns: @Sendable (String) -> Bool) {
+        let external = Leftovers.externalAppIDs()
+        let folders = [home + "/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons"]
+        let inUse = running.union(LaunchAgent.read(folders: folders).map(\.label))
+        let apps = ["/Applications", "/Applications/Utilities", home + "/Applications"].flatMap { folder in
+            ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }
+                .map { folder + "/" + $0 }
+        }
+        let vendors = Set(apps.compactMap { Bundle(path: $0)?.bundleIdentifier }.map(Leftovers.vendor))
+            .union(external.map(Leftovers.vendor))
+        return (external, vendors, { inUse.contains($0) || external.contains($0) || installedOutsideTrash($0) })
+    }
+
     func loadOrphans() async {
         guard !loadingOrphans else { return }
         loadingOrphans = true
         defer { loadingOrphans = false }
         let home = NSHomeDirectory()
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-        let external = await Task.detached { Leftovers.externalAppIDs() }.value
-        externalIDs = external
-        orphans = await Task.detached(priority: .utility) {
-            let folders = [home + "/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons"]
-            let inUse = running.union(LaunchAgent.read(folders: folders).map(\.label))
-            let apps = ["/Applications", "/Applications/Utilities", home + "/Applications"].flatMap { folder in
-                ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }
-                    .map { folder + "/" + $0 }
-            }
-            let vendors = Set(apps.compactMap { Bundle(path: $0)?.bundleIdentifier }.map(Leftovers.vendor))
-                .union(external.map(Leftovers.vendor))
-            return Leftovers.orphans(home: home, vendors: vendors) {
-                inUse.contains($0) || external.contains($0) || NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
-            }
+        let removed = removedIDs
+        let found = await Task.detached(priority: .utility) {
+            let owners = Self.owners(home: home, running: running)
+            return (owners.external, Leftovers.orphans(home: home, vendors: owners.vendors, removed: removed, isInstalled: owners.owns))
         }.value
+        externalIDs = found.0
+        orphans = found.1
+        // Told about once listed: an app back since, or cleared, is no longer news.
+        removedIDs.subtract(removed.subtracting(orphans?.map(\.bundleID) ?? []))
         applyIgnoreList()
+        // A notification clicked while this ran named an app it missed.
+        if !removedIDs.isSubset(of: removed) {
+            loadingOrphans = false
+            await loadOrphans()
+        }
     }
 
     func trashOrphans(_ picked: [Orphan]) async {
@@ -1094,13 +1320,32 @@ final class Care {
               store.busy == nil else { return }
         store.busy = "Removing leftovers"
         defer { store.busy = nil }
-        let files = picked.flatMap { orphan in orphan.paths.map { (URL(fileURLWithPath: $0), DiskUsage.allocated(URL(fileURLWithPath: $0))) } }
+        // An app reinstalled or started since the list was read owns its folders again.
+        let home = NSHomeDirectory()
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let removed = removedIDs
+        let (still, files) = await Task.detached(priority: .userInitiated) {
+            let owners = Self.owners(home: home, running: running)
+            let still = Leftovers.stillOrphaned(picked, vendors: owners.vendors, removed: removed, isInstalled: owners.owns)
+            return (still, still.flatMap { orphan in orphan.paths.map { (URL(fileURLWithPath: $0), DiskUsage.allocated(URL(fileURLWithPath: $0))) } })
+        }.value
+        let skipped = picked.filter { orphan in !still.contains { $0.id == orphan.id } }
+        let back = skipped.filter { $0.paths.contains(where: FileManager.default.fileExists) }
+        orphans?.removeAll { o in skipped.contains { $0.id == o.id } }
+        let note = back.isEmpty ? nil
+            : "\(back.map(\.bundleID).joined(separator: ", ")) came back since the scan; \(back.count == 1 ? "its" : "their") files stay."
+        guard !files.isEmpty else {
+            store.message = Store.Message(text: note ?? "Those leftovers are gone already.", failed: false)
+            return
+        }
         let (failure, trashed) = await recycle(files.map(\.0))
         let gone = Set(picked.map(\.id))
         orphans?.removeAll { o in gone.contains(o.id) && !o.paths.contains(where: FileManager.default.fileExists) }
         var log = RunLog(title: "App Leftovers", permanent: store.deletesPermanently)
         log.add(files, trashed: trashed, failure: failure)
         finish(log, kind: .apps, trashed: trashed)
+        // finish shows the run; the apps skipped are told beside it.
+        if let note { store.message = Store.Message(text: note, failed: false) }
     }
 
     // MARK: Adopting
@@ -1128,11 +1373,15 @@ final class Care {
         guard Alerts.confirm("Adopt \(app.name) as cask \(token)?",
                              "Homebrew takes over the app in /Applications, and zc-care adds cask:\(token) to the \(target) target.",
                              button: "Adopt") else { return }
+        guard store.busy == nil else {
+            store.message = Store.Message(text: "\(app.name) was not adopted: another change is running.", failed: true)
+            return
+        }
         store.busy = "Adopting \(app.name)"
         defer { store.busy = nil }
         let installFailure = await store.cancellable {
             await self.store.failure("brew install failed") {
-                try await ProcessRunner().run(brew, ["install", "--cask", "--adopt", token], env: self.store.loginEnv)
+                try await ProcessRunner().run(brew, ["install", "--cask", "--adopt", token], env: self.store.loginEnv.merging(Homebrew.quiet) { $1 })
             }
         }
         if let installFailure {
@@ -1167,10 +1416,13 @@ final class Care {
             let removal = await remove(urls)
             return (removal.failures.isEmpty ? nil : removal.summary, [])
         }
+        // Read before the move: without Full Disk Access the Trash is closed.
+        let identities = Dictionary(urls.map { ($0, Trashed.prepare($0.path)) }, uniquingKeysWith: { a, _ in a })
         return await withCheckedContinuation { continuation in
             NSWorkspace.shared.recycle(urls) { moved, error in
+                for url in urls where moved[url] == nil { Trashed.untag(url.path) }
                 continuation.resume(returning: (error?.localizedDescription,
-                                                moved.map { Trashed(original: $0.key, inTrash: $0.value) }))
+                                                moved.map { Trashed(original: $0.key, inTrash: $0.value, identity: identities[$0.key] ?? nil) }))
             }
         }
     }
@@ -1305,17 +1557,19 @@ final class Care {
     /// Runs the task's steps; why one failed, if one did.
     private func steps(of task: MaintenanceTask) async -> String? {
         if task.admin {
-            return await store.failure("osascript failed") {
+            let failed = await store.failure("osascript failed") {
                 try await ProcessRunner().run("/usr/bin/osascript", ["-e", Maintenance.adminScript(task.steps)], env: [:])
             }
+            return failed == Store.cancelled ? Store.stoppedWaiting : failed
         }
         for step in task.steps {
             let failed = await store.failure("\(step[0]) failed") {
                 let arguments = Array(step.dropFirst())
+                let env = self.store.loginEnv.merging(task.env) { $1 }
                 if task.docker {
-                    return try await Docker.run(step[0], arguments, env: self.store.loginEnv, runner: ProcessRunner())
+                    return try await Docker.run(step[0], arguments, env: env, runner: ProcessRunner())
                 }
-                return try await ProcessRunner().run(step[0], arguments, env: self.store.loginEnv)
+                return try await ProcessRunner().run(step[0], arguments, env: env)
             }
             if let failed { return failed }
         }
@@ -1348,7 +1602,10 @@ final class Care {
         if apps.isEmpty { await loadApps() }
         async let status = try? ProcessRunner(timeout: 30).run("/usr/sbin/spctl", ["--status"], env: [:])
         async let tcc = readPermissions()
+        async let checks = readSecurityChecks()
         gatekeeper = await status.map { $0.output.contains("assessments enabled") }
+        securityChecks = await checks
+        protectionCheckedAt = Date()
         permissions = await tcc
         await loadBrowserTraces()
         let unassessed = apps.filter { assessments[$0.id] == nil }.map { (id: $0.id, path: $0.url.path) }
@@ -1360,44 +1617,67 @@ final class Care {
         }
     }
 
+    private func readSecurityChecks() async -> [SecurityCheck] {
+        let runner = ProcessRunner(timeout: 20)
+        async let fv = try? runner.run(SecurityChecks.fileVault.path, SecurityChecks.fileVault.args, env: [:])
+        async let fw = try? runner.run(SecurityChecks.firewall.path, SecurityChecks.firewall.args, env: [:])
+        async let sip = try? runner.run(SecurityChecks.integrity.path, SecurityChecks.integrity.args, env: [:])
+        let prefs = NSDictionary(contentsOfFile: SecurityChecks.updates) as? [String: Any]
+        return await SecurityChecks.checks(fileVault: fv?.output, firewall: fw?.output, integrity: sip?.output, updates: prefs)
+    }
+
     func loadBrowserTraces() async {
         let home = NSHomeDirectory()
         browserTraces = await Task.detached(priority: .utility) { BrowserPrivacy.find(home: home) }.value
     }
 
-    func isRunning(_ bundleID: String) -> Bool {
-        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleID }
+    func isRunning(_ bundleIDs: [String]) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier.map(bundleIDs.contains) == true }
     }
 
     /// Deletes one browser's history, cookies or cache, only while that
     /// browser is closed: an open one holds the databases and writes them back.
     func clearBrowser(_ trace: BrowserTrace) async {
         guard store.busy == nil, !removing else { return }
+        var trace = trace
+        let all = trace.paths.count
+        trace.paths.removeAll(where: store.ignoreList.touches)
+        let ignored = all - trace.paths.count
+        // The reload after counts what stayed, ignored items included.
+        let measured = trace.size
+        if ignored > 0 { trace.size = trace.paths.reduce(0) { $0 + DiskUsage.allocated($1) } }
+        guard !trace.paths.isEmpty else {
+            store.message = Store.Message(text: "Everything in \(trace.browser)'s \(trace.kind.lowercased()) is on the ignore list, so it stays.", failed: true)
+            return
+        }
         removing = true
         defer { removing = false }
         let what = "clear \(trace.browser)'s \(trace.kind.lowercased())"
-        guard await closed(NSRunningApplication.runningApplications(withBundleIdentifier: trace.bundleID), toDo: what),
+        guard await closed(trace.bundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)), toDo: what),
               store.busy == nil else { return }
         let effect = switch trace.kind {
         case BrowserPrivacy.cookies: "You will be signed out of websites in \(trace.browser)."
         case BrowserPrivacy.history: "\(trace.browser) forgets the pages you visited; bookmarks and passwords stay."
+        case BrowserPrivacy.siteData: "Sites forget the databases they keep in \(trace.browser), such as offline data; you may be signed out of some. Extensions keep theirs."
+        case BrowserPrivacy.sessions: "\(trace.browser) no longer reopens the tabs and windows it saved; bookmarks stay."
         default: "\(trace.browser) downloads pages again as you visit them."
         }
+        let stays = ignored == 0 ? "" : " \(Store.counted(ignored, "item")) on the ignore list stay."
         guard Alerts.confirm("Clear \(trace.browser)'s \(trace.kind.lowercased())?",
                              (store.deletesPermanently
                                  ? "This permanently deletes \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)); nothing goes to the Trash.\n\n"
-                                 : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect,
+                                 : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect + stays,
                              button: "Clear") else { return }
         // Again: the browser may have opened while the alert was up.
-        guard await closed(NSRunningApplication.runningApplications(withBundleIdentifier: trace.bundleID), toDo: what),
+        guard await closed(trace.bundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)), toDo: what),
               store.busy == nil else { return }
         store.busy = "Clearing \(trace.browser) \(trace.kind.lowercased())"
         defer { store.busy = nil }
         let permanently = store.deletesPermanently
-        let removal = await Task.detached { BrowserPrivacy.clear(trace, permanently: permanently) }.value
+        let removal = await Task.detached { [trace] in BrowserPrivacy.clear(trace, permanently: permanently) }.value
         await loadBrowserTraces()
         let left = browserTraces?.first { $0.id == trace.id }?.size ?? 0
-        store.record(.privacy, "\(trace.browser) \(trace.kind)", freed: max(trace.size - left, 0), trashed: removal.trashed)
+        store.record(.privacy, "\(trace.browser) \(trace.kind)", freed: max(measured - left, 0), trashed: removal.trashed)
         monitor.readDisk()
         store.message = Store.Message(text: "\(trace.browser) \(trace.kind.lowercased()) cleared" + removal.ending,
                                       failed: removal.stayed > 0)
@@ -1447,7 +1727,35 @@ final class Care {
             }
         }
         permissionsError = rows == nil ? failure : nil
-        return rows?.sorted { ($0.service, $0.client) < ($1.service, $1.client) }
+        // The user's and the system's databases can both hold one answer.
+        var seen = Set<String>()
+        return rows?.filter { seen.insert($0.id).inserted }.sorted { ($0.service, $0.client) < ($1.service, $1.client) }
+    }
+
+    /// Forgets one app's answer for one service: macOS asks the app again
+    /// the next time it wants it. Nothing to put back, so it asks first.
+    func resetPermission(_ p: Permission) async {
+        guard store.busy == nil, let args = Privacy.resetArguments(p),
+              Alerts.confirm("Reset \(p.service) for \(p.client)?",
+                             "macOS forgets that you \(p.allowed ? "allowed" : "denied") it; the app asks again the next time it needs \(p.service)."
+                                + (p.resetName == "AppleEvents" ? " This covers every app it controls." : ""),
+                             button: "Reset") else { return }
+        store.busy = "Resetting \(p.service)"
+        defer { store.busy = nil }
+        do {
+            let r = try await ProcessRunner(timeout: 20).run("/usr/bin/tccutil", args, env: [:])
+            guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "tccutil exited \(r.status)") }
+            // tccutil without root can leave answers kept in the system database: read them again to know.
+            permissions = await readPermissions()
+            guard let permissions else { throw CLIError(message: "tccutil ran, but the permissions could not be read again to check") }
+            guard !permissions.contains(where: { $0.id == p.id }) else {
+                throw CLIError(message: "macOS keeps this answer in the system database; change it in System Settings")
+            }
+            store.record(.privacy, "Reset \(p.service) for \(p.client)")
+            store.message = Store.Message(text: "\(p.client) asks for \(p.service) again next time.", failed: false)
+        } catch {
+            store.message = Store.Message(text: "\(p.service) not reset: \(error.localizedDescription)", failed: true)
+        }
     }
 
     func openSettings(_ pane: String) {
@@ -1498,7 +1806,8 @@ final class Care {
     nonisolated static let cloudFile: Int64 = 50_000_000
 
     func scanCloud() async {
-        guard !scanningCloud else { return }
+        // A download being removed would come back in a scan read meanwhile.
+        guard !scanningCloud, store.busy == nil else { return }
         scanningCloud = true
         defer { scanningCloud = false }
         let drives = CloudDrives.found(home: FileManager.default.homeDirectoryForCurrentUser)
@@ -1513,7 +1822,7 @@ final class Care {
 
     /// Frees the space a downloaded file takes and keeps it in the cloud:
     /// the Finder downloads it again on opening.
-    func removeDownload(_ file: LargeFile, from drive: CloudDrive) {
+    func removeDownload(_ file: LargeFile, from drive: CloudDrive) async {
         guard store.busy == nil else { return }
         guard allowed([file.url]) else { return }
         guard FileManager.default.fileExists(atPath: file.url.path) else {
@@ -1524,13 +1833,19 @@ final class Care {
         guard Alerts.confirm("Remove the download of \(file.name)?",
                              "It stays in \(drive.name) and downloads again when you open it. Frees \(Store.bytes(file.size)).",
                              button: "Remove Download") else { return }
-        do {
-            try FileManager.default.evictUbiquitousItem(at: file.url)
+        store.busy = "Removing the download of \(file.name)"
+        // Eviction waits on the provider's file coordination: not on the main thread.
+        let url = file.url
+        let evicted = await Task.detached(priority: .userInitiated) { () -> Bool in
+            (try? FileManager.default.evictUbiquitousItem(at: url)) != nil
+        }.value
+        store.busy = nil
+        if evicted {
             dropCloudFile(file, from: drive, freed: file.size)
             monitor.readDisk()
             store.record(.cloud, file.name, freed: file.size)
             store.message = Store.Message(text: "\(file.name) is now in \(drive.name) only.", failed: false)
-        } catch {
+        } else {
             // Only iCloud lets another app evict; the Finder can for every provider.
             NSWorkspace.shared.activateFileViewerSelecting([file.url])
             store.message = Store.Message(text: "\(drive.name) keeps \(file.name) itself: in the Finder, Control-click it and choose Remove Download.",

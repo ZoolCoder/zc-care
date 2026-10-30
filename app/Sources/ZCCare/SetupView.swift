@@ -115,6 +115,7 @@ struct SetupView: View {
             if let busy = store.busy {
                 ProgressView().controlSize(.small)
                 Text(busy).font(.callout).foregroundStyle(.secondary)
+                if let cancel = store.cancelBusy { Button("Cancel", action: cancel) }
             } else if step == .who {
                 Button("Later", action: close).keyboardShortcut(.cancelAction)
             } else {

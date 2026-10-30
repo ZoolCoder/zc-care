@@ -8,13 +8,27 @@ struct PerformanceView: View {
     @Bindable var care: Care
     @State private var order = Monitor.Order.cpu
     @State private var showMore = false
+    @State private var part = Part.all
+
+    /// The segments over the page: all of it, or one section alone.
+    enum Part: String, CaseIterable { case all = "All", maintenance = "Maintenance", agents = "Launch Agents", background = "Background Apps", processes = "Processes" }
 
     var body: some View {
         VStack(spacing: 0) {
             CareHeader(title: "Performance", subtitle: care.startup.count == 1 ? "1 item starts with your session" : "\(care.startup.count) items start with your session",
                    action: ("Rescan", { Task { await care.loadAgents() } }))
+            Picker("", selection: $part) {
+                ForEach(Part.allCases, id: \.self) { Text(label($0)) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 620)
+            .padding(.horizontal, 28)
+            .padding(.bottom, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if shows(.maintenance) {
                     CareSection("Maintenance") {
                         ForEach(care.maintenance) { task in
                             CareRow(icon: SymbolTile(symbol: task.symbol, colors: Tint.violet, size: 32),
@@ -25,6 +39,8 @@ struct PerformanceView: View {
                             }
                         }
                     }
+                    }
+                    if shows(.agents) {
                     CareSection("Launch Agents") {
                         ForEach(care.agents) { agent in
                             CareRow(icon: SymbolTile(symbol: agent.broken ? "bolt.slash.fill" : "bolt.fill",
@@ -49,6 +65,8 @@ struct PerformanceView: View {
                             }
                         }
                     }
+                    }
+                    if shows(.background) {
                     CareSection("Background Apps") {
                         if care.background.isEmpty {
                             Text("None running.").foregroundStyle(.secondary).padding(10)
@@ -60,6 +78,8 @@ struct PerformanceView: View {
                             }
                         }
                     }
+                    }
+                    if shows(.processes) {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
                             Text("Top Processes").font(.title3.weight(.semibold))
@@ -74,7 +94,7 @@ struct PerformanceView: View {
                             .frame(width: 160)
                         }
                         VStack(spacing: 0) {
-                            ForEach(care.monitor.top) { p in
+                            ForEach(care.monitor.performanceTop) { p in
                                 CareRow(icon: SymbolTile(symbol: "cpu", colors: Tint.violet, size: 32),
                                     title: p.name, detail: processDetail(p),
                                     value: order == .cpu ? String(format: "%.0f%% CPU", p.cpu) : Store.bytes(p.memory, .memory)) {
@@ -83,8 +103,9 @@ struct PerformanceView: View {
                             }
                         }
                         .padding(6)
-                        .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.08)))
-                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
+                        .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.card))
+                        .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.rim))
+                    }
                     }
                 }
                 .padding(.horizontal, 28)
@@ -93,15 +114,33 @@ struct PerformanceView: View {
         }
         .onAppear { if care.maintenance.isEmpty { care.loadMaintenance() } }
         // ps every three seconds while the module shows.
-        .task(id: [order == .cpu, showMore]) {
-            care.monitor.order = order
-            care.monitor.topCount = showMore ? 25 : 10
+        .task(id: [order == .cpu, showMore, shows(.processes)]) {
+            guard shows(.processes) else { return }
+            if care.monitor.performance?.order != order { care.monitor.performanceTop = [] }
+            care.monitor.performance = (order, showMore ? 25 : 10)
             while !Task.isCancelled {
-                await care.monitor.readTop()
+                await care.monitor.readPerformanceTop()
                 try? await Task.sleep(for: .seconds(3))
             }
         }
-        .onDisappear { care.monitor.topCount = 6 }
+        .onDisappear {
+            care.monitor.performance = nil
+            care.monitor.performanceTop = []
+        }
+    }
+
+    private func shows(_ p: Part) -> Bool { part == .all || part == p }
+
+    private func label(_ p: Part) -> String {
+        let n: Int? = switch p {
+        case .all, .processes: nil
+        case .maintenance: care.maintenance.count
+        case .agents: care.agents.count
+        case .background: care.background.count
+        }
+        // Zero until the first read, so only a count above it shows.
+        guard let n, n > 0 else { return p.rawValue }
+        return "\(p.rawValue) \(n)"
     }
 }
 
@@ -144,7 +183,7 @@ private struct ProcessControls: View {
         if !end(force: force) {
             care.store.message = Store.Message(text: "Could not quit \(proc.name); macOS did not allow it.", failed: true)
         }
-        Task { await care.monitor.readTop() }
+        Task { await care.monitor.readPerformanceTop() }
     }
 
     /// Apps close the polite way; anything else gets a signal.

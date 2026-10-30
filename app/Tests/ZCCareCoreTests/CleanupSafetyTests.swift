@@ -99,11 +99,11 @@ private func age(_ url: URL, days: Double) throws {
 @Test func putBackCreatesMissingFoldersPrivately() throws {
     let dir = try tempDir()
     defer { try? FileManager.default.removeItem(at: dir) }
-    let binned = dir.appendingPathComponent("Trash/a.txt")
+    let binned = dir.appendingPathComponent(".Trash/a.txt")
     try write(binned)
     let original = dir.appendingPathComponent("gone/deeper/a.txt")
-    let item = Trashed(original: original, inTrash: binned)
-    #expect(Trashed.putBack([item]).isEmpty)
+    let item = trashedRecord(original, at: binned)
+    #expect(Trashed.putBack([item], home: dir.path).isEmpty)
     let mode = try FileManager.default.attributesOfItem(atPath: original.deletingLastPathComponent().path)[.posixPermissions] as? Int
     #expect(mode == 0o700)
 }
@@ -202,4 +202,73 @@ private func age(_ url: URL, days: Double) throws {
     try age(dir, days: 10)
     for i in 0...ProjectDependencies.touchedEntryCap { try age(dir.appendingPathComponent("f\(i)"), days: 10) }
     #expect(!AIClutter.untouched(dir, for: 1, now: .now, deep: true))
+}
+
+@Test func aModelTrashesOnlyWhatItStillOwnsAlone() {
+    let manifest = URL(fileURLWithPath: "/m/library/llama/latest")
+    let a = URL(fileURLWithPath: "/b/sha256-a"), b = URL(fileURLWithPath: "/b/sha256-b"), c = URL(fileURLWithPath: "/b/sha256-c")
+    let listed = AIModel(name: "llama:latest", source: .ollama, size: 3, modified: nil, paths: [manifest, a, b])
+    var shared = listed
+    shared.paths = [manifest, a]
+    #expect(AIModels.stillOwned(listed, in: [shared]) == [manifest, a])
+    var pulledAgain = listed
+    pulledAgain.paths = [manifest, c]
+    #expect(AIModels.stillOwned(listed, in: [pulledAgain]) == nil)
+    #expect(AIModels.stillOwned(listed, in: []) == nil)
+}
+
+@Test func ollamaPullsAndCreatesAreWrites() {
+    #expect(AIModels.isOllamaWriting("/opt/homebrew/bin/ollama pull llama3"))
+    #expect(AIModels.isOllamaWriting("ollama create mine -f Modelfile"))
+    #expect(!AIModels.isOllamaWriting("/Applications/Ollama.app/Contents/Resources/ollama serve"))
+    #expect(!AIModels.isOllamaWriting("vim notes-on-ollama pull"))
+}
+
+@Test func leftoversKeepAFolderASiblingAppShares() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    try write(home.appendingPathComponent("Library/Application Support/Firefox/Profiles/x.default/prefs.js"))
+    try write(home.appendingPathComponent("Library/Preferences/org.mozilla.firefox.plist"))
+
+    func names(_ found: [String]) -> [String] { found.map { ($0 as NSString).lastPathComponent } }
+    #expect(names(Leftovers.paths(bundleID: "org.mozilla.firefox", name: "Firefox", home: home.path)) == ["Firefox", "org.mozilla.firefox.plist"])
+    // Developer Edition keeps its profiles in Firefox's folder, by name or by id.
+    #expect(names(Leftovers.paths(bundleID: "org.mozilla.firefox", name: "Firefox", home: home.path,
+                                  names: ["Firefox", "Firefox Developer Edition"])) == ["org.mozilla.firefox.plist"])
+    #expect(names(Leftovers.paths(bundleID: "org.mozilla.firefox", name: "Firefox", home: home.path,
+                                  installed: ["org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition"])) == ["org.mozilla.firefox.plist"])
+    // The sibling's own uninstall still finds nothing of Firefox's to take.
+    #expect(Leftovers.paths(bundleID: "org.mozilla.firefoxdeveloperedition", name: "Firefox Developer Edition", home: home.path,
+                            installed: ["org.mozilla.firefox"], names: ["Firefox"]).isEmpty)
+}
+
+@Test func bundledAgentsAreTheBundlesOwnLabels() throws {
+    let dir = try tempDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let app = dir.appendingPathComponent("Foo.app")
+    let agents = app.appendingPathComponent("Contents/Library/LaunchAgents")
+    func plist(_ name: String, label: String, in folder: URL) throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: ["Label": label], format: .xml, options: 0)
+            .write(to: folder.appendingPathComponent(name))
+    }
+    try plist("com.foo.agent.plist", label: "com.foo.agent", in: agents)
+    // Another app's label, or a plist reached through a link out of the bundle, is not the app's to stop.
+    try plist("other.plist", label: "com.vendor.firewall", in: agents)
+    try plist("outside.plist", label: "com.foo.outside", in: dir)
+    try FileManager.default.createSymbolicLink(at: agents.appendingPathComponent("link.plist"), withDestinationURL: dir.appendingPathComponent("outside.plist"))
+    try write(agents.appendingPathComponent("README"))
+
+    #expect(Leftovers.bundledAgents(in: app, bundleID: "com.foo") == ["com.foo.agent"])
+    #expect(Leftovers.bundledAgents(in: app, bundleID: nil).isEmpty)
+    #expect(Leftovers.bundledAgents(in: app, bundleID: "../x").isEmpty)
+}
+
+@Test func firefoxTracesNameEveryChannel() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    try write(home.appendingPathComponent("Library/Application Support/Firefox/Profiles/x.default/cookies.sqlite"), String(repeating: "x", count: 9000))
+
+    let cookies = try #require(BrowserPrivacy.find(home: home.path).first { $0.kind == BrowserPrivacy.cookies })
+    #expect(cookies.bundleIDs == ["org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly"])
 }

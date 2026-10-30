@@ -2,18 +2,20 @@ import AppKit
 import SwiftUI
 import ZCCareCore
 
-/// The panel under the bar: a tab each for the Mac's vitals, coverage,
-/// updates, the doctor's findings and services, with plan and apply below.
+/// The panel under the bar. Its home is the Mac's vitals, with nothing above
+/// the grade, as CleanMyMac's menu draws it; coverage, updates, the doctor's
+/// findings and services are pages the footer's Mac menu opens.
 struct PanelView: View {
     @Bindable var store: Store
 
     var body: some View {
+        let home = store.setupProblem == nil && store.snapshot != nil && store.tab == .mac
         VStack(alignment: .leading, spacing: 10) {
-            Header(store: store)
+            if !home { Header(store: store) }
             if let problem = store.setupProblem {
                 SetupCard(problem: problem, setup: store.needsConfig ? store.openSetup : nil, choose: store.chooseConfig)
             } else if let snapshot = store.snapshot {
-                Tabs(store: store, snapshot: snapshot, system: store.system)
+                if !home { Tabs(store: store, snapshot: snapshot, system: store.system) }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(snapshot.errors, id: \.self) { Text($0).font(.caption).foregroundStyle(Theme.bad) }
@@ -27,13 +29,14 @@ struct PanelView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(height: 440)
+                // The home has the header's and the tabs' room too.
+                .frame(height: home ? 540 : 440)
             } else {
                 ProgressView("Reading this Mac…").frame(maxWidth: .infinity, minHeight: 200)
             }
             StatusLine(store: store)
             Rectangle().fill(Theme.rim).frame(height: 1).padding(.horizontal, -14)
-            Footer(store: store)
+            Footer(store: store, home: home)
         }
         .padding(14)
         .frame(width: 430)
@@ -59,23 +62,14 @@ private struct Header: View {
                     Text("ZC Care").font(.headline)
                     Image(systemName: icon).font(.caption).foregroundStyle(tint)
                 }
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(store.statusSummary).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button("Smart Care") { store.openCare?(nil) }
                 .controlSize(.small)
                 .disabled(store.setupProblem != nil)
                 .help("Open ZC Care's Smart Care")
-            Button {
-                Task { await store.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise").accessibilityLabel("Refresh")
-            }
-            .buttonStyle(.icon)
-            .keyboardShortcut("r")
-            .disabled(store.setupProblem != nil || store.refreshing)
-            .spinning(store.refreshing)
-            .help("Read this Mac again (⌘R)")
+            RefreshButton(store: store)
         }
     }
 
@@ -89,14 +83,35 @@ private struct Header: View {
         return store.attention == 0 ? Theme.good : Theme.warning
     }
 
-    private var subtitle: String {
-        if store.refreshing { return "Reading…" }
-        guard let at = store.refreshedAt else { return "" }
-        let n = store.attention
+}
+
+private struct RefreshButton: View {
+    let store: Store
+
+    var body: some View {
+        Button {
+            Task { await store.refresh() }
+        } label: {
+            Image(systemName: "arrow.clockwise").accessibilityLabel("Refresh")
+        }
+        .buttonStyle(.icon)
+        .keyboardShortcut("r")
+        .disabled(store.setupProblem != nil || store.refreshing)
+        .spinning(store.refreshing)
+        .help("Read this Mac again (⌘R). " + store.statusSummary)
+    }
+}
+
+extension Store {
+    /// How the workstation stands and when it was read, as the header says it.
+    var statusSummary: String {
+        if refreshing { return "Reading…" }
+        guard let at = refreshedAt else { return "" }
+        let n = attention
         let state = n == 0 ? "Everything in place" : "\(n) need\(n == 1 ? "s" : "") attention"
         var line = state + " · " + at.formatted(.relative(presentation: .named))
         // The daily check, which ran even while this panel was closed.
-        if let d = store.snapshot?.drift, d.error == nil, d.changes > 0 {
+        if let d = snapshot?.drift, d.error == nil, d.changes > 0 {
             line += " · drift \(d.changes) since " + d.at.formatted(date: .omitted, time: .shortened)
         }
         return line
@@ -125,7 +140,7 @@ private struct Tabs: View {
                     .padding(.vertical, 5)
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(store.tab == tab ? Color.white : Color.white.opacity(0.65))
-                    .background(RoundedRectangle(cornerRadius: 7).fill(store.tab == tab ? Color.white.opacity(0.16) : .clear))
+                    .background(RoundedRectangle(cornerRadius: 7).fill(store.tab == tab ? Theme.selected : .clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -136,11 +151,18 @@ private struct Tabs: View {
     }
 
     private func count(_ tab: Store.Tab) -> Int? {
+        store.pending(tab, snapshot: snapshot)
+    }
+}
+
+extension Store {
+    /// What a page holds that needs doing.
+    func pending(_ tab: Tab, snapshot: Snapshot) -> Int {
         switch tab {
-        case .mac: store.monitor.vitals.concerns(insecure: 0).count
+        case .mac: monitor.vitals.concerns(insecure: 0).count
         case .overview: snapshot.targets.map(\.gaps).reduce(0, +)
         case .updates: snapshot.outdated.count + system.updates.count
-        case .health: store.findings.count
+        case .health: findings.count
         case .services: snapshot.services.filter { !$0.isRunning }.count
         }
     }
@@ -457,15 +479,20 @@ final class SystemUpdates {
     private(set) var failure: String?
     /// When the last check answered; a failed check leaves it, so the next open tries again.
     private(set) var checkedAt: Date?
+    /// When the last check began. Offline, softwareupdate takes up to 40 s
+    /// to fail, so opening the panel again soon after does not ask again.
+    private var triedAt: Date?
 
     func refreshIfStale() async {
         if let checkedAt, Date.now.timeIntervalSince(checkedAt) < 6 * 3600 { return }
+        if let triedAt, Date.now.timeIntervalSince(triedAt) < 15 * 60 { return }
         await check()
     }
 
     func check() async {
         guard !checking else { return }
         checking = true
+        triedAt = .now
         defer { checking = false }
         do {
             updates = try await MacUpdate.list()
@@ -838,6 +865,8 @@ private struct StatusLine: View {
 
 private struct Footer: View {
     @Bindable var store: Store
+    /// The home has no header, so its refresh lives here.
+    let home: Bool
 
     var body: some View {
         ZStack {
@@ -846,25 +875,52 @@ private struct Footer: View {
                 .font(.callout.weight(.medium))
                 .disabled(store.busy != nil || store.setupProblem != nil)
             HStack(spacing: 6) {
-                Group {
-                    Button {
-                        store.tab = .overview
-                        Task { await store.showPlan() }
-                    } label: {
-                        Image(systemName: "list.bullet.rectangle").accessibilityLabel("Plan")
-                    }
-                    .help("Plan: show what apply would change")
-                    Button { Task { await store.apply() } } label: {
-                        Image(systemName: "wand.and.stars").accessibilityLabel("Apply")
-                    }
-                    .help("Apply…")
+                pages
+                if home { RefreshButton(store: store) }
+                Spacer()
+                Button { store.openCare?(.smartCare) } label: {
+                    Image(systemName: "sparkles").accessibilityLabel("Smart Care")
                 }
                 .buttonStyle(.icon)
-                .disabled(store.busy != nil || store.setupProblem != nil)
-                Spacer()
+                .disabled(store.setupProblem != nil)
+                .help("Open Smart Care")
                 settings
             }
         }
+    }
+
+    /// The pages beyond the Mac, with plan and apply; a dot says one needs doing.
+    private var pages: some View {
+        let snapshot = store.snapshot
+        let waiting = snapshot.map { s in Store.Tab.allCases.contains { $0 != .mac && store.pending($0, snapshot: s) > 0 } } ?? false
+        return IconTile {
+            Menu {
+                ForEach(Store.Tab.allCases, id: \.self) { tab in
+                    let n = snapshot.map { store.pending(tab, snapshot: $0) } ?? 0
+                    Button(tab == .mac ? "This Mac" : n > 0 && tab != .mac ? "\(tab.rawValue) (\(n))" : tab.rawValue) { store.tab = tab }
+                        .disabled(snapshot == nil)
+                }
+                Divider()
+                Group {
+                    Button("Plan") {
+                        store.tab = .overview
+                        Task { await store.showPlan() }
+                    }
+                    Button("Apply…") { Task { await store.apply() } }
+                }
+                .disabled(store.busy != nil)
+            } label: {
+                Image(systemName: "laptopcomputer").accessibilityLabel(waiting ? "Pages, something needs doing" : "Pages")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(store.setupProblem != nil)
+        }
+        .overlay(alignment: .topTrailing) {
+            if waiting { Circle().fill(Theme.warning).frame(width: 7, height: 7).offset(x: 2, y: -2) }
+        }
+        .help("Coverage, updates, health and services; plan and apply")
     }
 
     private var settings: some View {

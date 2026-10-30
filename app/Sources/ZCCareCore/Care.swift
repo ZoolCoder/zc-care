@@ -56,6 +56,9 @@ public struct LargeFile: Codable, Sendable, Equatable, Identifiable {
     public var url: URL
     public var size: Int64
     public var modified: Date?
+    /// When it was last opened, as Spotlight knows it; nil when never or
+    /// not known.
+    public var opened: Date?
 
     public init(url: URL, size: Int64, modified: Date? = nil) {
         self.url = url
@@ -76,7 +79,11 @@ public enum LargeFiles {
     /// app bundles are left out: what lives there belongs to apps, and
     /// Cleanup covers their caches.
     public static func files(paths: [String], home: String, minimum: Int64, limit: Int = 60) -> [LargeFile] {
-        Array(candidates(paths: paths, home: home, minimum: minimum).sorted { $0.size > $1.size }.prefix(limit))
+        candidates(paths: paths, home: home, minimum: minimum).sorted { $0.size > $1.size }.prefix(limit).map { file in
+            var file = file
+            file.opened = FileKind.lastOpened(file.url)
+            return file
+        }
     }
 
     /// Folders a package manager or build fills: what is in them comes back
@@ -134,6 +141,11 @@ public struct InstalledApp: Codable, Sendable, Equatable, Identifiable {
     public var lastUsed: Date?
     /// When it landed in Applications; an update counts as landing again.
     public var added: Date?
+    /// Its executable has Intel code only, so it needs Rosetta.
+    public var intelOnly: Bool?
+
+    /// In /Applications, where Homebrew and the App Store put apps.
+    public var inApplications: Bool { url.deletingLastPathComponent().path == "/Applications" }
 
     public init(name: String, url: URL, bundleID: String?, source: Source, declared: Item? = nil) {
         self.name = name
@@ -185,13 +197,16 @@ public enum AppCatalog {
 
     /// Every app in the folder, sources and Brewfile entries filled in;
     /// sizes and last use are read separately, being slow.
-    public static func apps(in folder: URL, caskApps: [String: String], items: [Item]) -> [InstalledApp] {
+    /// `managed` is false for a folder Homebrew and the Brewfile do not
+    /// install into, such as ~/Applications: an app there is a copy of its
+    /// own, so uninstalling it never runs brew on the one in /Applications.
+    public static func apps(in folder: URL, caskApps: [String: String], items: [Item], managed: Bool = true) -> [InstalledApp] {
         let all = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         return all.filter { $0.pathExtension == "app" }.map { url in
             let file = url.lastPathComponent
             let name = url.deletingPathExtension().lastPathComponent
             let source: InstalledApp.Source
-            if let token = caskApps[file] {
+            if managed, let token = caskApps[file] {
                 source = .cask(token)
             } else if FileManager.default.fileExists(atPath: url.path + "/Contents/_MASReceipt/receipt") {
                 source = .appStore
@@ -199,9 +214,16 @@ public enum AppCatalog {
                 source = .other
             }
             return InstalledApp(name: name, url: url, bundleID: Bundle(url: url)?.bundleIdentifier, source: source,
-                                declared: declared(name: name, source: source, items: items))
+                                declared: managed ? declared(name: name, source: source, items: items) : nil)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// The apps installed more than once: each copy that shares its bundle
+    /// id with another, by path.
+    public static func copies(_ apps: [InstalledApp]) -> Set<String> {
+        let counts = Dictionary(apps.compactMap(\.bundleID).map { ($0, 1) }, uniquingKeysWith: +)
+        return Set(apps.filter { counts[$0.bundleID ?? ""] ?? 0 > 1 }.map(\.id))
     }
 }
 
@@ -210,8 +232,8 @@ public enum Leftovers {
     /// The app and every leftover uninstalling trashes, each with its size
     /// on disk; what the ignore list names stays, so it is not listed.
     public static func files(of app: InstalledApp, home: String, ignoring ignore: IgnoreList = IgnoreList(),
-                             installed: Set<String> = []) -> [LargeFile] {
-        let leftovers = paths(bundleID: app.bundleID, name: app.name, home: home, installed: installed)
+                             installed: Set<String> = [], names: Set<String> = []) -> [LargeFile] {
+        let leftovers = paths(bundleID: app.bundleID, name: app.name, home: home, installed: installed, names: names)
             .filter { !ignore.touches($0) }
             .map { URL(fileURLWithPath: $0) }
         return ([app.url] + leftovers).map { LargeFile(url: $0, size: DiskUsage.allocated($0)) }
@@ -219,11 +241,15 @@ public enum Leftovers {
 
     /// `installed` holds the bundle ids of the installed apps: an agent or
     /// setting that belongs to another app whose id extends this one's, as
-    /// com.google.Chrome.canary does com.google.Chrome, stays.
-    public static func paths(bundleID: String?, name: String, home: String, installed: Set<String> = []) -> [String] {
+    /// com.google.Chrome.canary does com.google.Chrome, stays. `names` holds
+    /// the installed apps' names: folders named after the app stay when a
+    /// sibling shares them, as Firefox Developer Edition does Firefox's.
+    public static func paths(bundleID: String?, name: String, home: String, installed: Set<String> = [],
+                             names: Set<String> = []) -> [String] {
         let lib = home + "/Library/"
-        var candidates = [lib + "Application Support/" + name, lib + "Logs/" + name]
-        if let id = bundleID {
+        var candidates = isFileName(name) && !hasSibling(name: name, bundleID: bundleID, installed: installed, names: names)
+            ? [lib + "Application Support/" + name, lib + "Logs/" + name] : []
+        if let id = bundleID, isBundleID(id) {
             candidates += [
                 lib + "Application Support/" + id,
                 lib + "Caches/" + id,
@@ -247,6 +273,44 @@ public enum Leftovers {
         return candidates.filter { FileManager.default.fileExists(atPath: $0) }
     }
 
+    /// A bundle id as macOS allows them: anything else, such as
+    /// `../../Documents` in a planted app's Info.plist, would reach outside
+    /// the Library folder it is joined to.
+    static func isBundleID(_ id: String) -> Bool {
+        id.first.map { $0.isASCII && ($0.isLetter || $0.isNumber) } == true && !id.contains("..")
+            && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) }
+    }
+
+    /// Another installed app whose name or id extends this one's, which may
+    /// keep its data in the folder named after this app.
+    static func hasSibling(name: String, bundleID: String?, installed: Set<String>, names: Set<String>) -> Bool {
+        let prefix = name.lowercased() + " "
+        if names.contains(where: { $0.lowercased().hasPrefix(prefix) }) { return true }
+        guard let id = bundleID?.lowercased() else { return false }
+        return installed.contains { $0.lowercased() != id && $0.lowercased().hasPrefix(id) }
+    }
+
+    /// The labels of the agents an app registers from inside its bundle:
+    /// they keep running from the Trash unless booted out first. Only a
+    /// plist inside the bundle, labelled with the app's own id, counts, so
+    /// a planted bundle cannot have another app's agent stopped.
+    public static func bundledAgents(in app: URL, bundleID: String?) -> [String] {
+        guard let id = bundleID, isBundleID(id) else { return [] }
+        let root = app.resolvingSymlinksInPath().path + "/"
+        let folder = app.appendingPathComponent("Contents/Library/LaunchAgents")
+        return ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted().compactMap { name in
+            let plist = folder.appendingPathComponent(name).resolvingSymlinksInPath()
+            guard name.hasSuffix(".plist"), plist.path.hasPrefix(root),
+                  let label = NSDictionary(contentsOf: plist)?["Label"] as? String,
+                  isBundleID(label), label == id || label.hasPrefix(id + ".") else { return nil }
+            return label
+        }
+    }
+
+    static func isFileName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.contains("/")
+    }
+
     private static func belongsToOther(_ file: String, id: String, _ installed: Set<String>) -> Bool {
         let own = id.lowercased() + "."
         let file = file.lowercased()
@@ -254,6 +318,30 @@ public enum Leftovers {
             let other = other.lowercased()
             return other.hasPrefix(own) && file.hasPrefix(other + ".")
         }
+    }
+
+    /// Where an app's space goes, largest first, each part as the folder
+    /// its files sit in names it: "App", "Data", "Caches", "Settings",
+    /// "Logs" or "Other". Parts with nothing in them are left out.
+    public static func breakdown(_ files: [LargeFile], app: URL) -> [(part: String, size: Int64)] {
+        var sizes: [String: Int64] = [:]
+        for file in files {
+            sizes[part(of: file.url.path, app: app.path), default: 0] += file.size
+        }
+        return sizes.filter { $0.value > 0 }.map { (part: $0.key, size: $0.value) }
+            .sorted { $0.size != $1.size ? $0.size > $1.size : $0.part < $1.part }
+    }
+
+    private static func part(of path: String, app: String) -> String {
+        if path == app { return "App" }
+        let library = ["Caches": "Caches", "HTTPStorages": "Caches", "WebKit": "Caches",
+                       "Application Support": "Data", "Containers": "Data", "Application Scripts": "Data", "Cookies": "Data",
+                       "Preferences": "Settings", "Saved Application State": "Settings", "LaunchAgents": "Settings",
+                       "Logs": "Logs"]
+        // The last one: the home folder may sit under a Library of its own.
+        guard let range = path.range(of: "/Library/", options: .backwards) else { return "Other" }
+        let folder = path[range.upperBound...].prefix { $0 != "/" }
+        return library[String(folder)] ?? "Other"
     }
 
     /// The launch agents among the paths: launchd keeps running them until

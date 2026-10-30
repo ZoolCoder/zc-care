@@ -134,7 +134,8 @@ struct FileRow: View {
         let folder = (file.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
         CareRow(icon: Image(nsImage: NSWorkspace.shared.icon(forFile: file.url.path)).resizable().frame(width: 32, height: 32),
             title: showsFolder ? folder : file.name,
-            detail: (showsFolder ? file.name : folder) + (file.modified.map { " · \(dateLabel) " + relativeDate($0) } ?? ""),
+            detail: (showsFolder ? file.name : folder) + (file.opened.map { " · opened " + relativeDate($0) }
+                ?? file.modified.map { " · \(dateLabel) " + relativeDate($0) } ?? ""),
             value: Store.bytes(file.size), flag: flag, flagColor: Theme.good) {
             Button { NSWorkspace.shared.activateFileViewerSelecting([file.url]) } label: {
                 Image(systemName: "magnifyingglass").accessibilityLabel("Show in Finder")
@@ -163,6 +164,33 @@ struct IgnoreMenu: View {
     }
 }
 
+/// A leading-aligned column that gives no spacing to an empty child, so a
+/// section that loads itself can keep a zero-height view to load from.
+struct SectionStack: Layout {
+    var spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)) }
+        let shown = sizes.filter { $0.height > 0 }
+        let height = shown.reduce(0) { $0 + $1.height } + spacing * CGFloat(max(shown.count - 1, 0))
+        return CGSize(width: proposal.width ?? sizes.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        var first = true
+        for view in subviews {
+            let size = view.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            if size.height > 0 {
+                if !first { y += spacing }
+                first = false
+            }
+            view.place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: size.height))
+            y += size.height
+        }
+    }
+}
+
 struct CareSection<Content: View>: View {
     let title: String
     @ViewBuilder let content: Content
@@ -178,8 +206,8 @@ struct CareSection<Content: View>: View {
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(6)
-                .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.08)))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
+                .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.card))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.rim))
         }
     }
 }
