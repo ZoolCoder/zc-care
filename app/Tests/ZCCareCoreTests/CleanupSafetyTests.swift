@@ -203,3 +203,23 @@ private func age(_ url: URL, days: Double) throws {
     for i in 0...ProjectDependencies.touchedEntryCap { try age(dir.appendingPathComponent("f\(i)"), days: 10) }
     #expect(!AIClutter.untouched(dir, for: 1, now: .now, deep: true))
 }
+
+@Test func aModelTrashesOnlyWhatItStillOwnsAlone() {
+    let manifest = URL(fileURLWithPath: "/m/library/llama/latest")
+    let a = URL(fileURLWithPath: "/b/sha256-a"), b = URL(fileURLWithPath: "/b/sha256-b"), c = URL(fileURLWithPath: "/b/sha256-c")
+    let listed = AIModel(name: "llama:latest", source: .ollama, size: 3, modified: nil, paths: [manifest, a, b])
+    var shared = listed
+    shared.paths = [manifest, a]
+    #expect(AIModels.stillOwned(listed, in: [shared]) == [manifest, a])
+    var pulledAgain = listed
+    pulledAgain.paths = [manifest, c]
+    #expect(AIModels.stillOwned(listed, in: [pulledAgain]) == nil)
+    #expect(AIModels.stillOwned(listed, in: []) == nil)
+}
+
+@Test func ollamaPullsAndCreatesAreWrites() {
+    #expect(AIModels.isOllamaWriting("/opt/homebrew/bin/ollama pull llama3"))
+    #expect(AIModels.isOllamaWriting("ollama create mine -f Modelfile"))
+    #expect(!AIModels.isOllamaWriting("/Applications/Ollama.app/Contents/Resources/ollama serve"))
+    #expect(!AIModels.isOllamaWriting("vim notes-on-ollama pull"))
+}

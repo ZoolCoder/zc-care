@@ -151,7 +151,7 @@ struct SpaceLensView: View {
     }
 
     private func trash(_ node: SpaceNode) {
-        Task { await care.trash(LargeFile(url: URL(fileURLWithPath: node.path), size: node.size)) }
+        Task { await care.trash(LargeFile(url: URL(fileURLWithPath: node.path), size: node.size), within: NSHomeDirectory()) }
     }
 
     private static func module(_ destination: SpaceDestination) -> Care.Module {

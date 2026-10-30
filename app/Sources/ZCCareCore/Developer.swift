@@ -121,6 +121,23 @@ public enum AIModels {
             .sorted { $0.size > $1.size }
     }
 
+    /// What removing a model listed earlier may trash now: its reviewed
+    /// paths it still owns alone. Nil when it is gone, or was pulled again
+    /// and owns paths no one reviewed: removing part would strand the rest.
+    public static func stillOwned(_ model: AIModel, in fresh: [AIModel]) -> [URL]? {
+        guard let now = fresh.first(where: { $0.id == model.id }) else { return nil }
+        let reviewed = Set(model.paths)
+        guard now.paths.allSatisfy(reviewed.contains), !now.paths.isEmpty else { return nil }
+        return now.paths
+    }
+
+    /// An `ollama pull` or `ollama create`: either may reuse a blob on disk.
+    public static func isOllamaWriting(_ command: String) -> Bool {
+        let words = command.split(separator: " ")
+        guard let at = words.firstIndex(where: { $0 == "ollama" || $0.hasSuffix("/ollama") }), at + 1 < words.count else { return false }
+        return ["pull", "create", "cp"].contains(words[at + 1])
+    }
+
     private struct Manifest: Decodable {
         struct Layer: Decodable { var digest: String; var size: Int64 }
         var config: Layer?

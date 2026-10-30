@@ -148,7 +148,7 @@ extension Leftovers {
             let path = home + "/Library/" + folder
             for name in (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [] {
                 guard let id = bundleID(name), !isApple(id),
-                      !owned(id, isInstalled), removed.contains(id) || !vendors.contains(vendor(id)) else { continue }
+                      isLeftover(id, vendors: vendors, removed: removed, isInstalled: isInstalled) else { continue }
                 byID[id, default: []].append(path + "/" + name)
             }
         }
@@ -168,6 +168,23 @@ extension Leftovers {
             return ((try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [])
                 .filter { bundleID($0) == id }.map { path + "/" + $0 }
         }
+    }
+
+    /// The picked leftovers `orphans` would still list, each with only those
+    /// of its reviewed paths still there.
+    public static func stillOrphaned(_ picked: [Orphan], vendors: Set<String> = [], removed: Set<String> = [],
+                                     isInstalled: (String) -> Bool) -> [Orphan] {
+        picked.filter { isLeftover($0.bundleID, vendors: vendors, removed: removed, isInstalled: isInstalled) }.compactMap { orphan in
+            var orphan = orphan
+            orphan.paths = orphan.paths.filter { FileManager.default.fileExists(atPath: $0) }
+            return orphan.paths.isEmpty ? nil : orphan
+        }
+    }
+
+    /// No app owns the id, and no installed app of its vendor may share it,
+    /// unless that app was just removed.
+    static func isLeftover(_ id: String, vendors: Set<String>, removed: Set<String>, isInstalled: (String) -> Bool) -> Bool {
+        !owned(id, isInstalled) && (removed.contains(id) || !vendors.contains(vendor(id)))
     }
 
     /// Whether a path lies in a Trash: the home folder's or a volume's.

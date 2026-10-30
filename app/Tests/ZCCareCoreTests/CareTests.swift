@@ -485,6 +485,23 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(Leftovers.bundleID("org.x.y.savedState") == "org.x.y")
 }
 
+@Test func orphansReinstalledSinceTheScanStay() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    try write(home.appendingPathComponent("Library/Caches/com.gone.app/x"), bytes: 10)
+    try write(home.appendingPathComponent("Library/Caches/com.back.app/x"), bytes: 10)
+    let listed = Leftovers.orphans(home: home.path) { _ in false }
+    let gonePath = home.appendingPathComponent("Library/Preferences/com.gone.app.plist").path
+    let picked = listed.map { o in o.bundleID == "com.gone.app" ? Orphan(bundleID: o.bundleID, paths: o.paths + [gonePath], size: o.size) : o }
+    let still = Leftovers.stillOrphaned(picked) { $0 == "com.back.app" }
+    #expect(still.map(\.bundleID) == ["com.gone.app"])
+    #expect(still[0].paths == [home.appendingPathComponent("Library/Caches/com.gone.app").path])
+    // A vendor's app installed since shares its folders; files gone since leave nothing.
+    #expect(Leftovers.stillOrphaned(picked, vendors: ["com.gone"]) { _ in false }.map(\.bundleID) == ["com.back.app"])
+    try FileManager.default.removeItem(at: home.appendingPathComponent("Library/Caches/com.gone.app"))
+    #expect(Leftovers.stillOrphaned(picked) { $0 == "com.back.app" }.isEmpty)
+}
+
 @Test func orphansKeepAppleGroupsAndInstalledVendors() throws {
     let home = try tempDir()
     defer { try? FileManager.default.removeItem(at: home) }

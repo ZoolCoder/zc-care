@@ -544,7 +544,14 @@ final class Care {
         return output
     }
 
-    func trash(_ file: LargeFile) async {
+    /// `within` names the folder a Space Lens pick must still be safe in:
+    /// its saved tree may be days old, and a part of the path a symlink since.
+    func trash(_ file: LargeFile, within home: String? = nil) async {
+        // Mail keeps indexing its attachments while it runs.
+        if file.url.path.hasPrefix(NSHomeDirectory() + "/Library/Mail/") {
+            await trashMailAttachments([file])
+            return
+        }
         guard store.busy == nil, !removing, allowed([file.url]) else { return }
         removing = true
         defer { removing = false }
@@ -559,9 +566,19 @@ final class Care {
                 return
             }
         }
+        // Space Lens sizes come from its saved scan; the folder may have grown since.
+        var file = file
+        if home != nil {
+            let url = file.url
+            file.size = await Task.detached(priority: .userInitiated) { DiskUsage.allocated(url) }.value
+        }
         guard store.busy == nil, Alerts.confirm(store.removeQuestion(file.name),
                                                 "\(Store.bytes(file.size)) in \(file.url.deletingLastPathComponent().path).",
                                                 button: store.removeButton) else { return }
+        if let home, !SpaceLens.canTrash(file.url.path, home: home) {
+            store.message = Store.Message(text: "\(file.name) moved or became a link since the scan; Rescan first. Nothing was removed.", failed: true)
+            return
+        }
         store.busy = "Removing \(file.name)"
         defer { store.busy = nil }
         let removal = await remove([file.url])
@@ -608,7 +625,9 @@ final class Care {
     }
 
     func keepOldest(_ group: DuplicateGroup) async {
-        guard store.busy == nil else { return }
+        guard store.busy == nil, !removing else { return }
+        removing = true
+        defer { removing = false }
         let keeper = group.keeper
         let others = await stillSame(group)
         guard !others.isEmpty else {
@@ -775,14 +794,34 @@ final class Care {
     }
 
     func trash(_ model: AIModel) async {
-        guard store.busy == nil, allowed(model.paths), Alerts.confirm(store.removeQuestion(model.name),
-                                                "\(Store.bytes(model.size)) of \(model.source.rawValue) model files. "
-                                                    + "Pulling the model again downloads it.",
-                                                button: store.removeButton) else { return }
+        guard store.busy == nil, !removing, allowed(model.paths) else { return }
+        removing = true
+        defer { removing = false }
+        guard await !openInApp(model.paths), store.busy == nil,
+              Alerts.confirm(store.removeQuestion(model.name),
+                             "\(Store.bytes(model.size)) of \(model.source.rawValue) model files. "
+                                 + "Pulling the model again downloads it.",
+                             button: store.removeButton) else { return }
         store.busy = "Removing \(model.name)"
         defer { store.busy = nil }
-        let (failure, trashed) = await recycle(model.paths)
-        recordRemoval(.developer, model.name, freed: model.size, failure: failure, trashed: trashed)
+        // The list may be days old: a model pulled since can share a blob
+        // this one owned then, so only what it still owns alone goes.
+        let home = NSHomeDirectory()
+        let fresh = await Task.detached(priority: .userInitiated) { AIModels.find(home: home) }.value
+        guard let paths = AIModels.stillOwned(model, in: fresh) else {
+            models = fresh
+            applyIgnoreList()
+            store.message = Store.Message(text: "\(model.name) is gone or changed since the scan; Rescan first. Nothing was removed.", failed: true)
+            return
+        }
+        // A pull may be taking a blob this model owns alone into a new one.
+        if await Monitor.commands().contains(where: AIModels.isOllamaWriting) {
+            store.message = Store.Message(text: "Ollama is pulling or creating a model; try again when it is done. Nothing was removed.", failed: true)
+            return
+        }
+        let freed = await Task.detached { paths.reduce(Int64(0)) { $0 + DiskUsage.allocated($1) } }.value
+        let (failure, trashed) = await recycle(paths)
+        recordRemoval(.developer, model.name, freed: freed, failure: failure, trashed: trashed)
         if let failure {
             store.message = Store.Message(text: "\(model.name): \(failure)", failed: true)
         } else {
@@ -904,7 +943,11 @@ final class Care {
     func trashMailAttachments(_ files: [LargeFile]) async {
         guard store.busy == nil, !removing else { return }
         let mail = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.mail")
-        guard await closed(mail, toDo: "remove \(Store.counted(files.count, "attachment"))") else { return }
+        removing = true
+        let quit = await closed(mail, toDo: "remove \(Store.counted(files.count, "attachment"))")
+        // trashFiles takes the flag again before its first wait.
+        removing = false
+        guard quit else { return }
         await trashFiles(files, title: "Mail Attachments")
     }
 
@@ -1159,6 +1202,23 @@ final class Care {
             .contains { !Leftovers.inTrash($0.path) && FileManager.default.fileExists(atPath: $0.path) }
     }
 
+    /// What tells a leftover from an app's own files: apps on other volumes
+    /// and in Setapp, the vendors of installed apps, and whether an id is
+    /// running, a launch agent's, or installed outside the Trash.
+    nonisolated static func owners(home: String, running: Set<String>)
+        -> (external: Set<String>, vendors: Set<String>, owns: @Sendable (String) -> Bool) {
+        let external = Leftovers.externalAppIDs()
+        let folders = [home + "/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons"]
+        let inUse = running.union(LaunchAgent.read(folders: folders).map(\.label))
+        let apps = ["/Applications", "/Applications/Utilities", home + "/Applications"].flatMap { folder in
+            ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }
+                .map { folder + "/" + $0 }
+        }
+        let vendors = Set(apps.compactMap { Bundle(path: $0)?.bundleIdentifier }.map(Leftovers.vendor))
+            .union(external.map(Leftovers.vendor))
+        return (external, vendors, { inUse.contains($0) || external.contains($0) || installedOutsideTrash($0) })
+    }
+
     func loadOrphans() async {
         guard !loadingOrphans else { return }
         loadingOrphans = true
@@ -1166,21 +1226,12 @@ final class Care {
         let home = NSHomeDirectory()
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
         let removed = removedIDs
-        let external = await Task.detached { Leftovers.externalAppIDs() }.value
-        externalIDs = external
-        orphans = await Task.detached(priority: .utility) {
-            let folders = [home + "/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons"]
-            let inUse = running.union(LaunchAgent.read(folders: folders).map(\.label))
-            let apps = ["/Applications", "/Applications/Utilities", home + "/Applications"].flatMap { folder in
-                ((try? FileManager.default.contentsOfDirectory(atPath: folder)) ?? []).filter { $0.hasSuffix(".app") }
-                    .map { folder + "/" + $0 }
-            }
-            let vendors = Set(apps.compactMap { Bundle(path: $0)?.bundleIdentifier }.map(Leftovers.vendor))
-                .union(external.map(Leftovers.vendor))
-            return Leftovers.orphans(home: home, vendors: vendors, removed: removed) {
-                inUse.contains($0) || external.contains($0) || Self.installedOutsideTrash($0)
-            }
+        let found = await Task.detached(priority: .utility) {
+            let owners = Self.owners(home: home, running: running)
+            return (owners.external, Leftovers.orphans(home: home, vendors: owners.vendors, removed: removed, isInstalled: owners.owns))
         }.value
+        externalIDs = found.0
+        orphans = found.1
         // Told about once listed: an app back since, or cleared, is no longer news.
         removedIDs.subtract(removed.subtracting(orphans?.map(\.bundleID) ?? []))
         applyIgnoreList()
@@ -1207,13 +1258,32 @@ final class Care {
               store.busy == nil else { return }
         store.busy = "Removing leftovers"
         defer { store.busy = nil }
-        let files = picked.flatMap { orphan in orphan.paths.map { (URL(fileURLWithPath: $0), DiskUsage.allocated(URL(fileURLWithPath: $0))) } }
+        // An app reinstalled or started since the list was read owns its folders again.
+        let home = NSHomeDirectory()
+        let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let removed = removedIDs
+        let (still, files) = await Task.detached(priority: .userInitiated) {
+            let owners = Self.owners(home: home, running: running)
+            let still = Leftovers.stillOrphaned(picked, vendors: owners.vendors, removed: removed, isInstalled: owners.owns)
+            return (still, still.flatMap { orphan in orphan.paths.map { (URL(fileURLWithPath: $0), DiskUsage.allocated(URL(fileURLWithPath: $0))) } })
+        }.value
+        let skipped = picked.filter { orphan in !still.contains { $0.id == orphan.id } }
+        let back = skipped.filter { $0.paths.contains(where: FileManager.default.fileExists) }
+        orphans?.removeAll { o in skipped.contains { $0.id == o.id } }
+        let note = back.isEmpty ? nil
+            : "\(back.map(\.bundleID).joined(separator: ", ")) came back since the scan; \(back.count == 1 ? "its" : "their") files stay."
+        guard !files.isEmpty else {
+            store.message = Store.Message(text: note ?? "Those leftovers are gone already.", failed: false)
+            return
+        }
         let (failure, trashed) = await recycle(files.map(\.0))
         let gone = Set(picked.map(\.id))
         orphans?.removeAll { o in gone.contains(o.id) && !o.paths.contains(where: FileManager.default.fileExists) }
         var log = RunLog(title: "App Leftovers", permanent: store.deletesPermanently)
         log.add(files, trashed: trashed, failure: failure)
         finish(log, kind: .apps, trashed: trashed)
+        // finish shows the run; the apps skipped are told beside it.
+        if let note { store.message = Store.Message(text: note, failed: false) }
     }
 
     // MARK: Adopting
