@@ -1,5 +1,6 @@
 import AppKit
 import Charts
+import CoreWLAN
 import SwiftUI
 import ZCCareCore
 
@@ -524,6 +525,7 @@ private struct NetworkDetail: View {
                     }
                     .textSelection(.enabled)
                 }
+                if monitor.vitals.network?.wifi == true { WiFiLinkSection(store: store, interface: connection.interface) }
             } else {
                 Text(monitor.connectionRead ? "Not connected" : "…").foregroundStyle(.secondary)
             }
@@ -647,6 +649,52 @@ private struct TrafficList: View {
                 try? await Task.sleep(for: .seconds(max(0, 5 - now.timeIntervalSince(started))))
             }
         }
+    }
+}
+
+/// The Wi-Fi link when the connection is Wi-Fi, read again every five
+/// seconds while the panel shows; nothing for Ethernet or a link that is down.
+private struct WiFiLinkSection: View {
+    let store: Store
+    let interface: String
+    @State private var link: WiFiLink?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let link {
+                SectionTitle(title: "Wi-Fi")
+                ListCard {
+                    ValueRow(title: "Signal", value: "\(link.quality.rawValue) · \(link.rssi) dBm"
+                             + (link.noise.map { ", noise \($0) dBm" } ?? ""), warn: link.quality == .poor)
+                    if let standard = link.standard { ValueRow(title: "Standard", value: standard) }
+                    ValueRow(title: "Channel", value: link.channelText)
+                    ValueRow(title: "Transmit rate", value: "\(Int(link.rate)) Mbps")
+                    ValueRow(title: "Security", value: link.securityText, warn: link.isInsecure)
+                    if link.isInsecure {
+                        Text("Others nearby can read what is not otherwise encrypted on this network.")
+                            .font(.caption).foregroundStyle(Theme.warning)
+                    }
+                }
+            }
+        }
+        .task(id: [store.monitor.readers.contains(.panel) ? interface : ""]) {
+            while !Task.isCancelled, store.monitor.readers.contains(.panel) {
+                // CoreWLAN asks the Wi-Fi daemon, which can stall while it scans.
+                link = await Task.detached { Self.read(interface) }.value
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    nonisolated private static func read(_ name: String) -> WiFiLink? {
+        guard let wifi = CWWiFiClient.shared().interface(withName: name), wifi.powerOn() else { return nil }
+        let rssi = wifi.rssiValue()
+        guard rssi != 0, let channel = wifi.wlanChannel() else { return nil }
+        let noise = wifi.noiseMeasurement()
+        return WiFiLink(rssi: rssi, noise: noise < 0 ? noise : nil, rate: wifi.transmitRate(),
+                        phy: wifi.activePHYMode().rawValue, security: wifi.security().rawValue,
+                        channel: channel.channelNumber, band: channel.channelBand.rawValue,
+                        width: channel.channelWidth.rawValue)
     }
 }
 

@@ -1381,3 +1381,23 @@ private struct ProfilerRunner: Runner {
     #expect(await SleepLog.read(runner: pmset, now: f.date(from: "2026-10-30 08:00:00 +0300")!) == parsed)
     #expect(await SleepLog.read(runner: ProfilerRunner(outputs: [:])) == nil)
 }
+
+@Test func wifiLinkInWords() {
+    let home = WiFiLink(rssi: -47, noise: -92, rate: 400, phy: 5, security: 4, channel: 64, band: 2, width: 2)
+    #expect(home.quality == .excellent)
+    #expect(home.standard == "Wi-Fi 5 (802.11ac)")
+    #expect(home.channelText == "64 · 5 GHz · 40 MHz")
+    #expect(home.securityText == "WPA2 Personal")
+    #expect(!home.isInsecure)
+    // Strong but noisy: the margin decides.
+    #expect(WiFiLink(rssi: -45, noise: -62, rate: 0, phy: 0, security: 0, channel: 1, band: 0, width: 0).quality == .fair)
+    #expect(WiFiLink(rssi: -75, noise: -95, rate: 0, phy: 0, security: 0, channel: 1, band: 0, width: 0).quality == .poor)
+    let cafe = WiFiLink(rssi: -65, noise: -95, rate: 54, phy: 99, security: 0, channel: 6, band: 1, width: 9)
+    #expect(cafe.quality == .fair)
+    #expect(cafe.standard == nil)
+    #expect(cafe.channelText == "6 · 2.4 GHz")
+    #expect(cafe.isInsecure)
+    #expect(WiFiLink(rssi: -65, noise: -95, rate: 54, phy: 6, security: 14, channel: 6, band: 1, width: 1).isInsecure == false)
+    // No noise reading: the strength alone.
+    #expect(WiFiLink(rssi: -47, noise: nil, rate: 0, phy: 0, security: 4, channel: 1, band: 0, width: 0).quality == .excellent)
+}
