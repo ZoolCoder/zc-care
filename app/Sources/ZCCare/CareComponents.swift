@@ -178,8 +178,8 @@ struct CareSection<Content: View>: View {
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(6)
-                .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.08)))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.1)))
+                .background(RoundedRectangle(cornerRadius: Theme.radius).fill(Theme.card))
+                .overlay(RoundedRectangle(cornerRadius: Theme.radius).strokeBorder(Theme.rim))
         }
     }
 }

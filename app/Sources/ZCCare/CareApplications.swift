@@ -8,6 +8,8 @@ struct ApplicationsView: View {
     @Bindable var care: Care
     @State private var filter = Filter.all
     @State private var expanded: String?
+    @State private var query = ""
+    @State private var picked: Set<String> = []
 
     enum Filter: String, CaseIterable { case all = "All", undeclared = "Not in Brewfile", unused = "Unused", leftovers = "Leftovers" }
 
@@ -17,11 +19,16 @@ struct ApplicationsView: View {
                    busy: care.loadingApps, action: ("Rescan", { care.orphans = nil; Task { await care.loadApps() } }))
             HStack {
                 Picker("", selection: $filter) {
-                    ForEach(Filter.allCases, id: \.self) { Text($0.rawValue) }
+                    ForEach(Filter.allCases, id: \.self) { Text(label($0)) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 440)
+                .fixedSize()
+                if filter != .leftovers {
+                    TextField("Search", text: $query)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 100, maxWidth: 200)
+                }
                 Spacer()
                 let outdated = care.store.snapshot?.outdated.count ?? 0
                 if outdated > 0 {
@@ -36,8 +43,14 @@ struct ApplicationsView: View {
             } else {
             ScrollView {
                 CareSection(filter.rawValue) {
+                    if shown.isEmpty {
+                        Text(query.isEmpty ? "No app here." : "No app matches \u{201C}\(query)\u{201D}.")
+                            .foregroundStyle(.secondary).padding(10)
+                    }
                     ForEach(shown) { app in
                         VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 10) {
+                        PickBox(id: app.id, picked: $picked).padding(.leading, 8)
                         CareRow(icon: icon(app), title: app.name, detail: detail(app),
                             value: app.size.map { Store.bytes($0) } ?? "…",
                             flag: app.declared == nil ? "Not in Brewfile" : nil) {
@@ -53,7 +66,7 @@ struct ApplicationsView: View {
                                     .help("Install as cask \(token) over this copy, and add it to the Brewfile")
                                     .gatedOnBusy(care.store)
                             }
-                            Button("Uninstall") { Task { await care.uninstall(app); care.orphans = nil } }
+                            Button("Uninstall") { Task { await care.uninstall([app]) } }
                                 .controlSize(.small)
                                 .help("Uninstall (\(removalVerb(care.store)))")
                                 .gatedOnBusy(care.store)
@@ -69,6 +82,7 @@ struct ApplicationsView: View {
                             .help("Reset \(app.name) (\(care.store.deletesPermanently ? "deletes" : "trashes") its settings, caches and data, and keeps the app) or Show in Finder")
                             .gatedOnBusy(care.store)
                         }
+                        }
                         if expanded == app.id { AppFiles(care: care, app: app) }
                         }
                     }
@@ -76,8 +90,38 @@ struct ApplicationsView: View {
                 .padding(.horizontal, 28)
                 .padding(.bottom, 70)
             }
+            .safeAreaInset(edge: .bottom) { if !picked.isEmpty { selectionBar } }
             }
         }
+        .onChange(of: care.apps.map(\.id)) { _, ids in picked.formIntersection(ids) }
+    }
+
+    /// What is ticked, and one button that uninstalls it app by app: each
+    /// still shows what goes and asks, and No stops the rest.
+    private var selectionBar: some View {
+        // Only what is on screen goes: a tick the filter or search hides stays put.
+        let chosen = shown.filter { picked.contains($0.id) }
+        let hidden = picked.count - chosen.count
+        return HStack(spacing: 12) {
+            Text("\(Store.counted(chosen.count, "app")) selected · \(Store.bytes(chosen.reduce(0) { $0 + ($1.size ?? 0) }))"
+                 + (hidden > 0 ? " · \(hidden) hidden" : ""))
+                .font(.callout.weight(.semibold))
+            Spacer()
+            Button("Deselect All") { picked = [] }.controlSize(.small)
+            Button("Uninstall \(chosen.count)…") {
+                Task {
+                    await care.uninstall(chosen)
+                    picked.formIntersection(care.apps.map(\.id))
+                }
+            }
+            .gatedOnBusy(care.store)
+            .disabled(chosen.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .modifier(Card())
+        .padding(.horizontal, 28)
+        .padding(.bottom, 54)
     }
 
     private var total: Int64 { care.apps.reduce(0) { $0 + ($1.size ?? 0) } }
@@ -89,7 +133,21 @@ struct ApplicationsView: View {
         case .unused: care.unused
         case .leftovers: [InstalledApp]()
         }
-        return list.sorted { ($0.size ?? 0) > ($1.size ?? 0) }
+        let term = query.trimmingCharacters(in: .whitespaces)
+        return list.filter { term.isEmpty || $0.name.localizedCaseInsensitiveContains(term) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(term) }
+            .sorted { ($0.size ?? 0) > ($1.size ?? 0) }
+    }
+
+    /// A filter's name with how many it holds, once the scan has counted them.
+    private func label(_ f: Filter) -> String {
+        let n: Int? = switch f {
+        case .all: care.apps.count
+        case .undeclared: care.undeclared.count
+        case .unused: care.unused.count
+        case .leftovers: care.orphans?.count
+        }
+        guard let n, !care.apps.isEmpty else { return f.rawValue }
+        return "\(f.rawValue) \(n)"
     }
 
     @ViewBuilder private func icon(_ app: InstalledApp) -> some View {

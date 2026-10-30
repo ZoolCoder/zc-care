@@ -35,6 +35,7 @@ struct SmartCareView: View {
                 .disabled(care.scanning || care.store.busy != nil)
             }
             .padding(.top, 10)
+            Text(trust).font(.caption).foregroundStyle(.secondary).padding(.top, 6)
             .padding(.bottom, 12)
         }
         .onAppear { if care.maintenance.isEmpty { care.loadMaintenance() } }
@@ -42,6 +43,12 @@ struct SmartCareView: View {
 
     private var canRun: Bool {
         care.scannedAt != nil && (care.junk + care.ai > 0 || !(care.store.snapshot?.outdated.isEmpty ?? true))
+    }
+
+    /// What Run does to files, said before it is pressed: each step asks first.
+    private var trust: String {
+        "Nothing changes until you confirm each step. "
+            + (care.store.deletesPermanently ? "Cleanup deletes for good." : "Cleanup goes to the Trash; My Activity puts it back.")
     }
 
     private var summary: String {

@@ -90,16 +90,15 @@ struct CareView: View {
     }
 }
 
-/// CleanMyMac's floor: each module in its own colour, darker at the top
-/// left, lit from the bottom.
+/// The same navy floor in every module; the module's colour shows only
+/// as a faint light from the top right.
 private struct CareBackground: View {
     let look: ModuleLook
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: look.floor, startPoint: .topLeading, endPoint: .bottomTrailing)
-            RadialGradient(colors: [look.glow.opacity(0.35), .clear], center: .bottom, startRadius: 0, endRadius: 520)
-            RadialGradient(colors: [look.glow.opacity(0.22), .clear], center: .topTrailing, startRadius: 0, endRadius: 480)
+            LinearGradient(colors: [Theme.floor, Theme.hex(0x0C1538)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            RadialGradient(colors: [look.glow.opacity(0.10), .clear], center: .topTrailing, startRadius: 0, endRadius: 560)
         }
         .drawingGroup()
     }
@@ -207,8 +206,8 @@ private struct Sidebar: View {
         .padding(.bottom, 8)
         .frame(width: 210)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.black.opacity(0.18).ignoresSafeArea())
-        .overlay(alignment: .trailing) { Rectangle().fill(Color.white.opacity(0.06)).frame(width: 1) }
+        .background(Theme.sidebar.ignoresSafeArea())
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
     }
 
     /// The first nine modules open with ⌘1 to ⌘9, as tabs do.
@@ -272,7 +271,7 @@ private struct SidebarRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(selected ? 0.16 : over ? 0.07 : 0)))
+                .fill(selected ? Theme.selected : Color.white.opacity(over ? 0.07 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

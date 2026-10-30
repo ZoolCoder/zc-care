@@ -938,11 +938,18 @@ final class Care {
     /// Removes the app and what it left in the Library. A Brewfile app goes
     /// through zc-care remove, which drops it from the manifest too;
     /// the rest go to the Trash, where they can be put back.
-    func uninstall(_ app: InstalledApp) async {
-        guard store.busy == nil, !removing, allowed([app.url]) else { return }
+    /// How one uninstall ended, so a run over several apps knows whether
+    /// to go on and what to report at the end.
+    enum UninstallOutcome { case declined, busy, skipped, failed, done }
+
+    @discardableResult
+    func uninstall(_ app: InstalledApp) async -> UninstallOutcome {
+        guard store.busy == nil, !removing else { return .busy }
+        guard allowed([app.url]) else { return .skipped }
         removing = true
         defer { removing = false }
-        guard await closed(app, toDo: "uninstall \(app.name)"), store.busy == nil else { return }
+        guard await closed(app, toDo: "uninstall \(app.name)") else { return .skipped }
+        guard store.busy == nil else { return .busy }
         // What the ignore list names stays behind; the rest still goes.
         let leftovers = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
             .filter { !store.ignoreList.touches($0) }
@@ -957,8 +964,9 @@ final class Care {
             how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n") + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath })
         }
         // Again: the app may have opened while the alert was up.
-        guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall"),
-              await closed(app, toDo: "uninstall \(app.name)"), store.busy == nil else { return }
+        guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall") else { return .declined }
+        guard await closed(app, toDo: "uninstall \(app.name)") else { return .skipped }
+        guard store.busy == nil else { return .busy }
         store.busy = "Uninstalling \(app.name)"
         defer { store.busy = nil }
         var failure: String?
@@ -1010,6 +1018,30 @@ final class Care {
             store.message = Store.Message(text: "\(app.name) is uninstalled.", failed: false)
         }
         monitor.readDisk()
+        return failure == nil && leftoverFailure == nil ? .done : .failed
+    }
+
+    /// Uninstalls each app in turn, each asking first. No, or something
+    /// else taking over, stops the rest; one message sums up the run so a
+    /// later app's success does not hide an earlier failure.
+    func uninstall(_ chosen: [InstalledApp]) async {
+        let before = apps.count
+        var done = 0
+        var problems: [String] = []
+        var stopped = false
+        for app in chosen {
+            let outcome = await uninstall(app)
+            if outcome == .done { done += 1 }
+            if outcome == .failed || outcome == .skipped, let message = store.message, message.failed { problems.append(message.text) }
+            if outcome == .declined || outcome == .busy { stopped = true; break }
+        }
+        // An app gone, even with files that stayed, changes what counts as left over.
+        if apps.count < before { orphans = nil }
+        guard chosen.count > 1 else { return }
+        var text = "\(Store.counted(done, "app")) uninstalled"
+        if stopped { text += ", the rest left alone" }
+        if !problems.isEmpty { text += ". " + problems.joined(separator: " ") }
+        store.message = Store.Message(text: text + (problems.isEmpty ? "." : ""), failed: !problems.isEmpty)
     }
 
     /// Stops the agents so they do not run on from the Trash.

@@ -125,7 +125,7 @@ private struct Tabs: View {
                     .padding(.vertical, 5)
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(store.tab == tab ? Color.white : Color.white.opacity(0.65))
-                    .background(RoundedRectangle(cornerRadius: 7).fill(store.tab == tab ? Color.white.opacity(0.16) : .clear))
+                    .background(RoundedRectangle(cornerRadius: 7).fill(store.tab == tab ? Theme.selected : .clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

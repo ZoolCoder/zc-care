@@ -1,30 +1,35 @@
 import AppKit
 import SwiftUI
 
-/// The panel's look: a violet night with glassy cards and cyan links, as
-/// CleanMyMac's menu has, in dark mode whatever the system's is.
+/// Midnight: navy surfaces in every module, cyan for what acts, and
+/// colour elsewhere only where it means something: green fine, amber look,
+/// red risky. Dark mode whatever the system's is.
 enum Theme {
-    static let accent = Color(red: 0.36, green: 0.82, blue: 0.98)
-    static let warning = Color(red: 0.98, green: 0.69, blue: 0.27)
-    static let good = Color(red: 0.36, green: 0.85, blue: 0.55)
-    static let bad = Color(red: 1.0, green: 0.42, blue: 0.48)
-    static let card = Color.white.opacity(0.07)
-    static let rim = Color.white.opacity(0.09)
+    static let accent = hex(0x42C8F5)
+    static let warning = hex(0xF5B544)
+    static let good = hex(0x28D99A)
+    static let bad = hex(0xFF647A)
+    static let violet = hex(0x8D6BFF)
+    /// The window's floor and the sidebar's, a step lighter.
+    static let floor = hex(0x080F2B)
+    static let sidebar = hex(0x10183D)
+    static let selected = hex(0x393B82)
+    static let card = hex(0x182348).opacity(0.86)
+    static let rim = hex(0x29396F)
+    static let divider = hex(0x26345C)
     static let radius: CGFloat = 12
 
     /// The panel's floor, laid behind everything once.
     static var background: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.20, green: 0.13, blue: 0.42),
-                                    Color(red: 0.16, green: 0.09, blue: 0.36),
-                                    Color(red: 0.11, green: 0.06, blue: 0.25)],
-                           startPoint: .top, endPoint: .bottom)
-            RadialGradient(colors: [Color(red: 0.45, green: 0.30, blue: 0.85).opacity(0.45), .clear],
-                           center: .topLeading, startRadius: 0, endRadius: 380)
-            RadialGradient(colors: [Color(red: 0.55, green: 0.20, blue: 0.75).opacity(0.25), .clear],
-                           center: .bottomTrailing, startRadius: 0, endRadius: 320)
+            LinearGradient(colors: [sidebar, floor], startPoint: .top, endPoint: .bottom)
+            RadialGradient(colors: [violet.opacity(0.18), .clear], center: .topLeading, startRadius: 0, endRadius: 380)
         }
         .drawingGroup()
+    }
+
+    static func hex(_ rgb: UInt32) -> Color {
+        Color(red: Double(rgb >> 16 & 0xFF) / 255, green: Double(rgb >> 8 & 0xFF) / 255, blue: Double(rgb & 0xFF) / 255)
     }
 }
 
