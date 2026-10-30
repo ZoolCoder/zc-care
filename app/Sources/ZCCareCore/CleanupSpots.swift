@@ -41,7 +41,8 @@ public enum MailAttachments {
                 .filter { !["Mailboxes", "MailData"].contains($0.lastPathComponent) }
             for account in accounts { found += attachments(under: account, minimum: minimum) }
         }
-        return found.sorted { $0.size > $1.size }
+        // Years of mail can hold tens of thousands; the biggest are worth a look.
+        return Array(found.sorted { $0.size > $1.size }.prefix(1000))
     }
 
     /// Walks by hand: Mail's .mbox folders are packages, which an

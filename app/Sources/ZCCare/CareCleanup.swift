@@ -294,7 +294,7 @@ struct CloudCleanupView: View {
     var body: some View {
         let scans = care.cloud ?? []
         VStack(spacing: 0) {
-            CareHeader(title: "Cloud Cleanup", subtitle: subtitle(scans), busy: care.scanningCloud,
+            CareHeader(title: "Cloud Cleanup", subtitle: subtitle(scans), busy: care.scanningCloud || care.store.busy != nil,
                    action: ("Rescan", { Task { await care.scanCloud() } }))
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -324,7 +324,7 @@ struct CloudCleanupView: View {
                                     }
                                     .controlSize(.small)
                                     .help("Show in Finder")
-                                    Button("Remove Download") { care.removeDownload(file, from: scan.drive) }
+                                    Button("Remove Download") { Task { await care.removeDownload(file, from: scan.drive) } }
                                         .controlSize(.small)
                                         .disabled(care.store.busy != nil)
                                 }

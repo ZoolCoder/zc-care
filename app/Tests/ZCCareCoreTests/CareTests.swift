@@ -438,6 +438,12 @@ private func write(_ url: URL, bytes: Int) throws {
     let serving = ["node \(idle)/node_modules/.bin/vite --port 5173", "/bin/zsh -l"]
     #expect(ProjectDependencies.running(deps, commands: serving).map { $0.url.lastPathComponent } == ["node_modules"])
     #expect(ProjectDependencies.running(deps, commands: ["cat \(idle)r/x"]).isEmpty)
+
+    #expect(ProjectDependencies.touched(deps).isEmpty)
+    try write(URL(fileURLWithPath: idle).appendingPathComponent("node_modules/x/new.js"), bytes: 10)
+    #expect(ProjectDependencies.touched(deps).isEmpty)
+    try write(URL(fileURLWithPath: idle).appendingPathComponent("src/main.ts"), bytes: 10)
+    #expect(ProjectDependencies.touched(deps).map { $0.url.lastPathComponent } == ["node_modules"])
 }
 
 @Test func ollamaModelsKeepSharedBlobs() throws {

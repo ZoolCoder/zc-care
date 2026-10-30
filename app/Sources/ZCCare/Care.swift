@@ -165,6 +165,8 @@ final class Care {
     /// Duplicates are looked for from this size up: hashing smaller files
     /// costs more than they waste.
     nonisolated static let duplicateFile: Int64 = 10_000_000
+    /// Past this many groups a list is too long to review.
+    static let duplicateGroups = 500
     /// Mail attachments under this are not worth the row.
     nonisolated static let mailAttachment: Int64 = 1_000_000
 
@@ -391,7 +393,7 @@ final class Care {
         }
         let downloads = URL(fileURLWithPath: home + "/Downloads")
         let installers = [downloads, URL(fileURLWithPath: home + "/Desktop")]
-        let same = Task.detached(priority: .utility) { Duplicates.groups(paths: paths, home: home, minimum: Self.duplicateFile) }
+        let same = Task.detached(priority: .utility) { Duplicates.groups(paths: paths, home: home, minimum: Self.duplicateFile, limit: .max) }
         async let large = Task.detached { LargeFiles.files(paths: paths, home: home, minimum: Self.largeFile) }.value
         async let old = Task.detached { OldDownloads.files(in: downloads) }.value
         async let images = Task.detached { DiskImages.files(in: installers) }.value
@@ -405,11 +407,12 @@ final class Care {
         scanningFiles = false
         findingDuplicates = true
         defer { findingDuplicates = false }
-        duplicates = store.ignoreList.keep(await same.value).compactMap { group in
+        // Capped once ignored and vanished copies are out, so they take no place.
+        duplicates = Array(store.ignoreList.keep(await same.value).compactMap { group in
             var group = group
             group.files.removeAll { !FileManager.default.fileExists(atPath: $0.url.path) }
             return group.files.count > 1 ? group : nil
-        }
+        }.prefix(Self.duplicateGroups))
     }
 
     /// The paths Spotlight finds; nil, with why in a message, when mdfind fails.
@@ -767,14 +770,17 @@ final class Care {
         guard store.busy == nil, !removing, !folders.isEmpty, allowed(folders.map(\.url)) else { return }
         removing = true
         defer { removing = false }
-        // A project may have started since the scan, or have a shell open in it.
+        // A project may have started since the scan, have a shell open in it,
+        // or have been worked on again since a list restored from days ago.
         guard let cwds = await workingDirectories() else { return }
+        let resumed = await Task.detached(priority: .userInitiated) { ProjectDependencies.touched(folders) }.value
         let running = ProjectDependencies.running(folders, commands: await Monitor.commands())
             + folders.filter { !OpenFile.workingIn($0.url.deletingLastPathComponent().path, cwds).isEmpty }
+            + resumed
         if !running.isEmpty {
             let ids = Set(running.map(\.id))
             dependencies.removeAll { ids.contains($0.id) }
-            store.message = Store.Message(text: "\(Store.counted(ids.count, "project")) in use now; "
+            store.message = Store.Message(text: "\(Store.counted(ids.count, "project")) in use or worked on since the scan; "
                                               + "\(ids.count == 1 ? "its" : "their") dependencies stay.", failed: false)
             return
         }
@@ -1720,7 +1726,8 @@ final class Care {
     nonisolated static let cloudFile: Int64 = 50_000_000
 
     func scanCloud() async {
-        guard !scanningCloud else { return }
+        // A download being removed would come back in a scan read meanwhile.
+        guard !scanningCloud, store.busy == nil else { return }
         scanningCloud = true
         defer { scanningCloud = false }
         let drives = CloudDrives.found(home: FileManager.default.homeDirectoryForCurrentUser)
@@ -1735,7 +1742,7 @@ final class Care {
 
     /// Frees the space a downloaded file takes and keeps it in the cloud:
     /// the Finder downloads it again on opening.
-    func removeDownload(_ file: LargeFile, from drive: CloudDrive) {
+    func removeDownload(_ file: LargeFile, from drive: CloudDrive) async {
         guard store.busy == nil else { return }
         guard allowed([file.url]) else { return }
         guard FileManager.default.fileExists(atPath: file.url.path) else {
@@ -1746,13 +1753,19 @@ final class Care {
         guard Alerts.confirm("Remove the download of \(file.name)?",
                              "It stays in \(drive.name) and downloads again when you open it. Frees \(Store.bytes(file.size)).",
                              button: "Remove Download") else { return }
-        do {
-            try FileManager.default.evictUbiquitousItem(at: file.url)
+        store.busy = "Removing the download of \(file.name)"
+        // Eviction waits on the provider's file coordination: not on the main thread.
+        let url = file.url
+        let evicted = await Task.detached(priority: .userInitiated) { () -> Bool in
+            (try? FileManager.default.evictUbiquitousItem(at: url)) != nil
+        }.value
+        store.busy = nil
+        if evicted {
             dropCloudFile(file, from: drive, freed: file.size)
             monitor.readDisk()
             store.record(.cloud, file.name, freed: file.size)
             store.message = Store.Message(text: "\(file.name) is now in \(drive.name) only.", failed: false)
-        } catch {
+        } else {
             // Only iCloud lets another app evict; the Finder can for every provider.
             NSWorkspace.shared.activateFileViewerSelecting([file.url])
             store.message = Store.Message(text: "\(drive.name) keeps \(file.name) itself: in the Finder, Control-click it and choose Remove Download.",

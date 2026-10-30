@@ -34,6 +34,15 @@ public enum ProjectDependencies {
         return found.sorted { $0.size > $1.size }
     }
 
+    /// The folders whose project changed within `days` since the list was
+    /// read: work resumed there needs its dependencies.
+    public static func touched(_ folders: [LargeFile], within days: Int = 90, now: Date = .now) -> [LargeFile] {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86400)
+        return folders.filter {
+            lastTouched(project: $0.url.deletingLastPathComponent(), skipping: $0.url.lastPathComponent) >= cutoff
+        }
+    }
+
     /// The folders whose project a running command points into: a dev
     /// server or a script there still loads its dependencies.
     public static func running(_ folders: [LargeFile], commands: [String]) -> [LargeFile] {
