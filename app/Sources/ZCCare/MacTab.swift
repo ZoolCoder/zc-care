@@ -768,12 +768,16 @@ private struct AwakeList: View {
         }
         .task(id: store.monitor.readers.contains(.panel)) {
             while !Task.isCancelled, store.monitor.readers.contains(.panel) {
-                let read = SleepBlocker.read { NSRunningApplication(processIdentifier: $0)?.localizedName ?? SleepBlocker.processName($0) }
-                failed = read == nil
-                blockers = read
+                read()
                 try? await Task.sleep(for: .seconds(5))
             }
         }
+    }
+
+    private func read() {
+        let read = SleepBlocker.read { NSRunningApplication(processIdentifier: $0)?.localizedName ?? SleepBlocker.processName($0) }
+        failed = read == nil
+        blockers = read
     }
 
     private func row(_ blocker: SleepBlocker) -> some View {
@@ -788,7 +792,15 @@ private struct AwakeList: View {
             Text([what, blocker.held(at: .now)].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             if let app, app.activationPolicy == .regular, app != .current {
-                Button("Quit") { store.quit(app) }.controlSize(.small).gatedOnBusy(store)
+                Button("Quit") {
+                    store.quit(app)
+                    // Drop the row once the app is gone, not at the next five-second read.
+                    Task {
+                        try? await Task.sleep(for: .seconds(1))
+                        read()
+                    }
+                }
+                .controlSize(.small).gatedOnBusy(store)
             }
         }
         .modifier(Hover())
