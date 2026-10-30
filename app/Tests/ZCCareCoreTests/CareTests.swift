@@ -859,6 +859,7 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     let old = #"{"diskFreeGB":40,"memoryPressure":90,"cpuTemp":100,"batteryCapacity":60}"#
     let limits = try JSONDecoder().decode(VitalLimits.self, from: Data(old.utf8))
     #expect(limits.diskFreeGB == 40 && limits.batteryCapacity == 60 && limits.trashGB == 5 && limits.deviceBattery == 20)
+    #expect(limits.appCPU == 100 && limits.appMemoryGB == 8)
 }
 
 @Test func vitalsWatchWarnsOfEachLowDeviceOnItsOwn() {
@@ -878,6 +879,67 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     v.devices = [Device(name: "AirPods", kind: "Headphones", battery: 15)]
     #expect(watch.alerts(for: v, now: now.addingTimeInterval(3600)).isEmpty)
     #expect(watch.alerts(for: v, now: now.addingTimeInterval(6 * 3600)).map(\.id) == ["vitals device AirPods"])
+}
+
+@Test func vitalsWatchWarnsOfAnAppHoggingTheMacForTenMinutes() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    let start = Date(timeIntervalSince1970: 0)
+    let at = { (minute: Int) in start.addingTimeInterval(Double(minute) * 60) }
+    v.processes = [Proc(pid: 1, cpu: 180, memory: 1_000_000_000, name: "Spinner"),
+                   Proc(pid: 2, cpu: 2, memory: 6_000_000_000, name: "Hog Helper"),
+                   Proc(pid: 3, cpu: 1, memory: 3_000_000_000, name: "Hog Helper"),
+                   Proc(pid: 4, cpu: 0, memory: 9_000_000_000, name: "Hog")]
+    for minute in 0..<9 { #expect(watch.alerts(for: v, now: at(minute)).isEmpty) }
+    let alerts = watch.alerts(for: v, now: at(9))
+    #expect(alerts.map(\.id) == ["vitals app memory Hog", "vitals app cpu Spinner"])
+    #expect(alerts[0].title == "“Hog” is using 9 GB of memory")
+    #expect(alerts[1].body.hasPrefix("180% of a core"))
+    // Helpers sharing a name count at the heaviest, not summed.
+    #expect(!alerts.contains { $0.id.contains("Helper") })
+    // A pause starts the count again; the quiet time holds after that.
+    v.processes[0].cpu = 20
+    #expect(watch.alerts(for: v, now: at(10)).isEmpty)
+    v.processes[0].cpu = 180
+    for minute in 11..<30 { #expect(!watch.alerts(for: v, now: at(minute)).contains { $0.id.hasSuffix("Spinner") }) }
+    // After sleep the ten minutes start over.
+    for minute in 181..<190 { #expect(watch.alerts(for: v, now: at(minute)).isEmpty) }
+    #expect(watch.alerts(for: v, now: at(190)).map(\.id) == ["vitals app memory Hog", "vitals app cpu Spinner"])
+}
+
+@Test func vitalsWatchKeepsAnAppQuietWhenItQuitsAndReturns() {
+    var limits = VitalLimits()
+    limits.appCPU = 50
+    var watch = VitalsWatch(limits: limits)
+    var v = Vitals()
+    let at = { (minute: Int) in Date(timeIntervalSince1970: Double(minute) * 60) }
+    let busy = [Proc(pid: 1, cpu: 60, memory: 0, name: "Busy")]
+    v.processes = busy
+    for minute in 0..<9 { _ = watch.alerts(for: v, now: at(minute)) }
+    // A failed ps reads as no apps and keeps the count.
+    v.processes = []
+    #expect(watch.alerts(for: v, now: at(9)).isEmpty)
+    v.processes = busy
+    #expect(watch.alerts(for: v, now: at(10)).map(\.id) == ["vitals app cpu Busy"])
+    v.processes = [Proc(pid: 2, cpu: 0, memory: 0, name: "Idle")]
+    _ = watch.alerts(for: v, now: at(11))
+    v.processes = busy
+    for minute in 12..<40 { #expect(watch.alerts(for: v, now: at(minute)).isEmpty) }
+}
+
+@Test func vitalsWatchForgetsAppsThatQuit() {
+    var limits = VitalLimits()
+    limits.appCPU = 50
+    var watch = VitalsWatch(limits: limits)
+    var v = Vitals()
+    v.processes = [Proc(pid: 1, cpu: 60, memory: 0, name: "Busy")]
+    for minute in 0..<5 { _ = watch.alerts(for: v, now: Date(timeIntervalSince1970: Double(minute) * 60)) }
+    v.processes = [Proc(pid: 2, cpu: 0, memory: 0, name: "Idle")]
+    _ = watch.alerts(for: v, now: Date(timeIntervalSince1970: 300))
+    // Busy again: ten fresh minutes, not five left over.
+    v.processes = [Proc(pid: 3, cpu: 60, memory: 0, name: "Busy")]
+    for minute in 6..<15 { #expect(watch.alerts(for: v, now: Date(timeIntervalSince1970: Double(minute) * 60)).isEmpty) }
+    #expect(watch.alerts(for: v, now: Date(timeIntervalSince1970: 900)).map(\.id) == ["vitals app cpu Busy"])
 }
 
 @Test func vitalsWatchNamesTwoLowDevicesApart() {

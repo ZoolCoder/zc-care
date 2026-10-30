@@ -135,6 +135,10 @@ struct SettingsView: View {
                             value: $store.vitalLimits.trashGB, in: 1...100, step: 1)
                     Stepper("Bluetooth device battery at \(store.vitalLimits.deviceBattery)%",
                             value: $store.vitalLimits.deviceBattery, in: 5...50, step: 5)
+                    Stepper("One app over \(store.vitalLimits.appCPU)% CPU for ten minutes",
+                            value: $store.vitalLimits.appCPU, in: 50...800, step: 50)
+                    Stepper("One app over \(store.vitalLimits.appMemoryGB) GB of memory for ten minutes",
+                            value: $store.vitalLimits.appMemoryGB, in: 1...64, step: 1)
                 }
                 .disabled(!store.vitalsAlerts || !store.notifies)
             } header: {

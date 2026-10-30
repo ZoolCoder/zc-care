@@ -13,6 +13,8 @@ public struct Vitals: Sendable, Equatable {
     public var devices: [Device] = []
     /// What every Trash holds, read for the alerts only.
     public var trash: Int64?
+    /// This user's processes, read for the alerts only.
+    public var processes: [Proc] = []
 
     public init() {}
 }

@@ -164,9 +164,9 @@ final class Monitor {
     }
 
     /// The vitals the background alerts need, read apart from the panel's
-    /// loop; battery health, Bluetooth devices and the Trash only when
-    /// asked, as all three are slow.
-    func watchSample(battery: Bool, trash: Bool = false, devices: Bool = false) async -> Vitals {
+    /// loop; battery health, Bluetooth devices, the Trash and running apps
+    /// only when asked, as the first three are slow.
+    func watchSample(battery: Bool, trash: Bool = false, devices: Bool = false, apps: Bool = false) async -> Vitals {
         var v = Vitals()
         v.disk = sampler.disk()
         v.memory = sampler.memory()
@@ -177,6 +177,11 @@ final class Monitor {
            let r = try? await ProcessRunner(timeout: 60).run("/usr/sbin/system_profiler", ["-json", "SPPowerDataType"], env: [:]) {
             b.read(systemProfiler: r.stdout)
             v.battery = b
+        }
+        let args = ["-Aceo", "pid=,pcpu=,rss=,uid=,ppid=,stat=,comm="]
+        if apps, let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", args, env: [:]) {
+            let user = getuid()
+            v.processes = Proc.parse(ps: r.output, detailed: true).filter { $0.uid == user }
         }
         if devices, let r = try? await ProcessRunner(timeout: 60).run("/usr/sbin/system_profiler", ["-json", "SPBluetoothDataType"], env: [:]) {
             v.devices = Device.parse(systemProfiler: r.stdout)

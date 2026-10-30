@@ -86,6 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             care.care.orphans = nil
             care.care.showLeftovers = true
             care.show(.apps)
+        case _ where id.hasPrefix("vitals app "):
+            store.tab = .mac
+            store.macDetail = id.hasPrefix("vitals app cpu") ? .cpu : .memory
+            window.show()
         case _ where id.hasPrefix("vitals device"):
             store.tab = .mac
             store.macDetail = nil
