@@ -927,3 +927,42 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(!FileKind.unopened(file, now: now))
     #expect(!FileKind.unopened(LargeFile(url: file.url, size: 1), now: now))
 }
+
+@Test func batteryTimeLeftReadsLikeAClock() {
+    var b = Battery(percent: 60)
+    b.minutes = 125
+    #expect(b.timeLeft == "2:05 left")
+    b.charging = true
+    b.onAC = true
+    b.minutes = 40
+    #expect(b.timeLeft == "0:40 to full")
+    b.charging = false
+    #expect(b.timeLeft == nil)
+    b = Battery(percent: 60)
+    #expect(b.timeLeft == nil)
+    b.minutes = 45
+    #expect(b.timeLeft == "0:45 left" && b.clock == "0:45")
+    b.minutes = 0
+    #expect(b.timeLeft == "0:00 left")
+    b = Battery(percent: 100, onAC: true, charged: true)
+    b.minutes = 30
+    #expect(b.timeLeft == nil)
+}
+
+@Test func batteryTemperatureFromEitherRegistryPlace() {
+    #expect(Battery.temperature(registry: ["Temperature": 3050]) == 30.5)
+    #expect(Battery.temperature(registry: ["BatteryData": ["Temperature": 3750]]) == 37.5)
+    #expect(Battery.temperature(registry: ["BatteryData": ["Voltage": 12000]]) == nil)
+    #expect(Battery.temperature(registry: ["Temperature": 0]) == nil)
+    #expect(Battery.temperature(registry: ["Temperature": 0, "BatteryData": ["Temperature": 3750]]) == 37.5)
+}
+
+@Test func batteryWearKeepsConditionAndCapacityApart() {
+    var b = Battery(percent: 50)
+    b.health = "Good"
+    b.capacity = 78
+    #expect(!b.isWorn && b.isFaded && b.needsService)
+    b.capacity = 90
+    b.health = "Service Recommended"
+    #expect(b.isWorn && !b.isFaded && b.needsService)
+}

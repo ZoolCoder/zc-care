@@ -51,7 +51,10 @@ struct MacTab: View {
                 switch open {
                 case .disk: FreeUpList(store: store)
                 case .memory: TopList(store: store, order: .memory)
-                case .cpu: TopList(store: store, order: .cpu)
+                case .cpu:
+                    if let sensors = vitals.sensors { SensorList(sensors: sensors) }
+                    TopList(store: store, order: .cpu)
+                case .battery: if let battery = vitals.battery { BatteryDetail(battery: battery) }
                 case nil: EmptyView()
                 }
             }
@@ -98,8 +101,9 @@ struct MacTab: View {
     }
 
     private func batteryTile(_ b: Battery) -> some View {
-        Tile(symbol: batterySymbol(b), title: "Battery", value: Text("\(b.percent) %")) {
-            Text(b.state)
+        Tile(symbol: batterySymbol(b), title: "Battery", value: Text("\(b.percent) %"), link: "Details",
+             selected: open == .battery, action: { toggle(.battery) }) {
+            Text(b.timeLeft.map { b.state + " · " + $0 } ?? b.state)
             if let capacity = b.capacity {
                 Text("Health \(capacity) %" + (b.cycles.map { " · \($0) cycles" } ?? ""))
                     .foregroundStyle(b.needsService ? Theme.warning : .secondary)
@@ -165,8 +169,7 @@ struct MacTab: View {
         case .cpu: show(.cpu)
         case .security: store.tab = .health
         case .updates: store.tab = .updates
-        case .battery:
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Battery-Settings.extension")!)
+        case .battery: show(.battery)
         case .none: break
         }
     }
@@ -400,6 +403,83 @@ private struct FreeUpList: View {
         let sizes = spots.compactMap { store.monitor.junk[$0.id] }
         return sizes.isEmpty ? nil : sizes.reduce(0, +)
     }
+}
+
+/// What macOS and the battery itself say about its wear and charge.
+private struct BatteryDetail: View {
+    let battery: Battery
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SectionTitle(title: "Battery")
+                Spacer()
+                Button("Battery Settings") {
+                    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Battery-Settings.extension")!)
+                }
+                .buttonStyle(.zcLink).font(.caption)
+            }
+            ListCard {
+                ValueRow(title: "Condition", value: battery.health.map { $0 == "Good" ? "Normal" : $0 } ?? "…", warn: battery.isWorn)
+                ValueRow(title: "Maximum capacity", value: battery.capacity.map { "\($0) %" } ?? "…", warn: battery.isFaded)
+                ValueRow(title: "Charge cycles", value: battery.cycles.map(String.init) ?? "…")
+                if let t = battery.temperature {
+                    ValueRow(title: "Temperature", value: "\(Int(t.rounded())) °C", warn: t >= 40)
+                }
+                if battery.countsDown {
+                    ValueRow(title: battery.charging ? "Time to full" : "Time left", value: battery.clock ?? "Estimating…")
+                } else {
+                    ValueRow(title: "Power", value: battery.state)
+                }
+                if let watts = battery.adapterWatts { ValueRow(title: "Charger", value: "\(watts) W") }
+            }
+        }
+    }
+}
+
+/// A reading in a detail list: a name and its value on the right.
+private struct ValueRow: View {
+    let title: String
+    let value: String
+    var warn = false
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value).font(.callout.monospacedDigit()).foregroundStyle(warn ? Theme.warning : .secondary)
+        }
+        .modifier(Hover())
+    }
+}
+
+/// What macmon reads beyond the CPU tile: the GPU, each fan against its
+/// top speed, and the power drawn.
+private struct SensorList: View {
+    let sensors: Sensors
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Sensors")
+            ListCard {
+                ValueRow(title: "CPU temperature", value: degrees(sensors.cpuTemp), warn: sensors.cpuTemp >= 80)
+                if let t = sensors.gpuTemp { ValueRow(title: "GPU temperature", value: degrees(t), warn: t >= 80) }
+                if let load = sensors.gpuLoad { ValueRow(title: "GPU load", value: "\(Int((load * 100).rounded())) %") }
+                ForEach(Array(sensors.fans.enumerated()), id: \.offset) { i, rpm in
+                    let limit = i < sensors.fanLimits.count ? sensors.fanLimits[i] : nil
+                    ValueRow(title: sensors.fans.count > 1 ? "Fan \(i + 1)" : "Fan",
+                             value: limit.map { "\(rpm) of \($0) rpm" } ?? "\(rpm) rpm")
+                }
+                if let w = sensors.cpuPower { ValueRow(title: "CPU power", value: watts(w)) }
+                if let w = sensors.gpuPower { ValueRow(title: "GPU power", value: watts(w)) }
+                if let w = sensors.systemPower { ValueRow(title: "Whole Mac power", value: watts(w)) }
+            }
+        }
+    }
+
+    private func degrees(_ t: Double) -> String { "\(Int(t.rounded())) °C" }
+
+    private func watts(_ w: Double) -> String { String(format: w < 10 ? "%.1f W" : "%.0f W", w) }
 }
 
 /// The busiest processes by memory or CPU; an app can be quit from here.

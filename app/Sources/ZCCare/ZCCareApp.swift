@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             care.show(.apps)
         case "vitals memory", "vitals heat", "vitals battery":
             store.tab = .mac
-            store.macDetail = id == "vitals memory" ? .memory : id == "vitals heat" ? .cpu : nil
+            store.macDetail = id == "vitals memory" ? .memory : id == "vitals heat" ? .cpu : .battery
             window.show()
         default: window.show()
         }

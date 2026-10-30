@@ -230,6 +230,12 @@ struct EchoEnvRunner: Runner {
 @Test func vitalsParseWhatTheToolsPrint() {
     let sensors = Sensors.parse(macmon: Data(#"{"temp":{"cpu_temp_avg":60.5},"fans":[{"rpm":2325},{"rpm":2505}]}\#n"#.utf8))
     #expect(sensors == Sensors(cpuTemp: 60.5, fans: [2325, 2505]))
+    let full = Sensors.parse(macmon: Data(#"{"temp":{"cpu_temp_avg":73.1,"gpu_temp_avg":0},"fans":[{"rpm":3865,"max_rpm":5779},{"rpm":4145}],"gpu_usage":[388,0.21],"cpu_power":9.1,"gpu_power":0.55,"sys_power":26.1}"#.utf8))
+    #expect(full?.fans == [3865, 4145] && full?.fanLimits == [])
+    #expect(full?.gpuTemp == nil && full?.gpuLoad == 0.21)
+    #expect(full?.cpuPower == 9.1 && full?.gpuPower == 0.55 && full?.systemPower == 26.1)
+    let rated = Sensors.parse(macmon: Data(#"{"temp":{"cpu_temp_avg":70,"gpu_temp_avg":45},"fans":[{"rpm":3800,"max_rpm":5779},{"rpm":4100,"max_rpm":6241}]}"#.utf8))
+    #expect(rated?.fanLimits == [5779, 6241] && rated?.gpuTemp == 45)
 
     var battery = Battery(percent: 100, onAC: true)
     battery.read(systemProfiler: Data(#"{"SPPowerDataType":[{"sppower_battery_health_info":{"sppower_battery_cycle_count":311,"sppower_battery_health":"Good","sppower_battery_health_maximum_capacity":"84 %"}}]}"#.utf8))

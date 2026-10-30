@@ -1,6 +1,7 @@
 import CoreWLAN
 import Darwin
 import Foundation
+import IOKit
 import IOKit.ps
 import SystemConfiguration
 import ZCCareCore
@@ -74,10 +75,34 @@ struct Sampler {
                   d[kIOPSTypeKey] as? String == kIOPSInternalBatteryType,
                   let current = d[kIOPSCurrentCapacityKey] as? Int, let max = d[kIOPSMaxCapacityKey] as? Int
             else { continue }
-            return Battery(percent: max > 0 ? current * 100 / max : current,
-                           charging: d[kIOPSIsChargingKey] as? Bool ?? false,
-                           onAC: d[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue,
-                           charged: d[kIOPSIsChargedKey] as? Bool ?? false)
+            var battery = Battery(percent: max > 0 ? current * 100 / max : current,
+                                  charging: d[kIOPSIsChargingKey] as? Bool ?? false,
+                                  onAC: d[kIOPSPowerSourceStateKey] as? String == kIOPSACPowerValue,
+                                  charged: d[kIOPSIsChargedKey] as? Bool ?? false)
+            // -1 while macOS is still estimating.
+            let minutes = d[battery.charging ? kIOPSTimeToFullChargeKey : kIOPSTimeToEmptyKey] as? Int
+            // 0 to full comes just before charged; 0 left is a flat battery.
+            battery.minutes = minutes.flatMap { $0 > 0 || $0 == 0 && !battery.charging ? $0 : nil }
+            battery.temperature = batteryTemperature()
+            if battery.onAC, let adapter = IOPSCopyExternalPowerAdapterDetails()?.takeRetainedValue() as? [String: Any] {
+                battery.adapterWatts = adapter[kIOPSPowerAdapterWattsKey] as? Int
+            }
+            return battery
+        }
+        return nil
+    }
+
+    /// Newer macOS moved the reading from the battery to its pack.
+    private func batteryTemperature() -> Double? {
+        for name in ["AppleSmartBattery", "AppleSmartBatteryPack"] {
+            let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(name))
+            guard service != 0 else { continue }
+            defer { IOObjectRelease(service) }
+            var registry: [String: Any] = [:]
+            for key in ["Temperature", "BatteryData"] {
+                registry[key] = IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue()
+            }
+            if let celsius = Battery.temperature(registry: registry) { return celsius }
         }
         return nil
     }

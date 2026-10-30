@@ -45,7 +45,7 @@ final class Store {
         }
     }
 
-    enum MacDetail: String { case disk, memory, cpu }
+    enum MacDetail: String { case disk, memory, cpu, battery }
     /// The target whose items the overview shows, and what they are.
     var expanded: String?
     var targetItems: [String: [Item]] = [:]

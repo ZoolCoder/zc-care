@@ -45,10 +45,19 @@ public struct Memory: Sendable, Equatable {
     }
 }
 
-/// CPU temperature and fans, which only macmon reads without sudo.
+/// Temperatures, fans and power draw, which only macmon reads without sudo.
 public struct Sensors: Sendable, Equatable {
     public var cpuTemp: Double
     public var fans: [Int]
+    /// Each fan's top speed, in the order of `fans`.
+    public var fanLimits: [Int] = []
+    public var gpuTemp: Double?
+    /// 0 to 1.
+    public var gpuLoad: Double?
+    /// Watts drawn by the CPU, the GPU and the whole Mac.
+    public var cpuPower: Double?
+    public var gpuPower: Double?
+    public var systemPower: Double?
 
     public init(cpuTemp: Double, fans: [Int] = []) {
         self.cpuTemp = cpuTemp
@@ -61,9 +70,22 @@ public struct Sensors: Sendable, Equatable {
               let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
               let temp = ((obj["temp"] as? [String: Any])?["cpu_temp_avg"] as? NSNumber)?.doubleValue
         else { return nil }
-        let fans = (obj["fans"] as? [[String: Any]] ?? []).compactMap { ($0["rpm"] as? NSNumber)?.intValue }
-        return Sensors(cpuTemp: temp, fans: fans)
+        let fans = (obj["fans"] as? [[String: Any]] ?? []).filter { $0["rpm"] is NSNumber }
+        var sensors = Sensors(cpuTemp: temp, fans: fans.compactMap { ($0["rpm"] as? NSNumber)?.intValue })
+        let limits = fans.compactMap { ($0["max_rpm"] as? NSNumber)?.intValue }
+        if limits.count == fans.count { sensors.fanLimits = limits }
+        // 0 while the GPU sleeps, which reads as no sensor.
+        sensors.gpuTemp = ((obj["temp"] as? [String: Any])?["gpu_temp_avg"] as? NSNumber)?.doubleValue.nonZero
+        sensors.gpuLoad = ((obj["gpu_usage"] as? [Any])?.last as? NSNumber)?.doubleValue
+        sensors.cpuPower = (obj["cpu_power"] as? NSNumber)?.doubleValue
+        sensors.gpuPower = (obj["gpu_power"] as? NSNumber)?.doubleValue
+        sensors.systemPower = (obj["sys_power"] as? NSNumber)?.doubleValue.nonZero
+        return sensors
     }
+}
+
+private extension Double {
+    var nonZero: Double? { self > 0 ? self : nil }
 }
 
 public struct Battery: Sendable, Equatable {
@@ -76,6 +98,13 @@ public struct Battery: Sendable, Equatable {
     public var health: String?
     public var capacity: Int?
     public var cycles: Int?
+    /// Minutes to empty on battery, or to full while charging; nil while
+    /// macOS is still estimating.
+    public var minutes: Int?
+    /// In °C, from the battery's own sensor.
+    public var temperature: Double?
+    /// What the connected charger is rated for.
+    public var adapterWatts: Int?
 
     public init(percent: Int, charging: Bool = false, onAC: Bool = false, charged: Bool = false) {
         self.percent = percent
@@ -90,8 +119,36 @@ public struct Battery: Sendable, Equatable {
         return onAC ? "Not charging" : "On battery"
     }
 
-    public var needsService: Bool {
-        (health.map { $0 != "Good" } ?? false) || (capacity.map { $0 < 80 } ?? false)
+    /// Running down on battery or filling up on power; not when fully
+    /// charged, nor on power and not charging.
+    public var countsDown: Bool { !charged && (charging || !onAC) }
+
+    /// Minutes as a clock, "2:05"; nil when there is nothing to count down.
+    public var clock: String? {
+        guard let minutes, minutes >= 0, countsDown else { return nil }
+        return "\(minutes / 60):" + String(format: "%02d", minutes % 60)
+    }
+
+    /// "2:05 left" on battery, "0:40 to full" while charging.
+    public var timeLeft: String? {
+        clock.map { $0 + (charging ? " to full" : " left") }
+    }
+
+    /// macOS rates the battery anything but normal.
+    public var isWorn: Bool { health.map { $0 != "Good" } ?? false }
+
+    /// Holds less than 80 % of what it did new.
+    public var isFaded: Bool { capacity.map { $0 < 80 } ?? false }
+
+    public var needsService: Bool { isWorn || isFaded }
+
+    /// The smart battery's temperature from its registry properties, in
+    /// hundredths of a degree: on top on some Macs, inside BatteryData on
+    /// others.
+    public static func temperature(registry: [String: Any]) -> Double? {
+        let positive = { (value: Any?) in (value as? Int).flatMap { $0 > 0 ? $0 : nil } }
+        let raw = positive(registry["Temperature"]) ?? positive((registry["BatteryData"] as? [String: Any])?["Temperature"])
+        return raw.map { Double($0) / 100 }
     }
 
     /// Takes health, capacity and cycles from `system_profiler -json
