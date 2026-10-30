@@ -74,6 +74,15 @@ here with what to edit.
   Smart Care recommends removing the extra copy.
 - Applications' Leftovers lists installer package receipts outside Apple's
   and whether their files are still there.
+- A notification says when an app dragged to the Trash left more than 1 MB
+  in the Library; clicking it opens Leftovers, which lists that app even
+  when its vendor has another app installed. An app missing for one check
+  only, as an updater swaps it, stays quiet. Settings turns it off.
+- Leftovers lists what an app in the Trash left before the Trash is
+  emptied.
+- Vitals alerts warn once a day when the Trash holds more than a limit
+  Settings sets, 5 GB at first; the notification opens Cleanup. Limits
+  saved by an older version are kept.
 - Homebrew offers no formula for removal when `brew info` or `brew deps`
   fails, and says why a kept formula stays.
 - Intel Only no longer hangs on an app whose executable is not a file.
