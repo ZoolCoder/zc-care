@@ -335,6 +335,17 @@ public struct Recent: Sendable, Equatable {
 
     public var peak: Double? { values.max() }
 
+    /// The readings as tab-separated rows, which Numbers, Excel and Sheets
+    /// split into columns on paste: the local time with its offset and the
+    /// share in percent.
+    public func table(column: String, timeZone: TimeZone = .current) -> String {
+        let format = ISO8601DateFormatter()
+        format.timeZone = timeZone
+        let header = "time\t\(column.components(separatedBy: .whitespacesAndNewlines).joined(separator: " ")) %"
+        let rows = zip(times, values).map { "\(format.string(from: $0))\t\(String(format: "%.1f", $1 * 100))" }
+        return ([header] + rows).joined(separator: "\n") + "\n"
+    }
+
     /// The time the readings cover, as "40 s" or "5 min".
     public var span: String {
         guard let first = times.first, let last = times.last else { return "0 s" }

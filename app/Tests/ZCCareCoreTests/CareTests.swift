@@ -1401,3 +1401,14 @@ private struct ProfilerRunner: Runner {
     // No noise reading: the strength alone.
     #expect(WiFiLink(rssi: -47, noise: nil, rate: 0, phy: 0, security: 4, channel: 1, band: 0, width: 0).quality == .excellent)
 }
+
+@Test func recentReadingsAsATable() {
+    var recent = Recent(capacity: 3)
+    let start = Date(timeIntervalSince1970: 1_800_000_000)
+    #expect(recent.table(column: "CPU Load") == "time\tCPU Load %\n")
+    recent.append(0.123, at: start)
+    recent.append(1, at: start.addingTimeInterval(2))
+    let utc = TimeZone(identifier: "UTC")!
+    #expect(recent.table(column: "CPU\tall", timeZone: utc)
+        == "time\tCPU all %\n2027-01-15T08:00:00Z\t12.3\n2027-01-15T08:00:02Z\t100.0\n")
+}

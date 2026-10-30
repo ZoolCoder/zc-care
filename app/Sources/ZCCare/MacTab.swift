@@ -983,6 +983,7 @@ private struct HistoryChart: View {
     let title: String
     let monitor: Monitor
     let history: KeyPath<Monitor, Recent>
+    @State private var copied = false
 
     var body: some View {
         let recent = monitor[keyPath: history]
@@ -992,7 +993,15 @@ private struct HistoryChart: View {
                 Spacer()
                 if let peak = recent.peak, recent.values.count >= 2 {
                     Text("Peak \(percent(peak)) · last \(recent.span)").font(.caption).foregroundStyle(.secondary)
+                    Button(copied ? "Copied" : "Copy Readings") { copy(recent) }
+                        .buttonStyle(.zcLink).font(.caption)
+                        .help("Copy each reading with its time, for a spreadsheet")
                 }
+            }
+            .task(id: copied) {
+                guard copied else { return }
+                try? await Task.sleep(for: .seconds(2))
+                if !Task.isCancelled { copied = false }
             }
             ListCard {
                 // The space stays while the first readings come, so what is
@@ -1005,6 +1014,12 @@ private struct HistoryChart: View {
                 }
             }
         }
+    }
+
+    private func copy(_ recent: Recent) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(recent.table(column: title), forType: .string)
+        copied = true
     }
 
     private func chart(_ recent: Recent) -> some View {
