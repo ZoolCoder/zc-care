@@ -180,14 +180,17 @@ struct UpdateList: View {
     }
 
     private func packageRow(_ item: Item) -> some View {
-        let app = care.apps.first { item.app != nil && $0.url.lastPathComponent == item.app }
-            ?? care.apps.first { $0.name.caseInsensitiveCompare(item.app ?? item.name) == .orderedSame }
+        // By the cask token first: a cask's display name often differs from
+        // its app's, and the app found here is the one offered to quit.
+        let app = care.apps.first { if case .cask(let token) = $0.source { item.kind == "cask" && token == item.name } else { false } }
+            ?? care.apps.first { item.app != nil && $0.url.lastPathComponent == item.app }
+            ?? care.apps.first { $0.name.caseInsensitiveCompare(item.app ?? item.name) == .orderedSame && (item.kind != "mas" || $0.source == .appStore) }
         return CareRow(icon: app.map { icon($0.url) } ?? AnyView(SymbolTile(symbol: "shippingbox.fill", colors: Tint.orange, size: 32)),
                        title: app?.name ?? item.name,
                        detail: detail(item.version ?? "?", item.latest ?? "?", date: nil,
                                       source: item.kind == "mas" ? "App Store" : "Homebrew cask \(item.name)"),
                        value: "", flag: nil) {
-            Button("Update") { Task { await care.store.update(item) } }
+            Button("Update") { Task { await care.update(item, app: app) } }
                 .controlSize(.small)
                 .gatedOnBusy(care.store)
         }

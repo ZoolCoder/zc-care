@@ -489,6 +489,16 @@ final class Care {
         return await closed(running, toDo: what)
     }
 
+    /// Updates a Homebrew cask or App Store app after offering to quit it:
+    /// its bundle is replaced, which a running app may not survive.
+    func update(_ item: Item, app: InstalledApp?) async {
+        // ZC Care's own cask updates as before: it cannot quit itself here.
+        if let app, app.bundleID != Bundle.main.bundleIdentifier {
+            guard store.busy == nil, await closed(app, toDo: "update \(app.name)") else { return }
+        }
+        await store.update(item)
+    }
+
     /// Shows how a run went, and logs what went for My Activity.
     private func finish(_ log: RunLog, kind: ActivityEntry.Kind, trashed: [Trashed]) {
         var log = log
