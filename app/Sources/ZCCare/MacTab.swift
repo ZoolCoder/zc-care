@@ -52,7 +52,9 @@ struct MacTab: View {
                 case .disk:
                     if !store.monitor.volumes.isEmpty { DriveList(store: store, volumes: store.monitor.volumes) }
                     FreeUpList(store: store)
-                case .memory: TopList(store: store, order: .memory)
+                case .memory:
+                    if let memory = vitals.memory, memory.total > 0, memory.used > 0 { MemoryList(memory: memory) }
+                    TopList(store: store, order: .memory)
                 case .cpu:
                     if let sensors = vitals.sensors { SensorList(sensors: sensors) }
                     TopList(store: store, order: .cpu)
@@ -499,6 +501,58 @@ private struct ValueRow: View {
             Text(value).font(.callout.monospacedDigit()).foregroundStyle(warn ? Theme.warning : .secondary)
         }
         .modifier(Hover())
+    }
+}
+
+/// What memory holds, as one bar and a row for each part, and swap.
+private struct MemoryList: View {
+    let memory: Memory
+
+    private var parts: [(title: String, bytes: Int64, color: Color)] {
+        [("App memory", memory.app, Theme.accent), ("Wired", memory.wired, Theme.violet),
+         ("Compressed", memory.compressed, Theme.warning), ("Cached files", memory.cached, Theme.good)]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Memory")
+            ListCard {
+                bar.padding(.vertical, 4)
+                ForEach(parts, id: \.title) { part in
+                    HStack(spacing: 6) {
+                        Circle().fill(part.color).frame(width: 7, height: 7)
+                        ValueRow(title: part.title, value: Store.bytes(part.bytes, .memory))
+                    }
+                }
+                HStack(spacing: 6) {
+                    Circle().fill(.quaternary).frame(width: 7, height: 7)
+                    ValueRow(title: "Free", value: Store.bytes(memory.free, .memory))
+                }
+                HStack(spacing: 6) {
+                    Color.clear.frame(width: 7, height: 7)
+                    ValueRow(title: "Swap used", value: memory.swapUsed > 0 ? Store.bytes(memory.swapUsed, .memory) : "None",
+                             warn: memory.isSwapping)
+                }
+            }
+        }
+    }
+
+    private var bar: some View {
+        GeometryReader { geo in
+            // Scaled to the larger of the parts and RAM, so the bar never spills.
+            let scale = geo.size.width / CGFloat(max(memory.total, parts.reduce(0) { $0 + $1.bytes }))
+            HStack(spacing: 0) {
+                ForEach(parts, id: \.title) { part in
+                    part.color.frame(width: CGFloat(part.bytes) * scale)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(height: 8)
+        .background(.quaternary)
+        .clipShape(Capsule())
+        .accessibilityElement()
+        .accessibilityLabel("\(Store.bytes(memory.used, .memory)) of \(Store.bytes(memory.total, .memory)) used")
     }
 }
 

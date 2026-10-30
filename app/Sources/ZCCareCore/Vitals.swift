@@ -40,10 +40,51 @@ public struct Memory: Sendable, Equatable {
     public var used: Int64
     public var total: Int64
 
+    /// What used is made of: apps' own memory, what the kernel holds, what
+    /// is compressed; and files kept in memory, which macOS can free.
+    public var app: Int64 = 0
+    public var wired: Int64 = 0
+    public var compressed: Int64 = 0
+    public var cached: Int64 = 0
+    public var swapUsed: Int64 = 0
+
     public init(pressure: Int, used: Int64, total: Int64) {
         self.pressure = pressure
         self.used = used
         self.total = total
+    }
+
+    /// From the page counts of `host_statistics64`.
+    public init(pressure: Int, total: Int64, pages: MemoryPages, pageSize: Int64) {
+        let app = max(0, pages.internal - pages.purgeable) * pageSize
+        let wired = pages.wired * pageSize, compressed = pages.compressed * pageSize
+        self.init(pressure: pressure, used: app + wired + compressed, total: total)
+        self.app = app
+        self.wired = wired
+        self.compressed = compressed
+        cached = (pages.external + pages.purgeable) * pageSize
+    }
+
+    /// Neither used nor cached.
+    public var free: Int64 { max(0, total - used - cached) }
+
+    /// Swap in use while memory is under pressure: the Mac is slowing.
+    public var isSwapping: Bool { swapUsed > 0 && pressure >= 50 }
+}
+
+public struct MemoryPages: Sendable, Equatable {
+    public var `internal`: Int64
+    public var purgeable: Int64
+    public var wired: Int64
+    public var compressed: Int64
+    public var external: Int64
+
+    public init(internal: Int64, purgeable: Int64, wired: Int64, compressed: Int64, external: Int64) {
+        self.internal = `internal`
+        self.purgeable = purgeable
+        self.wired = wired
+        self.compressed = compressed
+        self.external = external
     }
 }
 

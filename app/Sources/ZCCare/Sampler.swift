@@ -52,10 +52,15 @@ struct Sampler {
         }
         var page: vm_size_t = 0
         host_page_size(mach_host_self(), &page)
-        let pages = ok == KERN_SUCCESS
-            ? Int64(vm.internal_page_count) - Int64(vm.purgeable_count) + Int64(vm.wire_count) + Int64(vm.compressor_page_count)
-            : 0
-        return Memory(pressure: 100 - Int(level), used: pages * Int64(page), total: Int64(total))
+        guard ok == KERN_SUCCESS else { return Memory(pressure: 100 - Int(level), used: 0, total: Int64(total)) }
+        let pages = MemoryPages(internal: Int64(vm.internal_page_count), purgeable: Int64(vm.purgeable_count),
+                                wired: Int64(vm.wire_count), compressed: Int64(vm.compressor_page_count),
+                                external: Int64(vm.external_page_count))
+        var memory = Memory(pressure: 100 - Int(level), total: Int64(total), pages: pages, pageSize: Int64(page))
+        var swap = xsw_usage()
+        size = MemoryLayout<xsw_usage>.size
+        if sysctlbyname("vm.swapusage", &swap, &size, nil, 0) == 0 { memory.swapUsed = Int64(swap.xsu_used) }
+        return memory
     }
 
     func disk() -> Disk? {

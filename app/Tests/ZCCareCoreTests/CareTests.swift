@@ -1088,3 +1088,18 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     share.isLocal = false
     #expect(share.canEject && share.kind == "Network share")
 }
+
+@Test func memorySplitsLikeActivityMonitor() {
+    let pages = MemoryPages(internal: 500, purgeable: 100, wired: 200, compressed: 50, external: 300)
+    let m = Memory(pressure: 60, total: 2_000 * 16_384, pages: pages, pageSize: 16_384)
+    #expect(m.app == 400 * 16_384 && m.wired == 200 * 16_384 && m.compressed == 50 * 16_384)
+    // Purgeable pages count as cache, not as an app's.
+    #expect(m.cached == 400 * 16_384)
+    #expect(m.used == 650 * 16_384 && m.free == 950 * 16_384)
+    #expect(!m.isSwapping)
+    var swapping = m
+    swapping.swapUsed = 1
+    #expect(swapping.isSwapping)
+    swapping.pressure = 20
+    #expect(!swapping.isSwapping)
+}
