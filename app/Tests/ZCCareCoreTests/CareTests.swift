@@ -1266,3 +1266,48 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     let unplugged = SleepBlocker.parse(byProcess, onBattery: true, name: { names[$0] }, parent: { _ in nil })
     #expect(!unplugged.map(\.name).contains("Music"))
 }
+
+private func nettop(_ output: String, status: Int32) -> FakeRunner {
+    FakeRunner(outputs: ["-P": CommandResult(status: status, stdout: Data(output.utf8))])
+}
+
+@Test func appTrafficRatesBetweenTwoReadings() async {
+    let first = AppTraffic.parse("""
+    ,bytes_in,bytes_out,
+    Google Chrome H.3504,1000,500,
+    2.1.312.63457,0,0,
+    ssh.1321,5000,5000,
+    a,b.12,1,2,
+    idle.40,7,7,
+    reused.41,100,100,
+    tie.50,0,0,
+    tie.51,0,0,
+    odd,1,2,
+    gap.60,,5,
+    """)
+    #expect(first[3504] == AppTraffic.Totals(name: "Google Chrome H", received: 1000, sent: 500))
+    #expect(first[63457]?.name == "2.1.312")
+    #expect(first[12]?.name == "a,b")
+    #expect(first.count == 8)
+
+    let second = AppTraffic.parse("""
+    ,bytes_in,bytes_out,
+    Google Chrome H.3504,5000,1700,
+    2.1.312.63457,0,2400,
+    ssh.1321,10,10,
+    idle.40,7,7,
+    other.41,90000,100,
+    tie.50,1000,1000,
+    tie.51,1000,1000,
+    a,b.12,1,600,
+    new.77,90000,90000,
+    """)
+    let rates = AppTraffic.rates(from: first, to: second, over: 2)
+    #expect(rates.map(\.pid) == [3504, 63457, 50, 51])
+    #expect(rates[0].down == 2000 && rates[0].up == 600)
+    #expect(AppTraffic.rates(from: first, to: second, over: 0).isEmpty)
+
+    #expect(await AppTraffic.read(runner: nettop("x", status: 1)) == nil)
+    #expect(await AppTraffic.read(runner: nettop(",bytes_in,bytes_out,\n", status: 0)) == nil)
+    #expect(await AppTraffic.read(runner: nettop("ssh.1,2,3,\n", status: 0))?[1]?.sent == 3)
+}

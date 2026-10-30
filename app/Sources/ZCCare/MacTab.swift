@@ -536,6 +536,7 @@ private struct NetworkDetail: View {
                     }
                 }
             }
+            TrafficList(store: store)
             listening
         }
         .task { await readListeners() }
@@ -576,6 +577,64 @@ private struct NetworkDetail: View {
         listenersFailed = read == nil
         // A failed refresh shows the failure, not the rows from before.
         listeners = read
+    }
+}
+
+/// The processes moving the most data now, measured while the detail shows:
+/// a hidden panel keeps its views, so the loop stops with the panel's
+/// reading. nettop takes about five seconds a reading, and little CPU.
+private struct TrafficList: View {
+    let store: Store
+    @State private var traffic: [AppTraffic]?
+    @State private var failed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Apps Using the Network")
+            ListCard {
+                if !failed, let traffic, !traffic.isEmpty {
+                    ForEach(traffic.prefix(5)) { app in
+                        HStack {
+                            Text(NSRunningApplication(processIdentifier: app.pid)?.localizedName
+                                 ?? SleepBlocker.processName(app.pid) ?? app.name)
+                                .lineLimit(1).truncationMode(.middle)
+                            Spacer()
+                            Text("↓ \(Store.rate(Int64(app.down)))  ↑ \(Store.rate(Int64(app.up)))")
+                                .font(.callout.monospacedDigit()).foregroundStyle(.secondary).fixedSize()
+                        }
+                        .modifier(Hover())
+                    }
+                } else {
+                    Text(failed ? "Could not read the network use." : traffic == nil ? "Measuring…" : "No app is using the network.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: store.monitor.readers.contains(.panel)) {
+            guard store.monitor.readers.contains(.panel) else { return }
+            // Rates from before the panel hid are not current.
+            traffic = nil
+            failed = false
+            var last: (at: Date, totals: [Int32: AppTraffic.Totals])?
+            while !Task.isCancelled, store.monitor.readers.contains(.panel) {
+                let started = Date.now
+                guard let totals = await AppTraffic.read(runner: ProcessRunner(timeout: 15)) else {
+                    guard !Task.isCancelled else { return }
+                    failed = true
+                    last = nil
+                    try? await Task.sleep(for: .seconds(10))
+                    continue
+                }
+                let now = Date.now
+                if let last {
+                    failed = false
+                    traffic = AppTraffic.rates(from: last.totals, to: totals, over: now.timeIntervalSince(last.at))
+                }
+                last = (now, totals)
+                // nettop takes about five seconds; never run it back to back.
+                try? await Task.sleep(for: .seconds(max(0, 5 - now.timeIntervalSince(started))))
+            }
+        }
     }
 }
 
