@@ -1348,3 +1348,36 @@ private struct ProfilerRunner: Runner {
     #expect(await USBDevices.read(runner: older) == ["Mouse"])
     #expect(await USBDevices.read(runner: ProfilerRunner(outputs: [:])) == nil)
 }
+
+@Test func sleepLogSumsUpTheLastDay() async {
+    let log = """
+    Time stamp                Domain              \tMessage
+    2026-10-27 10:00:00 +0300 Sleep               \tEntering Sleep state due to 'Idle Sleep':TCPKeepAlive=active Using Batt (Charge:90%) 60 secs
+    2026-10-27 10:30:00 +0300 DarkWake            \tDarkWake from Deep Idle [CDNP] : due to rtc/Maintenance Using BATT (Charge:88%) 2 secs
+    2026-10-27 11:00:00 +0300 Wake                \tWake from Deep Idle [CDNVA] : due to HID Activity Using BATT (Charge:85%)
+    2026-10-29 19:00:00 +0300 Sleep               \tEntering DarkWake state due to 'Clamshell Sleep':TCPKeepAlive=active Using AC (Charge:96%) 60 secs
+    2026-10-29 20:00:00 +0300 Sleep               \tEntering Sleep state due to 'Clamshell Sleep':TCPKeepAlive=active Using Batt (Charge:95%) 900 secs
+    2026-10-29 20:15:00 +0300 DarkWake            \tDarkWake from Deep Idle [CDNP] : due to rtc/Maintenance Using BATT (Charge:93%) 2 secs
+    2026-10-29 20:15:02 +0300 Sleep               \tEntering Sleep state due to 'Maintenance Sleep':TCPKeepAlive=active Using Batt (Charge:92%) 60 secs
+    2026-10-29 20:16:00 +0300 Wake Requests       \t[process=mDNSResponder request=Maintenance]
+    2026-10-29 21:58:25 +0300 Wake                \tWake from Deep Idle [CDNVA] : due to smc.sysState.Wake(0x70070000) lid SMC.OutboxNotEmpty/HID Activity Using BATT (Charge:90%)
+    2026-10-29 23:00:00 +0300 Sleep               \tEntering Sleep state due to 'Software Sleep pid=88':TCPKeepAlive=active Using AC (Charge:100%) 60 secs
+    2026-10-29 23:30:00 +0300 Wake                \tWake from Deep Idle [CDNVA] : due to UserActivity Assertion Using BATT (Charge:99%)
+    """
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
+    let parsed = SleepLog.parse(log, now: f.date(from: "2026-10-30 08:00:00 +0300")!)
+    #expect(parsed.lastSleep?.reason == "From the menu or an app")
+    #expect(parsed.lastSleep?.at == f.date(from: "2026-10-29 23:00:00 +0300"))
+    #expect(parsed.lastWake?.reason == "Keyboard or mouse")
+    #expect(parsed.darkWakes == 1)
+    // 95 to 93 to 92 to 90 asleep; the 27th is past, the AC sleep has no start.
+    #expect(parsed.drained == 5)
+    #expect(SleepLog.wakeReason("Wake from Deep Idle : due to smc lid SMC/UserActivity Using BATT") == "Lid opened")
+    #expect(SleepLog.sleepReason("Entering Sleep state due to 'Thermal Emergency'") == "Thermal Emergency")
+    #expect(SleepLog.parse("", now: .now) == SleepLog())
+    let pmset = ProfilerRunner(outputs: ["log": CommandResult(status: 0, stdout: Data(log.utf8))])
+    #expect(await SleepLog.read(runner: pmset, now: f.date(from: "2026-10-30 08:00:00 +0300")!) == parsed)
+    #expect(await SleepLog.read(runner: ProfilerRunner(outputs: [:])) == nil)
+}

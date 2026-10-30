@@ -66,6 +66,7 @@ struct MacTab: View {
                 case .battery:
                     if let battery = vitals.battery { BatteryDetail(battery: battery) }
                     AwakeList(store: store)
+                    SleepList(store: store)
                     TopList(store: store, order: .cpu)
                 case .network: NetworkDetail(store: store)
                 case .devices: DevicesDetail()
@@ -782,6 +783,57 @@ private struct AwakeList: View {
             }
         }
         .modifier(Hover())
+    }
+}
+
+/// How the Mac slept over the last day, from the power management log.
+/// pmset takes seconds of CPU to print it, so a reading is kept for five
+/// minutes across detail switches, not taken on a loop.
+private struct SleepList: View {
+    let store: Store
+    @State private var log = Self.kept?.log
+    @State private var failed = false
+    @MainActor private static var kept: (log: SleepLog, at: Date)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Sleep")
+            ListCard {
+                if let log {
+                    ValueRow(title: "Last slept", value: Self.describe(log.lastSleep))
+                    ValueRow(title: "Last woke", value: Self.describe(log.lastWake))
+                    ValueRow(title: "Upkeep wakes, past day", value: "\(log.darkWakes)")
+                    ValueRow(title: "Battery used asleep, past day", value: "\(log.drained) %", warn: log.drained >= 10)
+                    if failed {
+                        Text("Could not read the sleep log again; this is an earlier reading.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text(failed ? "Could not read the sleep log." : "Reading the sleep log…")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .task(id: store.monitor.readers.contains(.panel)) {
+            guard store.monitor.readers.contains(.panel),
+                  Self.kept.map({ Date.now.timeIntervalSince($0.at) > 300 }) ?? true else { return }
+            let read = await SleepLog.read(runner: ProcessRunner(timeout: 30))
+            guard !Task.isCancelled else { return }
+            failed = read == nil
+            if let read {
+                log = read
+                Self.kept = (read, .now)
+            }
+        }
+    }
+
+    /// "Lid closed · Thu 19:11", with the date once a week could make the
+    /// weekday ambiguous.
+    private static func describe(_ event: SleepLog.Event?) -> String {
+        guard let event else { return "Not in the last log" }
+        var format = Date.FormatStyle().weekday(.abbreviated).hour().minute()
+        if Date.now.timeIntervalSince(event.at) > 6 * 86_400 { format = format.day().month(.abbreviated) }
+        return "\(event.reason) · \(event.at.formatted(format))"
     }
 }
 
