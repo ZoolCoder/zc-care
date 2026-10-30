@@ -63,7 +63,9 @@ struct MacTab: View {
                     if let tiers = vitals.sensors?.tiers, !tiers.isEmpty { CoreList(tiers: tiers) }
                     if let sensors = vitals.sensors { SensorList(sensors: sensors) }
                     TopList(store: store, order: .cpu)
-                case .battery: if let battery = vitals.battery { BatteryDetail(battery: battery) }
+                case .battery:
+                    if let battery = vitals.battery { BatteryDetail(battery: battery) }
+                    TopList(store: store, order: .cpu)
                 case .network: NetworkDetail(store: store)
                 case nil: EmptyView()
                 }

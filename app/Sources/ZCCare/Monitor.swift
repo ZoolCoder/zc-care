@@ -15,7 +15,7 @@ final class Monitor {
     /// Set by the Store; what it names stays in the Free Up folders.
     var ignore = IgnoreList()
     var model = "Mac"
-    /// The busiest processes, while the memory or CPU tile is open.
+    /// The busiest processes, while the memory, CPU or battery detail is open.
     var top: [Proc] = []
     /// Rows readTop keeps: six for the panel's tiles, more while Performance shows.
     var topCount = 6

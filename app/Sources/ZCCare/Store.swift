@@ -40,7 +40,8 @@ final class Store {
     /// The Mac tab's open tile: what Free Up clears, or the busiest apps.
     var macDetail: MacDetail? {
         didSet {
-            monitor.order = macDetail == .memory ? .memory : macDetail == .cpu ? .cpu : nil
+            // Battery lists the busiest apps too: CPU is a large part of what drains it.
+            monitor.order = macDetail == .memory ? .memory : macDetail == .cpu || macDetail == .battery ? .cpu : nil
             if macDetail == .disk, monitor.junk.isEmpty { Task { await monitor.scan() } }
         }
     }
