@@ -1,5 +1,23 @@
 import Foundation
 
+/// When each alert was last posted, so one that comes and goes between
+/// refreshes, or comes back after a relaunch, posts once a day at most.
+public struct AlertLog: Codable, Sendable, Equatable {
+    public var posted: [String: Date] = [:]
+    public static let quiet: TimeInterval = 86400
+
+    public init() {}
+
+    /// The alerts not posted in the last day, which it records as posted;
+    /// older entries are forgotten.
+    public mutating func fresh(_ alerts: [Alert], now: Date = .now) -> [Alert] {
+        posted = posted.filter { now.timeIntervalSince($0.value) < Self.quiet }
+        let fresh = alerts.filter { posted[$0.id] == nil }
+        for a in fresh { posted[a.id] = now }
+        return fresh
+    }
+}
+
 /// Something a refresh found that the one before did not: worth a
 /// notification once, not on every refresh.
 public struct Alert: Sendable, Equatable {

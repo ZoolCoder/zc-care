@@ -87,6 +87,8 @@ final class Store {
         static let deletesPermanently = "deletesPermanently"
         static let leftoverAlerts = "leftoverAlerts"
         static let hadFullDisk = "hadFullDiskAccess"
+        static let vitalsPosted = "vitalsPosted"
+        static let alertLog = "alertLog"
     }
 
     /// A reading the menu bar can show beside the mark.
@@ -112,6 +114,9 @@ final class Store {
     private var discovery: Task<Void, Never>?
     private var watcher: Task<Void, Never>?
     private var watch = VitalsWatch()
+    /// When each refresh alert last posted, so one that comes and goes
+    /// posts once a day.
+    private var alertLog = AlertLog()
     private var leftoverWatch = LeftoverWatch()
     private let planFile = FileManager.default.temporaryDirectory.appendingPathComponent("zccare-plan.json").path
     let notifier = Notifier()
@@ -147,6 +152,8 @@ final class Store {
         barStats = Set((UserDefaults.standard.stringArray(forKey: Keys.barStats) ?? []).compactMap(BarStat.init))
         monitor.ignore = ignoreList
         watch.limits = vitalLimits
+        watch.posted = Self.load([String: Date].self, Keys.vitalsPosted) ?? [:]
+        alertLog = Self.load(AlertLog.self, Keys.alertLog) ?? AlertLog()
         if !barStats.isEmpty { monitor.start(.bar) }
         checkAccess()
         // A grant made in System Settings shows when the app comes back,
@@ -234,7 +241,9 @@ final class Store {
                 if notifies, vitalsAlerts {
                     let vitals = await monitor.watchSample(battery: check % 60 == 0, trash: check % 30 == 0,
                                                              devices: check % 10 == 0, apps: true)
-                    notifier.post(watch.alerts(for: vitals))
+                    let alerts = watch.alerts(for: vitals)
+                    notifier.post(alerts)
+                    if !alerts.isEmpty { Self.save(watch.posted, Keys.vitalsPosted) }
                 }
                 if notifies, leftoverAlerts {
                     if check % 5 == 0 { await watchLeftovers() }
@@ -361,7 +370,9 @@ final class Store {
             return
         }
         setupProblem = nil
-        careCLI = CareCLI(binary: binary, config: config, env: env)
+        // A read that hangs would keep refreshing on for ever; apply may
+        // install for long and is never cut short.
+        careCLI = CareCLI(binary: binary, config: config, env: env, reader: ProcessRunner(timeout: 300))
     }
 
     /// A read asked for while another runs is queued, so a change made in
@@ -388,7 +399,19 @@ final class Store {
         if let expanded { await loadItems(expanded) }
         // The first read has nothing to compare with: what is already
         // outstanding at launch is the badge's to show.
-        if notifies, let old { notifier.post(new.alerts(since: old, ignoring: ignored)) }
+        if notifies, let old {
+            let alerts = alertLog.fresh(new.alerts(since: old, ignoring: ignored))
+            notifier.post(alerts)
+            if !alerts.isEmpty { Self.save(alertLog, Keys.alertLog) }
+        }
+    }
+
+    private static func load<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
+        UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    }
+
+    private static func save<T: Encodable>(_ value: T, _ key: String) {
+        UserDefaults.standard.set(try? JSONEncoder().encode(value), forKey: key)
     }
 
     /// A remove or an adopt changed the config: what the lists and the
@@ -654,7 +677,7 @@ final class Store {
         else { return }
         busy = "\(action.rawValue.capitalized) \(item.name)"
         defer { busy = nil }
-        let r = try? await ProcessRunner().run(program, args, env: env)
+        let r = try? await ProcessRunner(timeout: 120).run(program, args, env: env)
         message = r?.status == 0
             ? Message(text: "\(item.name): \(action == .run ? "started" : action.rawValue + " done").", failed: false)
             : Message(text: "\(item.name): \(lastLine(of: r) ?? "\(action.rawValue) failed").", failed: true)

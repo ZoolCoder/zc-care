@@ -479,15 +479,20 @@ final class SystemUpdates {
     private(set) var failure: String?
     /// When the last check answered; a failed check leaves it, so the next open tries again.
     private(set) var checkedAt: Date?
+    /// When the last check began. Offline, softwareupdate takes up to 40 s
+    /// to fail, so opening the panel again soon after does not ask again.
+    private var triedAt: Date?
 
     func refreshIfStale() async {
         if let checkedAt, Date.now.timeIntervalSince(checkedAt) < 6 * 3600 { return }
+        if let triedAt, Date.now.timeIntervalSince(triedAt) < 15 * 60 { return }
         await check()
     }
 
     func check() async {
         guard !checking else { return }
         checking = true
+        triedAt = .now
         defer { checking = false }
         do {
             updates = try await MacUpdate.list()

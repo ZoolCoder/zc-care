@@ -36,7 +36,9 @@ public struct VitalLimits: Codable, Sendable, Equatable {
 public struct VitalsWatch: Sendable {
     public var limits: VitalLimits
     private var streaks: [String: Int] = [:]
-    private var posted: [String: Date] = [:]
+    /// When each kind last warned. The Store keeps it across launches, so
+    /// quitting and opening the app does not post the same warning again.
+    public var posted: [String: Date] = [:]
     private var lastCheck: Date?
 
     /// Checks in a row before memory or heat counts.

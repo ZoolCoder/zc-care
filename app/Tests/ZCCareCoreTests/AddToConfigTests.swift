@@ -40,3 +40,14 @@ private let wget = Item(name: "wget", kind: "brew", state: "not declared")
         #expect(error.localizedDescription == "error: choose a section: Tools")
     }
 }
+
+@Test func readsGoThroughTheReaderAndChangesThroughTheRunner() async throws {
+    let reader = Recorder(ok("[]"))
+    let runner = Recorder(ok("done"))
+    let cli = CareCLI(binary: "/zc", config: "/c.yaml", env: [:], runner: runner, reader: reader)
+    _ = try await cli.status()
+    #expect(reader.args == ["status", "-json"])
+    try await cli.add(target: "packages", item: wget, why: "w")
+    #expect(runner.args.first == "add")
+    #expect(reader.args == ["status", "-json"])
+}

@@ -289,3 +289,27 @@ struct EchoEnvRunner: Runner {
     #expect(s.drift?.targets?["packages"] == 3)
     #expect(s.security.map(\.title) == ["AI: MCP servers pinned to a version"])
 }
+
+@Test func alertLogPostsEachAlertOnceADay() throws {
+    var log = AlertLog()
+    let start = Date(timeIntervalSince1970: 1_000_000)
+    let a = Alert(id: "finding x", title: "x", body: "")
+    let b = Alert(id: "finding y", title: "y", body: "")
+    #expect(log.fresh([a], now: start).map(\.id) == ["finding x"])
+    #expect(log.fresh([a, b], now: start.addingTimeInterval(3600)).map(\.id) == ["finding y"])
+    // Kept across launches as JSON.
+    var back = try JSONDecoder().decode(AlertLog.self, from: JSONEncoder().encode(log))
+    #expect(back.fresh([a], now: start.addingTimeInterval(86400 - 1)).isEmpty)
+    #expect(back.fresh([a], now: start.addingTimeInterval(86400)).map(\.id) == ["finding x"])
+    #expect(back.posted.count == 2)
+}
+
+@Test func vitalsWatchKeepsStillWithARestoredLog() {
+    var watch = VitalsWatch(limits: VitalLimits())
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    watch.posted = ["disk": now.addingTimeInterval(-60)]
+    var v = Vitals()
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 1_000_000_000)
+    #expect(watch.alerts(for: v, now: now).isEmpty)
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(6 * 3600)).map(\.id) == ["vitals disk"])
+}
