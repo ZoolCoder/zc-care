@@ -80,6 +80,8 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's CPU and memory graphs have *Copy Readings*, which copies
+  each reading with its time as rows that paste into a spreadsheet.
 - The panel's Network detail shows the Wi-Fi link: signal and noise with
   a quality word, standard, channel, transmit rate and security, warning
   on an open, WEP or WPA network.
