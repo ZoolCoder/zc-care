@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "zc-care: skills and commands for keeping declared state in sync with one YAML file.",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "zc-care",
       "source": "./plugin",
       "description": "Set up the tool, plan and apply declared state, always plan before apply.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "category": "devops",
       "tags": ["declarative", "drift"]
     }

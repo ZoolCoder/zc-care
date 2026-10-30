@@ -4,7 +4,13 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
-## Unreleased
+## v0.4.0 — 2026-10-30
+
+The app grows into a full Mac care tool: a menu panel with live readings,
+alerts, Sensors, Battery, Network and Devices details, privacy
+traces and security settings in Protection, an app updater, Startup Disk and
+installer receipts, and a hardening pass over every removal and Put Back.
+Plans that overwrite outside edits or run scripts now ask first.
 
 ### ZC Care
 
