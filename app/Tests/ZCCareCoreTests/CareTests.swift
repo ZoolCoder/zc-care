@@ -71,6 +71,23 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(Leftovers.agents(in: found).map { URL(fileURLWithPath: $0).lastPathComponent } == ["com.x.app.helper.plist"])
 }
 
+@Test func leftoversStayInsideTheLibrary() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    try write(home.appendingPathComponent("Documents/keep"), bytes: 1)
+    try FileManager.default.createDirectory(at: home.appendingPathComponent("Library/Caches"), withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: home.appendingPathComponent("Library/Application Support"), withIntermediateDirectories: true)
+
+    // A planted app's Info.plist names a folder outside the Library.
+    for id in ["../../Documents", "", ".", "com.x/../../../Documents", "com.\u{0430}pple.x"] {
+        #expect(Leftovers.paths(bundleID: id, name: "Y", home: home.path).isEmpty, "\(id)")
+    }
+    for name in ["", ".", ".."] {
+        #expect(Leftovers.paths(bundleID: nil, name: name, home: home.path).isEmpty, "\(name)")
+    }
+    #expect(Leftovers.isBundleID("com.x-y.app_2"))
+}
+
 @Test func duplicateKeeperIsTheOldestCopy() {
     let old = LargeFile(url: URL(fileURLWithPath: "/u/Downloads/a/b/x.mov"), size: 1, modified: Date(timeIntervalSince1970: 10))
     let new = LargeFile(url: URL(fileURLWithPath: "/u/x.mov"), size: 1, modified: Date(timeIntervalSince1970: 20))
@@ -366,6 +383,11 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(CareSchedule.due(last: now.addingTimeInterval(-7 * 86400), now: now))
 
     #expect(CareSchedule.alerts(junk: 1024, outdated: 0, findings: 0).isEmpty)
+    var failing = DiskHealth()
+    failing.smart = "Failing"
+    #expect(CareSchedule.alerts(junk: 0, outdated: 0, findings: 0, drive: failing).map(\.id) == ["care drive"])
+    failing.smart = "Verified"
+    #expect(CareSchedule.alerts(junk: 0, outdated: 0, findings: 0, drive: failing).isEmpty)
     let alerts = CareSchedule.alerts(junk: 3 * 1024 * 1024 * 1024, outdated: 2, findings: 1)
     #expect(alerts.map(\.id) == ["care junk", "care updates", "care health"])
     #expect(alerts.allSatisfy { $0.id.hasPrefix("care") })
@@ -479,6 +501,8 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(Maintenance.tasks(brew: nil, docker: nil, xcode: false).allSatisfy { $0.id != "brew" && $0.id != "docker" })
     let verify = Maintenance.tasks(brew: nil, docker: nil, xcode: false).first { $0.id == "verify" }
     #expect(verify?.steps == [["/usr/sbin/diskutil", "verifyVolume", "/"]] && verify?.admin == false && verify?.every == nil)
+    let tasks = Maintenance.tasks(brew: nil, docker: nil, xcode: false)
+    #expect(tasks.first { $0.id == "quicklook" }?.admin == false && tasks.first { $0.id == "fonts" }?.admin == false)
     let docker = Maintenance.tasks(brew: "/b", docker: "/d", xcode: true).first { $0.id == "docker" }
     #expect(docker != nil)
     #expect(docker?.steps.allSatisfy { !$0.contains("system") && !$0.contains("container") } == true)
@@ -855,4 +879,19 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     let found = spot.inUse(commands: ["node /h/.npm/_npx/ab12/node_modules/.bin/mcp --x", "/h/.npm/_npx/cd34 a /h/.npm/_npx/ef56/b",
                                       "node /h/.npm/_npxother/zz"])
     #expect(found == ["ab12", "cd34", "ef56"])
+}
+
+@Test func largeFilesSortByKindAndAge() {
+    let kinds = ["a.mov": FileKind.videos, "b.MP4": .videos, "c.m4a": .music, "d.heic": .pictures, "e.zip": .archives,
+                 "f.tar.gz": .archives, "g.dmg": .installers, "h.pkg": .installers, "i.pdf": .documents, "j.key": .documents,
+                 "k.qqzz": .other, "noext": .other]
+    for (name, kind) in kinds {
+        #expect(FileKind.of(URL(fileURLWithPath: "/u/" + name)) == kind, "\(name)")
+    }
+    let now = Date(timeIntervalSince1970: 400 * 86400)
+    var file = LargeFile(url: URL(fileURLWithPath: "/u/a.mov"), size: 1, modified: Date(timeIntervalSince1970: 0))
+    #expect(FileKind.unopened(file, now: now))
+    file.opened = Date(timeIntervalSince1970: 300 * 86400)
+    #expect(!FileKind.unopened(file, now: now))
+    #expect(!FileKind.unopened(LargeFile(url: file.url, size: 1), now: now))
 }

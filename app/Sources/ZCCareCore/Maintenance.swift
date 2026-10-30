@@ -15,6 +15,8 @@ public struct MaintenanceTask: Sendable, Equatable, Identifiable {
     /// How often Smart Care suggests it; nil for a task run only when
     /// something is wrong.
     public var every: TimeInterval?
+    /// Set over the login environment for each step.
+    public var env: [String: String] = [:]
 }
 
 public enum Maintenance {
@@ -43,10 +45,18 @@ public enum Maintenance {
                             detail: "Drops apps that are gone and registers those in /Applications again.",
                             symbol: "contextualmenu.and.cursorarrow",
                             steps: [[lsregister, "-gc"], [lsregister, "-r", "/Applications"]], every: 30 * day),
+            MaintenanceTask(id: "quicklook", title: "Reset Quick Look",
+                            detail: "Clears stale thumbnails and previews, and reloads preview plug-ins.",
+                            symbol: "eye.fill", steps: [["/usr/bin/qlmanage", "-r", "cache"], ["/usr/bin/qlmanage", "-r"]]),
+            // Only this user's caches: the system ones need a restart in Safe Mode.
+            MaintenanceTask(id: "fonts", title: "Clear Font Caches",
+                            detail: "Fixes garbled or missing fonts; apps rebuild the caches as they open.",
+                            symbol: "textformat", steps: [["/usr/bin/atsutil", "databases", "-removeUser"]]),
         ]
         if let brew {
             tasks.append(MaintenanceTask(id: "brew", title: "Clean Up Homebrew", detail: "Removes old versions and every cached download.",
-                                         symbol: "mug.fill", steps: [[brew, "cleanup", "--prune=all"]], every: 14 * day))
+                                         symbol: "mug.fill", steps: [[brew, "cleanup", "--prune=all"]], every: 14 * day,
+                                         env: Homebrew.quiet))
         }
         if xcode {
             tasks.append(MaintenanceTask(id: "simulators", title: "Delete Unavailable Simulators",

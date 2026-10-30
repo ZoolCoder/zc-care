@@ -56,6 +56,9 @@ public struct LargeFile: Codable, Sendable, Equatable, Identifiable {
     public var url: URL
     public var size: Int64
     public var modified: Date?
+    /// When it was last opened, as Spotlight knows it; nil when never or
+    /// not known.
+    public var opened: Date?
 
     public init(url: URL, size: Int64, modified: Date? = nil) {
         self.url = url
@@ -76,7 +79,11 @@ public enum LargeFiles {
     /// app bundles are left out: what lives there belongs to apps, and
     /// Cleanup covers their caches.
     public static func files(paths: [String], home: String, minimum: Int64, limit: Int = 60) -> [LargeFile] {
-        Array(candidates(paths: paths, home: home, minimum: minimum).sorted { $0.size > $1.size }.prefix(limit))
+        candidates(paths: paths, home: home, minimum: minimum).sorted { $0.size > $1.size }.prefix(limit).map { file in
+            var file = file
+            file.opened = FileKind.lastOpened(file.url)
+            return file
+        }
     }
 
     /// Folders a package manager or build fills: what is in them comes back
@@ -134,6 +141,11 @@ public struct InstalledApp: Codable, Sendable, Equatable, Identifiable {
     public var lastUsed: Date?
     /// When it landed in Applications; an update counts as landing again.
     public var added: Date?
+    /// Its executable has Intel code only, so it needs Rosetta.
+    public var intelOnly: Bool?
+
+    /// In /Applications, where Homebrew and the App Store put apps.
+    public var inApplications: Bool { url.deletingLastPathComponent().path == "/Applications" }
 
     public init(name: String, url: URL, bundleID: String?, source: Source, declared: Item? = nil) {
         self.name = name
@@ -185,13 +197,16 @@ public enum AppCatalog {
 
     /// Every app in the folder, sources and Brewfile entries filled in;
     /// sizes and last use are read separately, being slow.
-    public static func apps(in folder: URL, caskApps: [String: String], items: [Item]) -> [InstalledApp] {
+    /// `managed` is false for a folder Homebrew and the Brewfile do not
+    /// install into, such as ~/Applications: an app there is a copy of its
+    /// own, so uninstalling it never runs brew on the one in /Applications.
+    public static func apps(in folder: URL, caskApps: [String: String], items: [Item], managed: Bool = true) -> [InstalledApp] {
         let all = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         return all.filter { $0.pathExtension == "app" }.map { url in
             let file = url.lastPathComponent
             let name = url.deletingPathExtension().lastPathComponent
             let source: InstalledApp.Source
-            if let token = caskApps[file] {
+            if managed, let token = caskApps[file] {
                 source = .cask(token)
             } else if FileManager.default.fileExists(atPath: url.path + "/Contents/_MASReceipt/receipt") {
                 source = .appStore
@@ -199,9 +214,16 @@ public enum AppCatalog {
                 source = .other
             }
             return InstalledApp(name: name, url: url, bundleID: Bundle(url: url)?.bundleIdentifier, source: source,
-                                declared: declared(name: name, source: source, items: items))
+                                declared: managed ? declared(name: name, source: source, items: items) : nil)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// The apps installed more than once: each copy that shares its bundle
+    /// id with another, by path.
+    public static func copies(_ apps: [InstalledApp]) -> Set<String> {
+        let counts = Dictionary(apps.compactMap(\.bundleID).map { ($0, 1) }, uniquingKeysWith: +)
+        return Set(apps.filter { counts[$0.bundleID ?? ""] ?? 0 > 1 }.map(\.id))
     }
 }
 
@@ -222,8 +244,8 @@ public enum Leftovers {
     /// com.google.Chrome.canary does com.google.Chrome, stays.
     public static func paths(bundleID: String?, name: String, home: String, installed: Set<String> = []) -> [String] {
         let lib = home + "/Library/"
-        var candidates = [lib + "Application Support/" + name, lib + "Logs/" + name]
-        if let id = bundleID {
+        var candidates = isFileName(name) ? [lib + "Application Support/" + name, lib + "Logs/" + name] : []
+        if let id = bundleID, isBundleID(id) {
             candidates += [
                 lib + "Application Support/" + id,
                 lib + "Caches/" + id,
@@ -245,6 +267,18 @@ public enum Leftovers {
             }
         }
         return candidates.filter { FileManager.default.fileExists(atPath: $0) }
+    }
+
+    /// A bundle id as macOS allows them: anything else, such as
+    /// `../../Documents` in a planted app's Info.plist, would reach outside
+    /// the Library folder it is joined to.
+    static func isBundleID(_ id: String) -> Bool {
+        id.first.map { $0.isASCII && ($0.isLetter || $0.isNumber) } == true && !id.contains("..")
+            && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) }
+    }
+
+    static func isFileName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.contains("/")
     }
 
     private static func belongsToOther(_ file: String, id: String, _ installed: Set<String>) -> Bool {
