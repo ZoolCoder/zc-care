@@ -127,8 +127,8 @@ The panel's settings turn on:
 - the weekly Smart Care scan
 - opening at login
 
-Each tile on the Mac tab opens a detail. *Free Up* on Disk lists
-connected drives, disk images and shares, each with an Eject button, then
+Each tile on the Mac tab opens a detail. *Free Up* on Disk shows
+what the drives read and write each second, lists connected drives, disk images and shares, each with an Eject button, then
 the folders it can clear, with their sizes. *Free Up* on Memory splits
 memory into app memory, wired, compressed, cached files, free and swap. *Top Apps* on CPU lists what is
 busy. *Details* on Battery shows its condition, capacity, cycles,
