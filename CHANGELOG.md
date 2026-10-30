@@ -80,9 +80,12 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
-- The panel's Devices tile opens a detail with the displays in use, built
-  in or external, their pixels and refresh rate, and what is plugged into
-  the USB ports, hubs included.
+- The panel's Battery detail shows when the Mac last slept and woke and
+  why, how often it woke briefly for upkeep over the past day, and how much
+  battery it used asleep, from the power management log.
+- The panel's Devices tile opens a detail with the displays in use,
+  external ones marked, their pixels and refresh rate, and what is plugged
+  into the USB ports, hubs included.
 - The panel's Network detail lists the five processes moving the most
   data, with how fast each receives and sends, measured with nettop while
   the detail is open; the first rates take about ten seconds.
