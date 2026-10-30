@@ -190,6 +190,17 @@ here with what to edit.
   Vitals warnings remember their quiet time across relaunches; a finding,
   drift or update notice posts once a day at most; a failed macOS update
   check waits 15 minutes before the panel asks again.
+- Removals check again at the moment they act, since a list may be days
+  old: an app reinstalled, or a vendor's app installed, since Applications'
+  Leftovers was read keeps its folders; an Ollama model removes only the
+  blobs it still owns alone, refuses while `ollama pull` or `create` runs,
+  and stops if the model was pulled again; a Space Lens item is measured
+  afresh and refused if a part of its path became a link; a dependency
+  folder stays if its project changed in the last 90 days; a Mail
+  attachment removed from its row asks for Mail to quit first; Keep Oldest
+  cannot run twice at once. Removing a cloud download no longer freezes the
+  window while the provider answers. Duplicates list the 500 biggest
+  wastes and Mail attachments the 1,000 biggest files.
 
 ### Docs
 
