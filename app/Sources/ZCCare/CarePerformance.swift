@@ -94,7 +94,7 @@ struct PerformanceView: View {
                             .frame(width: 160)
                         }
                         VStack(spacing: 0) {
-                            ForEach(care.monitor.top) { p in
+                            ForEach(care.monitor.performanceTop) { p in
                                 CareRow(icon: SymbolTile(symbol: "cpu", colors: Tint.violet, size: 32),
                                     title: p.name, detail: processDetail(p),
                                     value: order == .cpu ? String(format: "%.0f%% CPU", p.cpu) : Store.bytes(p.memory, .memory)) {
@@ -116,14 +116,17 @@ struct PerformanceView: View {
         // ps every three seconds while the module shows.
         .task(id: [order == .cpu, showMore, shows(.processes)]) {
             guard shows(.processes) else { return }
-            care.monitor.order = order
-            care.monitor.topCount = showMore ? 25 : 10
+            if care.monitor.performance?.order != order { care.monitor.performanceTop = [] }
+            care.monitor.performance = (order, showMore ? 25 : 10)
             while !Task.isCancelled {
-                await care.monitor.readTop()
+                await care.monitor.readPerformanceTop()
                 try? await Task.sleep(for: .seconds(3))
             }
         }
-        .onDisappear { care.monitor.topCount = 6 }
+        .onDisappear {
+            care.monitor.performance = nil
+            care.monitor.performanceTop = []
+        }
     }
 
     private func shows(_ p: Part) -> Bool { part == .all || part == p }
@@ -180,7 +183,7 @@ private struct ProcessControls: View {
         if !end(force: force) {
             care.store.message = Store.Message(text: "Could not quit \(proc.name); macOS did not allow it.", failed: true)
         }
-        Task { await care.monitor.readTop() }
+        Task { await care.monitor.readPerformanceTop() }
     }
 
     /// Apps close the polite way; anything else gets a signal.

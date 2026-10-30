@@ -12,6 +12,16 @@ struct Sampler {
     private var lastTicks: (busy: UInt64, total: UInt64)?
     private var lastBytes: (interface: String, down: UInt64, up: UInt64, at: Date)?
     private var lastDisk: (drives: [UInt64: DiskIO.Counter], at: Date)?
+
+    mutating func forgetRates() {
+        lastTicks = nil
+        lastBytes = nil
+        forgetDisk()
+    }
+
+    mutating func forgetDisk() {
+        lastDisk = nil
+    }
     /// Made once: a dynamic store is a connection to configd.
     private let store = SCDynamicStoreCreate(nil, "ZCCare" as CFString, nil, nil)
     /// Wi-Fi interface names, asked of CoreWLAN once.

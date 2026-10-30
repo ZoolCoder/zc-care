@@ -4,11 +4,17 @@ import CoreWLAN
 import SwiftUI
 import ZCCareCore
 
+extension EnvironmentValues {
+    /// Which window the panel's views are in; the floating panel sets it.
+    @Entry var panelHost: Monitor.Host = .menu
+}
+
 /// The Mac itself: a grade, protection, a tile for each vital, and one
 /// recommendation. It samples only while it shows.
 struct MacTab: View {
     @Bindable var store: Store
     let snapshot: Snapshot
+    @Environment(\.panelHost) private var host
     private var open: Store.MacDetail? { store.macDetail }
 
     private var monitor: Monitor { store.monitor }
@@ -24,10 +30,11 @@ struct MacTab: View {
                     withAnimation { proxy.scrollTo("detail", anchor: .top) }
                 }
         }
-        .onAppear { monitor.start() }
+        .onAppear { monitor.start(host: host) }
         .onDisappear {
-            monitor.stop()
-            store.macDetail = nil
+            monitor.stop(host: host)
+            // The other host's tab may still show it.
+            if !monitor.readers.contains(.panel) { store.macDetail = nil }
         }
     }
 

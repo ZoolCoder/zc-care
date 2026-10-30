@@ -17,8 +17,8 @@ final class Monitor {
     var model = "Mac"
     /// The busiest processes, while the memory, CPU or battery detail is open.
     var top: [Proc] = []
-    /// Rows readTop keeps: six for the panel's tiles, more while Performance shows.
-    var topCount = 6
+    /// Rows readTop keeps for the panel's tiles.
+    private let topCount = 6
     var order: Order? {
         didSet {
             guard order != oldValue else { return }
@@ -26,6 +26,11 @@ final class Monitor {
             Task { await readTop() }
         }
     }
+    /// Performance's own list, apart from the panel's, so each keeps its
+    /// order when both show.
+    var performanceTop: [Proc] = []
+    /// What Performance shows, while it does: the order and how many rows.
+    var performance: (order: Order, count: Int)?
     /// External drives, disk images and shares, while the panel shows.
     var volumes: [Volume] = []
     /// Volumes being ejected, by path.
@@ -52,22 +57,71 @@ final class Monitor {
     /// the cheap ones.
     enum Reader { case panel, bar }
 
+    /// Where a Mac tab shows: the menu bar's window and the floating panel
+    /// can both show one, and one closing must not stop the other's.
+    enum Host: Hashable { case menu, window }
+
     private var sampler = Sampler()
     private var loop: Task<Void, Never>?
     private(set) var readers: Set<Reader> = []
+    private var hosts: Set<Host> = []
+    /// While the Mac or its displays sleep nothing samples, as no one sees
+    /// the readings; waking starts again afresh. Two flags, as the Mac can
+    /// wake for upkeep with its displays still off.
+    private var systemAsleep = false
+    private var screensAsleep = false
     private var tick = 0
     private let macmon = ["/opt/homebrew/bin/macmon", "/usr/local/bin/macmon"].first(where: FileManager.default.isExecutableFile)
 
-    func start(_ reader: Reader = .panel) {
+    init() {
+        let center = NSWorkspace.shared.notificationCenter
+        let names = [NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification,
+                     NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification]
+        for name in names {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let name = note.name
+                MainActor.assumeIsolated { self?.power(name) }
+            }
+        }
+    }
+
+    func start(_ reader: Reader = .panel, host: Host = .menu) {
         readers.insert(reader)
-        // The tab opening reads the slow parts at once, and the connection
-        // before them, so the Network detail never shows the last one.
         if reader == .panel {
+            // The menu bar's loop does not read the disk: its last count is
+            // from when the tab last showed.
+            if hosts.isEmpty {
+                sampler.forgetDisk()
+                vitals.diskIO = nil
+            }
+            hosts.insert(host)
+            // The tab opening reads the slow parts at once, and the
+            // connection before them, so the Network detail never shows the
+            // last one.
             tick = 0
             connection = sampler.connection()
             connectionRead = true
         }
-        guard loop == nil else { return }
+        run()
+    }
+
+    func stop(_ reader: Reader = .panel, host: Host = .menu) {
+        if reader == .panel {
+            hosts.remove(host)
+            guard hosts.isEmpty else { return }
+            connectionRead = false
+        }
+        readers.remove(reader)
+        guard readers.isEmpty else { return }
+        halt()
+    }
+
+    private func run() {
+        guard loop == nil, !systemAsleep, !screensAsleep, !readers.isEmpty else { return }
+        // Rates are differences from the last read: one from before a stop
+        // would average over the whole gap.
+        sampler.forgetRates()
+        vitals.diskIO = nil
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.sample()
@@ -76,15 +130,27 @@ final class Monitor {
         }
     }
 
-    func stop(_ reader: Reader = .panel) {
-        readers.remove(reader)
-        if reader == .panel { connectionRead = false }
-        guard readers.isEmpty else { return }
+    private func halt() {
         loop?.cancel()
         loop = nil
         // A gap would join two times as one line.
         cpuHistory.clear()
         memoryHistory.clear()
+    }
+
+    private func power(_ name: NSNotification.Name) {
+        switch name {
+        case NSWorkspace.willSleepNotification: systemAsleep = true
+        case NSWorkspace.didWakeNotification: systemAsleep = false
+        case NSWorkspace.screensDidSleepNotification: screensAsleep = true
+        default: screensAsleep = false
+        }
+        if systemAsleep || screensAsleep {
+            halt()
+        } else if loop == nil {
+            tick = 0
+            run()
+        }
     }
 
     private func sample() async {
@@ -117,6 +183,9 @@ final class Monitor {
             }
         }
         if panel, tick % 30 == 0 { await readSystemProfile(into: &v) }
+        // A stop while it waited cleared the history: writing the copies
+        // back would bring it back, or overwrite a newer loop's readings.
+        guard !Task.isCancelled else { return }
         // Written beside the vitals, so a tick stays one redraw.
         cpuHistory = cpu
         memoryHistory = memoryUsed
@@ -124,7 +193,9 @@ final class Monitor {
         // Apart from the copy above, which would bring back a drive ejected
         // while it waited.
         if panel, tick % 5 == 0 { await readVolumes() }
-        if order != nil, tick % 2 == 1 { await readTop() }
+        if panel, order != nil, tick % 2 == 1 { await readTop() }
+        // A loop started since counts from 0; this one must not move it on.
+        guard !Task.isCancelled else { return }
         tick += 1
     }
 
@@ -148,11 +219,21 @@ final class Monitor {
     }
 
     func readTop() async {
-        guard let order else { return }
-        let args = ["-Aceo", "pid=,pcpu=,rss=,uid=,ppid=,stat=,comm=", order == .memory ? "-m" : "-r"]
-        guard let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", args, env: [:]), self.order == order else { return }
-        let next = Array(Proc.parse(ps: r.output, detailed: true).prefix(topCount))
+        guard let order, let next = await Self.busiest(order, count: topCount), self.order == order else { return }
         if next != top { top = next }
+    }
+
+    func readPerformanceTop() async {
+        guard let wanted = performance,
+              let next = await Self.busiest(wanted.order, count: wanted.count),
+              performance?.order == wanted.order else { return }
+        if next != performanceTop { performanceTop = next }
+    }
+
+    private static func busiest(_ order: Order, count: Int) async -> [Proc]? {
+        let args = ["-Aceo", "pid=,pcpu=,rss=,uid=,ppid=,stat=,comm=", order == .memory ? "-m" : "-r"]
+        guard let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", args, env: [:]) else { return nil }
+        return Array(Proc.parse(ps: r.output, detailed: true).prefix(count))
     }
 
     /// Sizes every Free Up folder at once, off the main thread: caches run
