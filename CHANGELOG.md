@@ -89,6 +89,8 @@ here with what to edit.
 - Vitals alerts warn once a day when the Trash holds more than a limit
   Settings sets, 5 GB at first; the notification opens Cleanup. Limits
   saved by an older version are kept.
+- Vitals alerts warn when a connected Bluetooth device's battery falls to
+  a limit, 20 % at first, at most every six hours per device.
 - Homebrew offers no formula for removal when `brew info` or `brew deps`
   fails, and says why a kept formula stays.
 - Intel Only no longer hangs on an app whose executable is not a file.
