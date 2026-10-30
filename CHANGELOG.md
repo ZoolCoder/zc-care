@@ -82,6 +82,9 @@ here with what to edit.
   emptied.
 - The panel's CPU and memory graphs have *Copy Readings*, which copies
   each reading with its time as rows that paste into a spreadsheet.
+- The panel's Network detail names the proxies in use (HTTP, HTTPS, SOCKS,
+  FTP, automatic configuration or discovery) and the VPNs up beside the main
+  connection.
 - The panel's Network detail shows the Wi-Fi link: signal and noise with
   a quality word, standard, channel, transmit rate and security, warning
   on an open, WEP or WPA network.
