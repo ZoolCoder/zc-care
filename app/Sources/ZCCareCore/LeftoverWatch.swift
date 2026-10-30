@@ -50,9 +50,10 @@ public struct LeftoverWatch: Sendable {
         return found
     }
 
-    /// A folder name fit for a notification: one short line.
+    /// A folder or device name fit for a notification: one short line.
     static func shown(_ name: String) -> String {
-        let line = String(name.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }.map(Character.init))
+        let breaks = CharacterSet.controlCharacters.union(.newlines)
+        let line = String(name.unicodeScalars.filter { !breaks.contains($0) }.map(Character.init))
         return line.count > 40 ? line.prefix(39) + "…" : line
     }
 }

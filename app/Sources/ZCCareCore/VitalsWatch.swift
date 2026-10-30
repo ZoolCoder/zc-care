@@ -7,6 +7,8 @@ public struct VitalLimits: Codable, Sendable, Equatable {
     public var cpuTemp = 95
     public var batteryCapacity = 80
     public var trashGB = 5
+    /// A Bluetooth device's battery, in percent.
+    public var deviceBattery = 20
 
     public init() {}
 
@@ -19,6 +21,7 @@ public struct VitalLimits: Codable, Sendable, Equatable {
         cpuTemp = try c.decodeIfPresent(Int.self, forKey: .cpuTemp) ?? cpuTemp
         batteryCapacity = try c.decodeIfPresent(Int.self, forKey: .batteryCapacity) ?? batteryCapacity
         trashGB = try c.decodeIfPresent(Int.self, forKey: .trashGB) ?? trashGB
+        deviceBattery = try c.decodeIfPresent(Int.self, forKey: .deviceBattery) ?? deviceBattery
     }
 }
 
@@ -35,6 +38,8 @@ public struct VitalsWatch: Sendable {
     static let quiet: [String: TimeInterval] = [
         "disk": 6 * 3600, "memory": 3600, "heat": 3600, "battery": 7 * 86400, "trash": 86400,
     ]
+    /// Each device keeps still this long once it has warned.
+    static let deviceQuiet: TimeInterval = 6 * 3600
 
     public init(limits: VitalLimits = VitalLimits()) {
         self.limits = limits
@@ -45,7 +50,8 @@ public struct VitalsWatch: Sendable {
         func check(_ kind: String, _ over: Bool, needs streak: Int = 1, _ alert: () -> Alert) {
             streaks[kind] = over ? streaks[kind, default: 0] + 1 : 0
             guard over, streaks[kind, default: 0] >= streak else { return }
-            if let last = posted[kind], now.timeIntervalSince(last) < Self.quiet[kind, default: 3600] { return }
+            let quiet = kind.hasPrefix("device ") ? Self.deviceQuiet : Self.quiet[kind, default: 3600]
+            if let last = posted[kind], now.timeIntervalSince(last) < quiet { return }
             posted[kind] = now
             alerts.append(alert())
         }
@@ -79,7 +85,29 @@ public struct VitalsWatch: Sendable {
                       body: "Files in the Trash still take space until it is emptied. Cleanup can empty it.")
             }
         }
+        // Devices that share a name count as one, at the lowest level.
+        let levels = v.devices.reduce(into: [String: Int]()) { levels, device in
+            guard let level = device.battery else { return }
+            levels[device.name] = min(level, levels[device.name] ?? level)
+        }
+        if !v.devices.isEmpty { forgetDevices(except: Set(levels.keys), now: now) }
+        for (name, level) in levels.sorted(by: { $0.key < $1.key }) {
+            check("device " + name, level <= limits.deviceBattery) {
+                // Quoted: a device chooses its own name.
+                let shown = LeftoverWatch.shown(name)
+                return Alert(id: "vitals device " + shown, title: "“\(shown)” is low on battery",
+                             body: "\(level)% left. Charge it soon.")
+            }
+        }
         return alerts
+    }
+
+    /// Drops what the watch keeps for devices no longer connected, once
+    /// their quiet time is over, so names seen once do not pile up.
+    private mutating func forgetDevices(except connected: Set<String>, now: Date) {
+        let gone = { (key: String) in key.hasPrefix("device ") && !connected.contains(String(key.dropFirst("device ".count))) }
+        streaks = streaks.filter { !gone($0.key) }
+        posted = posted.filter { !gone($0.key) || now.timeIntervalSince($0.value) < Self.deviceQuiet }
     }
 
     private static func gb(_ bytes: Int64) -> String {

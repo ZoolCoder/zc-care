@@ -133,6 +133,8 @@ struct SettingsView: View {
                             value: $store.vitalLimits.batteryCapacity, in: 50...95, step: 5)
                     Stepper("Trash over \(store.vitalLimits.trashGB) GB",
                             value: $store.vitalLimits.trashGB, in: 1...100, step: 1)
+                    Stepper("Bluetooth device battery at \(store.vitalLimits.deviceBattery)%",
+                            value: $store.vitalLimits.deviceBattery, in: 5...50, step: 5)
                 }
                 .disabled(!store.vitalsAlerts || !store.notifies)
             } header: {

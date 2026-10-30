@@ -205,7 +205,8 @@ final class Store {
             while !Task.isCancelled {
                 guard let self else { return }
                 if notifies, vitalsAlerts {
-                    let vitals = await monitor.watchSample(battery: check % 60 == 0, trash: check % 30 == 0)
+                    let vitals = await monitor.watchSample(battery: check % 60 == 0, trash: check % 30 == 0,
+                                                             devices: check % 10 == 0)
                     notifier.post(watch.alerts(for: vitals))
                 }
                 if notifies, leftoverAlerts {

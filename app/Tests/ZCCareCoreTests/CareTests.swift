@@ -858,7 +858,38 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
 @Test func vitalLimitsKeepOldSettings() throws {
     let old = #"{"diskFreeGB":40,"memoryPressure":90,"cpuTemp":100,"batteryCapacity":60}"#
     let limits = try JSONDecoder().decode(VitalLimits.self, from: Data(old.utf8))
-    #expect(limits.diskFreeGB == 40 && limits.batteryCapacity == 60 && limits.trashGB == 5)
+    #expect(limits.diskFreeGB == 40 && limits.batteryCapacity == 60 && limits.trashGB == 5 && limits.deviceBattery == 20)
+}
+
+@Test func vitalsWatchWarnsOfEachLowDeviceOnItsOwn() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    let now = Date(timeIntervalSince1970: 0)
+    v.devices = [Device(name: "AirPods", kind: "Headphones", battery: 20), Device(name: "Mouse", kind: "Mouse", battery: 60),
+                 Device(name: "Speaker", kind: "Speaker")]
+    #expect(watch.alerts(for: v, now: now).map(\.title) == ["“AirPods” is low on battery"])
+    v.devices[1].battery = 10
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(600)).map(\.id) == ["vitals device Mouse"])
+    // A sample without devices, or one without the AirPods, keeps their quiet time.
+    v.devices = []
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(1200)).isEmpty)
+    v.devices = [Device(name: "Mouse", kind: "Mouse", battery: 10)]
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(1800)).isEmpty)
+    v.devices = [Device(name: "AirPods", kind: "Headphones", battery: 15)]
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(3600)).isEmpty)
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(6 * 3600)).map(\.id) == ["vitals device AirPods"])
+}
+
+@Test func vitalsWatchNamesTwoLowDevicesApart() {
+    var limits = VitalLimits()
+    limits.deviceBattery = 40
+    var watch = VitalsWatch(limits: limits)
+    var v = Vitals()
+    v.devices = [Device(name: "Keyboard", kind: "Keyboard", battery: 35), Device(name: "Mouse", kind: "Mouse", battery: 30),
+                 Device(name: "Mouse", kind: "Mouse", battery: 80), Device(name: "Pods\u{1B}[2J\u{2028}x", kind: "Headphones", battery: 5)]
+    let alerts = watch.alerts(for: v)
+    #expect(alerts.map(\.id) == ["vitals device Keyboard", "vitals device Mouse", "vitals device Pods[2Jx"])
+    #expect(alerts[1].body == "30% left. Charge it soon.")
 }
 
 @Test func largeFilesLeaveAppLibrariesAlone() {
