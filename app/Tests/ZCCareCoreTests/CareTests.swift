@@ -805,7 +805,7 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     try Data("x".utf8).write(to: binned)
 
     var entry = ActivityEntry(kind: .files, title: "report.pdf", bytes: 1,
-                              trashed: [Trashed(original: home, inTrash: binned)])
+                              trashed: [trashedRecord(home, at: binned)])
     #expect(entry.canPutBack(home: root.path))
     #expect(Trashed.putBack(entry.trashed ?? [], home: root.path).isEmpty)
     #expect(FileManager.default.fileExists(atPath: home.path))
@@ -826,7 +826,7 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     try Data("new".utf8).write(to: home)
     try Data("old".utf8).write(to: binned)
 
-    let entry = ActivityEntry(kind: .files, title: "a.txt", bytes: 3, trashed: [Trashed(original: home, inTrash: binned)])
+    let entry = ActivityEntry(kind: .files, title: "a.txt", bytes: 3, trashed: [trashedRecord(home, at: binned)])
     #expect(!entry.canPutBack(home: root.path))
     #expect(Trashed.putBack(entry.trashed ?? [], home: root.path) == ["a.txt"])
     #expect(try String(contentsOf: home, encoding: .utf8) == "new")
@@ -1026,7 +1026,7 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
 
 @Test func activityLogForgetsOldTrashPathsAndStaysSmall() {
     let now = Date()
-    let item = Trashed(original: URL(fileURLWithPath: "/a"), inTrash: URL(fileURLWithPath: "/b"))
+    let item = Trashed(original: URL(fileURLWithPath: "/a"), inTrash: URL(fileURLWithPath: "/b"), identity: nil)
     var log = ActivityLog(entries: [ActivityEntry(date: now.addingTimeInterval(-40 * 86400), kind: .files, title: "old", bytes: 1, trashed: [item])])
     log.add(ActivityEntry(date: now, kind: .files, title: "new", bytes: 1, trashed: [item]), now: now)
     #expect(log.entries[0].trashed == nil)

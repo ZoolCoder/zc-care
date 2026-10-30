@@ -38,7 +38,7 @@ private func write(_ url: URL, bytes: Int) throws {
     try write(binnedB, bytes: 4096)
     try Data("new".utf8).write(to: b)
     var entry = ActivityEntry(kind: .files, title: "two", bytes: 8192,
-                              trashed: [Trashed(original: a, inTrash: binnedA), Trashed(original: b, inTrash: binnedB)])
+                              trashed: [trashedRecord(a, at: binnedA), trashedRecord(b, at: binnedB)])
     #expect(entry.canPutBack(home: root.path))
     #expect(entry.putBackFromTrash(home: root.path) == ["b.txt"])
     #expect(FileManager.default.fileExists(atPath: a.path))
@@ -59,7 +59,7 @@ private func write(_ url: URL, bytes: Int) throws {
     let original = root.appendingPathComponent("Downloads/Report.pdf")
     let binned = root.appendingPathComponent(".Trash/Report.pdf")
     try write(binned, bytes: 4096)
-    let record = Trashed(original: original, inTrash: binned)
+    let record = trashedRecord(original, at: binned)
     #expect(record.canRestore(home: root.path))
 
     // The Trash is emptied, and another Report.pdf lands under the same name.
@@ -73,7 +73,7 @@ private func write(_ url: URL, bytes: Int) throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let elsewhere = root.appendingPathComponent("Documents/Report.pdf")
     try write(elsewhere, bytes: 4096)
-    let record = Trashed(original: root.appendingPathComponent("Downloads/Report.pdf"), inTrash: elsewhere)
+    let record = trashedRecord(root.appendingPathComponent("Downloads/Report.pdf"), at: elsewhere)
     #expect(!record.canRestore(home: root.path))
 }
 
@@ -83,7 +83,7 @@ private func write(_ url: URL, bytes: Int) throws {
     let binned = root.appendingPathComponent(".Trash/chat.db")
     try write(binned, bytes: 4096)
     let original = root.appendingPathComponent("Public/chat.db")
-    var record = Trashed(original: original, inTrash: binned)
+    var record = trashedRecord(original, at: binned)
     #expect(record.canRestore(home: root.path))
 
     // A record without file numbers, as an older log or another program writes it.
@@ -97,7 +97,7 @@ private func write(_ url: URL, bytes: Int) throws {
     let decoy = root.appendingPathComponent("tmp/.Trash")
     try FileManager.default.createDirectory(at: decoy.deletingLastPathComponent(), withIntermediateDirectories: true)
     try FileManager.default.createSymbolicLink(at: decoy, withDestinationURL: messages.deletingLastPathComponent())
-    let lured = Trashed(original: original, inTrash: decoy.appendingPathComponent("chat.db"))
+    let lured = trashedRecord(original, at: decoy.appendingPathComponent("chat.db"))
     #expect(lured.inode != nil)
     #expect(!lured.canRestore(home: root.path))
 
@@ -105,12 +105,14 @@ private func write(_ url: URL, bytes: Int) throws {
     record.inTrash = binned.path
     let link = root.appendingPathComponent("Link")
     try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root.appendingPathComponent("Elsewhere"))
-    record.original = link.appendingPathComponent("chat.db").path
-    #expect(!record.canRestore(home: root.path))
-    record.original = root.appendingPathComponent("Library/Application Support/com.apple.TCC/TCC.db").path
-    #expect(!record.canRestore(home: root.path))
-    record.original = root.path + "/Public/../Library/chat.db"
-    #expect(!record.canRestore(home: root.path))
+    // Each tagged to match, so only the destination check stops it.
+    for bad in [link.appendingPathComponent("chat.db").path,
+                root.appendingPathComponent("Library/Application Support/com.apple.TCC/TCC.db").path,
+                root.path + "/Public/../Library/chat.db"] {
+        record.original = bad
+        Trashed.tag(binned.path, origin: bad)
+        #expect(!record.canRestore(home: root.path))
+    }
 }
 
 @Test func ignoredLinkTargetKeepsTheLinkInAJunkFolder() throws {
@@ -225,4 +227,51 @@ private final class Recorder: Runner, @unchecked Sendable {
     #expect(calls.allSatisfy { $0.env["DOCKER_HOST"] == nil && $0.env["DOCKER_CONTEXT"] == nil && $0.env["PATH"] == "/usr/bin" })
     let prune = try #require(calls.last)
     #expect(prune.args == Docker.pruneBuildCache + ["--context", "desktop-linux"])
+}
+
+/// A record as Removal.trash leaves it: the item tagged with where it came from.
+func trashedRecord(_ original: URL, at inTrash: URL) -> Trashed {
+    Trashed.tag(inTrash.path, origin: original.path)
+    return Trashed(original: original, inTrash: inTrash, identity: Trashed.identity(of: inTrash.path))
+}
+
+@Test func anItemLockedWithAPlantedTagIsNeverPutBack() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let planted = root.appendingPathComponent("Library/Caches/evil")
+    try write(planted, bytes: 16)
+    Trashed.tag(planted.path, origin: root.appendingPathComponent("Library/Mail/new").path)
+    try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: planted.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: planted.path) }
+    #expect(Trashed.prepare(planted.path) == nil)
+
+    let fine = root.appendingPathComponent("Library/Caches/fine")
+    try write(fine, bytes: 16)
+    #expect(Trashed.prepare(fine.path) != nil)
+}
+
+@Test func putBackRefusesARecordSentSomewhereElse() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let item = root.appendingPathComponent(".Trash/History.db")
+    try write(item, bytes: 4096)
+    var record = trashedRecord(root.appendingPathComponent("Library/Safari/History.db"), at: item)
+    #expect(record.canRestore(home: root.path))
+    // Another program edits the log to send the item where it can read it.
+    record.original = root.appendingPathComponent("Public/History.db").path
+    #expect(!record.canRestore(home: root.path))
+    // An item without the tag, as one the app never trashed.
+    Trashed.untag(item.path)
+    record.original = root.appendingPathComponent("Library/Safari/History.db").path
+    #expect(!record.canRestore(home: root.path))
+}
+
+@Test func trashingTagsTheItemAndPutBackClearsIt() throws {
+    let root = try tempDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let item = root.appendingPathComponent(".Trash/a.txt")
+    try write(item, bytes: 16)
+    let record = trashedRecord(root.appendingPathComponent("a.txt"), at: item)
+    #expect(Trashed.putBack([record], home: root.path).isEmpty)
+    #expect(Trashed.origin(of: record.original) == nil)
 }

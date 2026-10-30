@@ -1413,9 +1413,10 @@ final class Care {
             return (removal.failures.isEmpty ? nil : removal.summary, [])
         }
         // Read before the move: without Full Disk Access the Trash is closed.
-        let identities = Dictionary(urls.map { ($0, Trashed.identity(of: $0.path)) }, uniquingKeysWith: { a, _ in a })
+        let identities = Dictionary(urls.map { ($0, Trashed.prepare($0.path)) }, uniquingKeysWith: { a, _ in a })
         return await withCheckedContinuation { continuation in
             NSWorkspace.shared.recycle(urls) { moved, error in
+                for url in urls where moved[url] == nil { Trashed.untag(url.path) }
                 continuation.resume(returning: (error?.localizedDescription,
                                                 moved.map { Trashed(original: $0.key, inTrash: $0.value, identity: identities[$0.key] ?? nil) }))
             }

@@ -38,7 +38,7 @@ private let when = Date(timeIntervalSince1970: 1_700_000_000)
     let a = URL(fileURLWithPath: "/Users/me/Library/Caches/com.a")
     let b = URL(fileURLWithPath: "/Users/me/Library/Caches/com.b")
     var log = RunLog(title: "Leftovers", permanent: false)
-    log.add([(a, 5), (b, 7)], trashed: [Trashed(original: a, inTrash: URL(fileURLWithPath: "/Users/me/.Trash/com.a"))],
+    log.add([(a, 5), (b, 7)], trashed: [Trashed(original: a, inTrash: URL(fileURLWithPath: "/Users/me/.Trash/com.a"), identity: nil)],
             failure: "The operation couldn’t be completed.")
     #expect(log.lines[0].done)
     #expect(log.lines[1].failure == "The operation couldn’t be completed.")

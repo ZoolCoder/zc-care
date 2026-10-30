@@ -56,8 +56,9 @@ public struct ActivityEntry: Codable, Sendable, Equatable {
 ///
 /// The activity log holds these paths, and any program running as the user
 /// can write it, so a record is checked before anything moves: the item
-/// must still be the one trashed, sit directly in a real Trash folder, and
-/// go back to a path with no link or `..` in it.
+/// must still be the one trashed, carry the tag naming its old place, sit
+/// directly in a real Trash folder on the same volume as that place, and go
+/// back to a path with no link or `..` in it.
 public struct Trashed: Codable, Sendable, Equatable {
     public var original: String
     public var inTrash: String
@@ -67,14 +68,14 @@ public struct Trashed: Codable, Sendable, Equatable {
     public var inode: UInt64?
     public var device: Int64?
 
-    /// `identity` is read before the move when given: without Full Disk
-    /// Access the Trash is closed to the app. A move keeps both numbers.
-    public init(original: URL, inTrash: URL, identity: Identity? = nil) {
+    /// The identity comes from `prepare` before the move: without Full Disk
+    /// Access the Trash is closed to the app, and a move keeps both numbers.
+    /// None means the item never moves back.
+    public init(original: URL, inTrash: URL, identity: Identity?) {
         self.original = original.path
         self.inTrash = inTrash.path
-        let found = identity ?? Self.identity(of: inTrash.path)
-        inode = found?.inode
-        device = found?.device
+        inode = identity?.inode
+        device = identity?.device
     }
 
     /// Still in the Trash as the same item, and nothing took its old place.
@@ -82,7 +83,9 @@ public struct Trashed: Codable, Sendable, Equatable {
 
     public func canRestore(home: String) -> Bool {
         guard let inode, let device, Self.identity(of: inTrash) == Identity(inode: inode, device: device),
-              Self.inTrashFolder(inTrash, home: home), Self.safeDestination(original) else { return false }
+              Self.origin(of: inTrash) == original,
+              Self.inTrashFolder(inTrash, home: home), Self.safeDestination(original),
+              Self.volume(of: original) == device else { return false }
         return Self.identity(of: original) == nil
     }
 
@@ -93,6 +96,7 @@ public struct Trashed: Codable, Sendable, Equatable {
             try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
             try FileManager.default.moveItem(at: URL(fileURLWithPath: inTrash), to: to)
+            Self.untag(original)
             return true
         } catch {
             return false
@@ -107,6 +111,48 @@ public struct Trashed: Codable, Sendable, Equatable {
     public struct Identity: Equatable, Sendable {
         var inode: UInt64
         var device: Int64
+    }
+
+    /// The extended attribute naming an item's old place. It is set before
+    /// the move, and the Trash is closed to programs without Full Disk
+    /// Access, so one that edits the log cannot change where an item goes.
+    static let originKey = "dev.zoolcoder.zccare.origin"
+
+    /// Tags the item at `path` with where it came from; false when the
+    /// item takes no tag, so Put Back will not move it.
+    @discardableResult
+    public static func tag(_ path: String, origin: String) -> Bool {
+        let value = Array(origin.utf8)
+        return setxattr(path, originKey, value, value.count, 0, XATTR_NOFOLLOW) == 0
+    }
+
+    /// Tags the item before it goes to the Trash and returns its identity
+    /// for the record; nil when the tag does not read back as this path, as
+    /// on an item locked against new tags with an old one planted on it.
+    public static func prepare(_ path: String) -> Identity? {
+        guard tag(path, origin: path), origin(of: path) == path else { return nil }
+        return identity(of: path)
+    }
+
+    public static func untag(_ path: String) {
+        removexattr(path, originKey, XATTR_NOFOLLOW)
+    }
+
+    static func origin(of path: String) -> String? {
+        let size = getxattr(path, originKey, nil, 0, 0, XATTR_NOFOLLOW)
+        guard size > 0, size <= 4096 else { return nil }
+        var value = [UInt8](repeating: 0, count: size)
+        guard getxattr(path, originKey, &value, size, 0, XATTR_NOFOLLOW) == size else { return nil }
+        return String(bytes: value, encoding: .utf8)
+    }
+
+    /// The volume of the deepest folder of `path` that exists: an item only
+    /// ever goes to the Trash of its own volume, so a disk image's Trash
+    /// cannot feed the startup disk.
+    static func volume(of path: String) -> Int64? {
+        var folder = (path as NSString).deletingLastPathComponent
+        while identity(of: folder) == nil, folder != "/" { folder = (folder as NSString).deletingLastPathComponent }
+        return identity(of: folder)?.device
     }
 
     /// What is at `path`, a link itself rather than what it points to; nil
