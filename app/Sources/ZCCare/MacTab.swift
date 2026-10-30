@@ -68,6 +68,7 @@ struct MacTab: View {
                     AwakeList(store: store)
                     TopList(store: store, order: .cpu)
                 case .network: NetworkDetail(store: store)
+                case .devices: DevicesDetail()
                 case nil: EmptyView()
                 }
             }
@@ -152,7 +153,8 @@ struct MacTab: View {
     }
 
     private var devicesTile: some View {
-        Tile(symbol: "dot.radiowaves.left.and.right", title: "Devices") {
+        Tile(symbol: "dot.radiowaves.left.and.right", title: "Devices", link: "Details", selected: open == .devices,
+             action: { toggle(.devices) }) {
             if vitals.devices.isEmpty {
                 Text("Nothing connected")
             }
@@ -635,6 +637,68 @@ private struct TrafficList: View {
                 try? await Task.sleep(for: .seconds(max(0, 5 - now.timeIntervalSince(started))))
             }
         }
+    }
+}
+
+/// The displays in use and what is plugged into the USB ports; the
+/// Bluetooth devices are on the tile.
+private struct DevicesDetail: View {
+    @State private var screens = NSScreen.screens
+    @State private var usb: [String]?
+    @State private var usbFailed = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    SectionTitle(title: "Displays")
+                    Spacer()
+                    Button("Displays Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Displays-Settings.extension")!)
+                    }
+                    .buttonStyle(.zcLink).font(.caption)
+                }
+                ListCard {
+                    ForEach(screens, id: \.self) { screen in
+                        ValueRow(title: screen.localizedName, value: Self.describe(screen))
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                SectionTitle(title: "USB")
+                ListCard {
+                    if !usbFailed, let usb, !usb.isEmpty {
+                        ForEach(Array(usb.enumerated()), id: \.offset) { _, name in
+                            Text(name).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).modifier(Hover())
+                        }
+                    } else {
+                        Text(usbFailed ? "Could not read the USB devices." : usb == nil ? "…" : "Nothing plugged into USB.")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .task { await readUSB() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            screens = NSScreen.screens
+        }
+    }
+
+    private func readUSB() async {
+        let read = await USBDevices.read(runner: ProcessRunner(timeout: 15))
+        usbFailed = read == nil
+        usb = read
+    }
+
+    /// "External · 3840 × 2160 · 60 Hz": the pixels drawn, not the size
+    /// macOS lays things out at. A built-in display says so in its name.
+    private static func describe(_ screen: NSScreen) -> String {
+        let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+        let pixels = screen.convertRectToBacking(screen.frame).size
+        var parts = id.flatMap { CGDisplayIsBuiltin($0) == 0 ? ["External"] : nil } ?? []
+        parts.append("\(Int(pixels.width)) × \(Int(pixels.height))")
+        if screen.maximumFramesPerSecond > 0 { parts.append("\(screen.maximumFramesPerSecond) Hz") }
+        return parts.joined(separator: " · ")
     }
 }
 

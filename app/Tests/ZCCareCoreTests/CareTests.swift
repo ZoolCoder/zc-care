@@ -1311,3 +1311,40 @@ private func nettop(_ output: String, status: Int32) -> FakeRunner {
     #expect(await AppTraffic.read(runner: nettop(",bytes_in,bytes_out,\n", status: 0)) == nil)
     #expect(await AppTraffic.read(runner: nettop("ssh.1,2,3,\n", status: 0))?[1]?.sent == 3)
 }
+
+private struct ProfilerRunner: Runner {
+    var outputs: [String: CommandResult]
+
+    func run(_ executable: String, _ args: [String], env: [String: String]) async throws -> CommandResult {
+        outputs[args.last ?? ""] ?? CommandResult(status: 1)
+    }
+}
+
+@Test func usbDevicesListWhatIsPluggedIn() async {
+    let json = Data("""
+    {"SPUSBHostDataType": [
+      {"_name": "USB 3.1 Bus", "Driver": "AppleT6000USBXHCI"},
+      {"_name": "USB 3.1 Bus", "_items": [
+        {"_name": "USB2.0 Hub", "_items": [{"_name": "Keyboard"}, {"Driver": "nameless"}]},
+        {"_name": "SanDisk Extreme"}
+      ]}
+    ]}
+    """.utf8)
+    let type = "SPUSBHostDataType"
+    #expect(USBDevices.parse(json, type: type) == ["USB2.0 Hub", "Keyboard", "SanDisk Extreme"])
+    #expect(USBDevices.parse(Data("{}".utf8), type: type) == nil)
+    #expect(USBDevices.parse(Data(#"{"SPUSBHostDataType": []}"#.utf8), type: type) == nil)
+    #expect(USBDevices.parse(Data(#"{"SPUSBHostDataType": [{"_name": "USB 3.1 Bus"}]}"#.utf8), type: type) == [])
+
+    // An older macOS: the host type unknown, the old one lists the Intel Mac's own camera.
+    let legacy = Data("""
+    {"SPUSBDataType": [{"_name": "USB30Bus", "_items": [
+      {"_name": "FaceTime HD Camera", "Built-in_Device": "Yes"}, {"_name": "Mouse", "Built-in_Device": "No"}]}]}
+    """.utf8)
+    let older = ProfilerRunner(outputs: [
+        "SPUSBHostDataType": CommandResult(status: 0, stdout: Data(#"{"SPUSBHostDataType": []}"#.utf8)),
+        "SPUSBDataType": CommandResult(status: 0, stdout: legacy),
+    ])
+    #expect(await USBDevices.read(runner: older) == ["Mouse"])
+    #expect(await USBDevices.read(runner: ProfilerRunner(outputs: [:])) == nil)
+}
