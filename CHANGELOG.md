@@ -174,6 +174,12 @@ here with what to edit.
   *Add to Config…* asks for the why line and an optional section, runs
   `zc-care add`, and reloads, so the next plan shows the item; a bulk add
   covers the selected items of one target at a time.
+- The main window says when Full Disk Access stopped working after it had
+  worked: an update gives the ad hoc signed app a new signature, and macOS
+  stops honouring the old grant even with its switch still on. *Open
+  Settings…* goes to the list; *Don't Remind Me* stops the banner until
+  access works again. Access granted before this version is not known, so
+  the first update after it shows no banner.
 
 ### Docs
 

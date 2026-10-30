@@ -196,7 +196,8 @@ outside what Cleanup clears.
 
 - **Full Disk Access** lets Protection read privacy permissions and browser
   history and cookies. An ad hoc signed build is a new app to macOS, so each
-  rebuild asks again.
+  rebuild asks again; once access has worked, the main window says when it
+  stops.
 - **Finder automation** lets Cleanup empty the Trash. It asks once.
 
 ## URLs

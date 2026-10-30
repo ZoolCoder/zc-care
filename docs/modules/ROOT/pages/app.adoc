@@ -191,8 +191,10 @@ moved, it is kept unchanged and not overwritten.
 === Permissions
 
 Reading the privacy permissions needs Full Disk Access for ZC Care. An ad hoc
-signed build is a new app to macOS, so each rebuild asks again. Emptying the
-Trash asks once to let ZC Care control the Finder.
+signed build is a new app to macOS, so each rebuild asks again. Once access
+has worked, the main window shows a banner when it stops: switch ZC Care off
+and on again in the list *Open Settings…* goes to, or choose *Don't Remind
+Me*. Emptying the Trash asks once to let ZC Care control the Finder.
 
 == Develop
 
