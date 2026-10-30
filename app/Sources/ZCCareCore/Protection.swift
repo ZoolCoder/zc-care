@@ -83,7 +83,9 @@ public struct Permission: Codable, Sendable, Equatable, Identifiable {
     /// path, which tccutil cannot reset.
     public var resetName: String?
 
-    public var id: String { service + " " + client }
+    /// By tccutil's name where there is one: Accessibility and PostEvent
+    /// both show as Accessibility but are two answers, reset one at a time.
+    public var id: String { (resetName ?? service) + " " + client }
 }
 
 public enum Privacy {

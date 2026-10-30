@@ -480,19 +480,29 @@ final class Store {
             let r = try await run()
             return r.status == 0 ? nil : (ZCCareCore.lastLine(r.stderr) ?? fallback)
         } catch is CancellationError {
-            return "Cancelled."
+            return Self.cancelled
         } catch {
             return error.localizedDescription
         }
     }
 
+    /// Cancel stops osascript, but the root shell it started cannot be
+    /// signalled and may still finish.
+    static let cancelled = "Cancelled.", stoppedWaiting = "Stopped waiting; the administrator step may still finish."
+
     /// Runs the command as root behind the password dialog; why it failed, if it did.
     private func asRoot(_ command: String) async -> String? {
-        await cancellable {
+        let failed = await cancellable {
             await self.failure("osascript failed") {
                 try await ProcessRunner().run("/usr/bin/osascript", ["-e", adminScript(command)], env: [:])
             }
         }
+        return failed == Self.cancelled ? Self.stoppedWaiting : failed
+    }
+
+    private func outcome(_ title: String, _ failed: String?) -> Message {
+        guard let failed else { return Message(text: "\(title): fixed.", failed: false) }
+        return Message(text: failed == Self.stoppedWaiting ? "\(title): \(failed)" : "\(title): not changed. \(failed)", failed: true)
     }
 
     /// Runs exactly the steps the owner confirmed, behind one password
@@ -507,8 +517,7 @@ final class Store {
         busy = "Securing this Mac"
         defer { busy = nil }
         let failed = await asRoot(command)
-        message = failed.map { Message(text: "This Mac: not changed. \($0)", failed: true) }
-            ?? Message(text: "This Mac: fixed.", failed: false)
+        message = outcome("This Mac", failed)
         await refresh()
     }
 
@@ -743,8 +752,7 @@ final class Store {
             busy = "Fixing \(check.title)"
             defer { busy = nil }
             let failed = await asRoot(command)
-            message = failed.map { Message(text: "\(check.title): not changed. \($0)", failed: true) }
-                ?? Message(text: "\(check.title): fixed.", failed: false)
+            message = outcome(check.title, failed)
             await refresh()
         case .settings(let url, let what):
             NSWorkspace.shared.open(url)

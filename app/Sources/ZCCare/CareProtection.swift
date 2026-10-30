@@ -78,7 +78,7 @@ struct ProtectionView: View {
                                 Text("No browser keeps history, cookies or caches ZC Care can read.").foregroundStyle(.secondary).padding(10)
                             }
                             ForEach(traces) { trace in
-                                let open = care.isRunning(trace.bundleID)
+                                let open = care.isRunning(trace.bundleIDs)
                                 CareRow(icon: SymbolTile(symbol: symbol(trace.kind), colors: open ? Tint.gray : Tint.violet, size: 32),
                                     title: "\(trace.browser) \(trace.kind)",
                                     detail: open ? "Quit \(trace.browser) to clear it" : Store.counted(trace.paths.count, "item"),

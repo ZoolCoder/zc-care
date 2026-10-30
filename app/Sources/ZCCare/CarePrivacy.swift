@@ -127,8 +127,19 @@ struct WiFiSection: View {
                              button: "Forget") else { return }
         care.store.busy = "Forgetting \(network.ssid)"
         defer { care.store.busy = nil }
+        // The list may be old: networksetup exits 0 on a network it no longer knows.
+        await load()
+        guard let known = networks else {
+            care.store.message = Store.Message(text: "\(network.ssid) not forgotten: \(failure ?? "networksetup failed")", failed: true)
+            return
+        }
+        guard known.contains(network) else {
+            care.store.message = Store.Message(text: "\(network.ssid) is not in the list any more.", failed: false)
+            return
+        }
         do {
-            let r = try await ProcessRunner().run("/usr/bin/osascript", ["-e", Maintenance.adminScript(WiFiNetworks.forgetSteps(network))], env: [:])
+            // Time for the password dialog; a wedged airportd must not hold busy for ever.
+            let r = try await ProcessRunner(timeout: 300).run("/usr/bin/osascript", ["-e", Maintenance.adminScript(WiFiNetworks.forgetSteps(network))], env: [:])
             guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "networksetup exited \(r.status)") }
             // networksetup exits 0 when it fails too: only the list read again proves it.
             await load()
@@ -140,6 +151,11 @@ struct WiFiSection: View {
         } catch {
             care.store.message = Store.Message(text: "\(network.ssid) not forgotten: \(error.localizedDescription)", failed: true)
             await load()
+            // A timed-out run may still have finished as root: the list says.
+            if let networks, !networks.contains(network) {
+                care.store.record(.privacy, "Forgot Wi-Fi \(network.ssid)")
+                care.store.message = Store.Message(text: "\(network.ssid) forgotten.", failed: false)
+            }
         }
     }
 }

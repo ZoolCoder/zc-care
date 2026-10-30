@@ -232,11 +232,11 @@ private struct AppFiles: View {
         .padding(.bottom, 8)
         .task(id: [app.id] + care.store.ignoreList.paths) {
             let app = app, home = NSHomeDirectory(), ignore = care.store.ignoreList, installed = care.installedIDs
-            let shared = care.copies.contains(app.id)
+            let names = care.installedNames, shared = care.copies.contains(app.id)
             let found = await Task.detached(priority: .userInitiated) {
                 // Another copy uses the same settings and data, so only the app goes.
-                shared ? [LargeFile(url: app.url, size: DiskUsage.allocated(app.url))]
-                    : Leftovers.files(of: app, home: home, ignoring: ignore, installed: installed)
+                shared || Care.otherCopy(of: app) != nil ? [LargeFile(url: app.url, size: DiskUsage.allocated(app.url))]
+                    : Leftovers.files(of: app, home: home, ignoring: ignore, installed: installed, names: names)
             }.value
             // A newer task owns `files` once this one is cancelled.
             guard !Task.isCancelled else { return }

@@ -232,8 +232,8 @@ public enum Leftovers {
     /// The app and every leftover uninstalling trashes, each with its size
     /// on disk; what the ignore list names stays, so it is not listed.
     public static func files(of app: InstalledApp, home: String, ignoring ignore: IgnoreList = IgnoreList(),
-                             installed: Set<String> = []) -> [LargeFile] {
-        let leftovers = paths(bundleID: app.bundleID, name: app.name, home: home, installed: installed)
+                             installed: Set<String> = [], names: Set<String> = []) -> [LargeFile] {
+        let leftovers = paths(bundleID: app.bundleID, name: app.name, home: home, installed: installed, names: names)
             .filter { !ignore.touches($0) }
             .map { URL(fileURLWithPath: $0) }
         return ([app.url] + leftovers).map { LargeFile(url: $0, size: DiskUsage.allocated($0)) }
@@ -241,10 +241,14 @@ public enum Leftovers {
 
     /// `installed` holds the bundle ids of the installed apps: an agent or
     /// setting that belongs to another app whose id extends this one's, as
-    /// com.google.Chrome.canary does com.google.Chrome, stays.
-    public static func paths(bundleID: String?, name: String, home: String, installed: Set<String> = []) -> [String] {
+    /// com.google.Chrome.canary does com.google.Chrome, stays. `names` holds
+    /// the installed apps' names: folders named after the app stay when a
+    /// sibling shares them, as Firefox Developer Edition does Firefox's.
+    public static func paths(bundleID: String?, name: String, home: String, installed: Set<String> = [],
+                             names: Set<String> = []) -> [String] {
         let lib = home + "/Library/"
-        var candidates = isFileName(name) ? [lib + "Application Support/" + name, lib + "Logs/" + name] : []
+        var candidates = isFileName(name) && !hasSibling(name: name, bundleID: bundleID, installed: installed, names: names)
+            ? [lib + "Application Support/" + name, lib + "Logs/" + name] : []
         if let id = bundleID, isBundleID(id) {
             candidates += [
                 lib + "Application Support/" + id,
@@ -275,6 +279,32 @@ public enum Leftovers {
     static func isBundleID(_ id: String) -> Bool {
         id.first.map { $0.isASCII && ($0.isLetter || $0.isNumber) } == true && !id.contains("..")
             && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || ".-_".contains($0)) }
+    }
+
+    /// Another installed app whose name or id extends this one's, which may
+    /// keep its data in the folder named after this app.
+    static func hasSibling(name: String, bundleID: String?, installed: Set<String>, names: Set<String>) -> Bool {
+        let prefix = name.lowercased() + " "
+        if names.contains(where: { $0.lowercased().hasPrefix(prefix) }) { return true }
+        guard let id = bundleID?.lowercased() else { return false }
+        return installed.contains { $0.lowercased() != id && $0.lowercased().hasPrefix(id) }
+    }
+
+    /// The labels of the agents an app registers from inside its bundle:
+    /// they keep running from the Trash unless booted out first. Only a
+    /// plist inside the bundle, labelled with the app's own id, counts, so
+    /// a planted bundle cannot have another app's agent stopped.
+    public static func bundledAgents(in app: URL, bundleID: String?) -> [String] {
+        guard let id = bundleID, isBundleID(id) else { return [] }
+        let root = app.resolvingSymlinksInPath().path + "/"
+        let folder = app.appendingPathComponent("Contents/Library/LaunchAgents")
+        return ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).sorted().compactMap { name in
+            let plist = folder.appendingPathComponent(name).resolvingSymlinksInPath()
+            guard name.hasSuffix(".plist"), plist.path.hasPrefix(root),
+                  let label = NSDictionary(contentsOf: plist)?["Label"] as? String,
+                  isBundleID(label), label == id || label.hasPrefix(id + ".") else { return nil }
+            return label
+        }
     }
 
     static func isFileName(_ name: String) -> Bool {

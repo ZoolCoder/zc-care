@@ -479,8 +479,12 @@ final class Care {
             return false
         }
         // By id too: a copy running from elsewhere uses the same settings.
+        // A login item or helper inside the bundle counts as the app.
+        let inside = app.url.standardizedFileURL.path + "/"
         let running = NSWorkspace.shared.runningApplications.filter {
             $0.bundleURL?.standardizedFileURL == app.url.standardizedFileURL || ($0.bundleIdentifier != nil && $0.bundleIdentifier == app.bundleID)
+                || $0.bundleURL?.standardizedFileURL.path.hasPrefix(inside) == true
+                || $0.executableURL?.standardizedFileURL.path.hasPrefix(inside) == true
         }
         return await closed(running, toDo: what)
     }
@@ -1044,6 +1048,7 @@ final class Care {
 
     /// Apps in /Applications plus Setapp's and other volumes': a sibling there keeps its agents.
     var installedIDs: Set<String> { Set(apps.compactMap(\.bundleID)).union(externalIDs) }
+    var installedNames: Set<String> { Set(apps.map(\.name)) }
 
     /// Removes the app and what it left in the Library. A Brewfile app goes
     /// through zc-care remove, which drops it from the manifest too;
@@ -1061,9 +1066,11 @@ final class Care {
         guard await closed(app, toDo: "uninstall \(app.name)") else { return .skipped }
         guard store.busy == nil else { return .busy }
         // What the ignore list names stays behind; the rest still goes. With
-        // another copy installed, its settings and data are that copy's too.
-        let leftovers = copies.contains(app.id) ? []
-            : Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
+        // another copy installed, its settings and data are that copy's too,
+        // whether the list shows it or only Launch Services knows it.
+        let other = await Task.detached { Self.otherCopy(of: app) }.value
+        let leftovers = copies.contains(app.id) || other != nil ? []
+            : Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs, names: installedNames)
                 .filter { !store.ignoreList.touches($0) }
         let method = Uninstall.method(declared: app.declared, source: app.source)
         var how: String
@@ -1073,10 +1080,15 @@ final class Care {
         case .trash: how = store.deletesPermanently ? "The app is deleted for good." : "The app moves to the Trash."
         }
         if !leftovers.isEmpty {
-            how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n") + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath })
+            how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n")
+                + Alerts.lines(leftovers.map { ($0 as NSString).abbreviatingWithTildeInPath }, max: 24)
+        } else if let other {
+            how += "\n\nIts settings and data stay: another copy is at \((other.path as NSString).abbreviatingWithTildeInPath)."
         }
-        // Again: the app may have opened while the alert was up.
         guard Alerts.confirm("Uninstall \(app.name)?", how, button: "Uninstall") else { return .declined }
+        // Another copy runs the same agents; they stay with it.
+        if !copies.contains(app.id), other == nil { await bootOutBundledAgents(of: app) }
+        // Again: the app may have opened while the alert was up.
         guard await closed(app, toDo: "uninstall \(app.name)") else { return .skipped }
         guard store.busy == nil else { return .busy }
         store.busy = "Uninstalling \(app.name)"
@@ -1096,7 +1108,7 @@ final class Care {
             if let brew = store.program("brew") {
                 failure = await store.cancellable {
                     await self.store.failure("brew uninstall failed") {
-                        try await ProcessRunner().run(brew, ["uninstall", "--cask", token], env: self.store.loginEnv)
+                        try await ProcessRunner().run(brew, ["uninstall", "--cask", token], env: self.store.loginEnv.merging(Homebrew.quiet) { $1 })
                     }
                 }
             } else {
@@ -1163,6 +1175,28 @@ final class Care {
         }
     }
 
+    /// Another copy of the app Launch Services knows, outside the Trash:
+    /// one in a subfolder, on another volume or on the ignore list. A
+    /// mounted installer disk image is read-only and does not count.
+    nonisolated static func otherCopy(of app: InstalledApp) -> URL? {
+        guard let id = app.bundleID else { return nil }
+        let own = app.url.resolvingSymlinksInPath().path
+        return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id).first {
+            $0.resolvingSymlinksInPath().path != own && !Leftovers.inTrash($0.path) && FileManager.default.fileExists(atPath: $0.path)
+                && (try? $0.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) != true
+        }
+    }
+
+    /// Stops the agents the app runs from inside its bundle, so a helper
+    /// launchd keeps alive neither comes back after Quit nor writes its
+    /// files back once they are gone.
+    private func bootOutBundledAgents(of app: InstalledApp) async {
+        let labels = await Task.detached { Leftovers.bundledAgents(in: app.url, bundleID: app.bundleID) }.value
+        for label in labels {
+            _ = try? await ProcessRunner(timeout: 10).run("/bin/launchctl", ["bootout", "gui/\(getuid())/\(label)"], env: [:])
+        }
+    }
+
     /// The app as on its first launch: its settings, caches and data go to
     /// the Trash, and the app stays.
     func reset(_ app: InstalledApp) async {
@@ -1170,7 +1204,7 @@ final class Care {
         removing = true
         defer { removing = false }
         guard await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
-        let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
+        let data = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs, names: installedNames)
             .filter { !store.ignoreList.touches($0) }
         guard !data.isEmpty else {
             store.message = Store.Message(text: "\(app.name) keeps no settings or data to reset.", failed: false)
@@ -1179,8 +1213,10 @@ final class Care {
         let urls = data.map(URL.init(fileURLWithPath:))
         guard Alerts.confirm("Reset \(app.name)?",
                                             "It opens as on its first launch. " + (store.deletesPermanently ? "These are deleted for good:\n" : "These move to the Trash:\n")
-                                                + Alerts.lines(data.map { ($0 as NSString).abbreviatingWithTildeInPath }),
-                                            button: "Reset"), await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
+                                                + Alerts.lines(data.map { ($0 as NSString).abbreviatingWithTildeInPath }, max: 24),
+                                            button: "Reset") else { return }
+        await bootOutBundledAgents(of: app)
+        guard await closed(app, toDo: "reset \(app.name)"), store.busy == nil else { return }
         store.busy = "Resetting \(app.name)"
         defer { store.busy = nil }
         await bootOut(Leftovers.agents(in: data))
@@ -1321,7 +1357,7 @@ final class Care {
         defer { store.busy = nil }
         let installFailure = await store.cancellable {
             await self.store.failure("brew install failed") {
-                try await ProcessRunner().run(brew, ["install", "--cask", "--adopt", token], env: self.store.loginEnv)
+                try await ProcessRunner().run(brew, ["install", "--cask", "--adopt", token], env: self.store.loginEnv.merging(Homebrew.quiet) { $1 })
             }
         }
         if let installFailure {
@@ -1494,9 +1530,10 @@ final class Care {
     /// Runs the task's steps; why one failed, if one did.
     private func steps(of task: MaintenanceTask) async -> String? {
         if task.admin {
-            return await store.failure("osascript failed") {
+            let failed = await store.failure("osascript failed") {
                 try await ProcessRunner().run("/usr/bin/osascript", ["-e", Maintenance.adminScript(task.steps)], env: [:])
             }
+            return failed == Store.cancelled ? Store.stoppedWaiting : failed
         }
         for step in task.steps {
             let failed = await store.failure("\(step[0]) failed") {
@@ -1567,8 +1604,8 @@ final class Care {
         browserTraces = await Task.detached(priority: .utility) { BrowserPrivacy.find(home: home) }.value
     }
 
-    func isRunning(_ bundleID: String) -> Bool {
-        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleID }
+    func isRunning(_ bundleIDs: [String]) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier.map(bundleIDs.contains) == true }
     }
 
     /// Deletes one browser's history, cookies or cache, only while that
@@ -1578,7 +1615,7 @@ final class Care {
         removing = true
         defer { removing = false }
         let what = "clear \(trace.browser)'s \(trace.kind.lowercased())"
-        guard await closed(NSRunningApplication.runningApplications(withBundleIdentifier: trace.bundleID), toDo: what),
+        guard await closed(trace.bundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)), toDo: what),
               store.busy == nil else { return }
         let effect = switch trace.kind {
         case BrowserPrivacy.cookies: "You will be signed out of websites in \(trace.browser)."
@@ -1593,7 +1630,7 @@ final class Care {
                                  : "This moves \(Store.counted(trace.paths.count, "item")), \(Store.bytes(trace.size)), to the Trash; My Activity can put it back.\n\n") + effect,
                              button: "Clear") else { return }
         // Again: the browser may have opened while the alert was up.
-        guard await closed(NSRunningApplication.runningApplications(withBundleIdentifier: trace.bundleID), toDo: what),
+        guard await closed(trace.bundleIDs.flatMap(NSRunningApplication.runningApplications(withBundleIdentifier:)), toDo: what),
               store.busy == nil else { return }
         store.busy = "Clearing \(trace.browser) \(trace.kind.lowercased())"
         defer { store.busy = nil }
@@ -1651,7 +1688,9 @@ final class Care {
             }
         }
         permissionsError = rows == nil ? failure : nil
-        return rows?.sorted { ($0.service, $0.client) < ($1.service, $1.client) }
+        // The user's and the system's databases can both hold one answer.
+        var seen = Set<String>()
+        return rows?.filter { seen.insert($0.id).inserted }.sorted { ($0.service, $0.client) < ($1.service, $1.client) }
     }
 
     /// Forgets one app's answer for one service: macOS asks the app again
@@ -1659,7 +1698,8 @@ final class Care {
     func resetPermission(_ p: Permission) async {
         guard store.busy == nil, let args = Privacy.resetArguments(p),
               Alerts.confirm("Reset \(p.service) for \(p.client)?",
-                             "macOS forgets that you \(p.allowed ? "allowed" : "denied") it; the app asks again the next time it needs \(p.service).",
+                             "macOS forgets that you \(p.allowed ? "allowed" : "denied") it; the app asks again the next time it needs \(p.service)."
+                                + (p.resetName == "AppleEvents" ? " This covers every app it controls." : ""),
                              button: "Reset") else { return }
         store.busy = "Resetting \(p.service)"
         defer { store.busy = nil }
@@ -1668,7 +1708,8 @@ final class Care {
             guard r.status == 0 else { throw CLIError(message: lastLine(r.stderr) ?? "tccutil exited \(r.status)") }
             // tccutil without root can leave answers kept in the system database: read them again to know.
             permissions = await readPermissions()
-            guard !(permissions?.contains { $0.id == p.id } ?? false) else {
+            guard let permissions else { throw CLIError(message: "tccutil ran, but the permissions could not be read again to check") }
+            guard !permissions.contains(where: { $0.id == p.id }) else {
                 throw CLIError(message: "macOS keeps this answer in the system database; change it in System Settings")
             }
             store.record(.privacy, "Reset \(p.service) for \(p.client)")

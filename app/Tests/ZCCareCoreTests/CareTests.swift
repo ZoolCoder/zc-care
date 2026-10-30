@@ -333,6 +333,18 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(Privacy.resetArguments(rows[3]) == nil)
 }
 
+@Test func privacyRowsKeepBothAccessibilityAnswers() {
+    let rows = Privacy.parse("""
+    kTCCServiceAccessibility|com.x.app|0|2
+    kTCCServicePostEvent|com.x.app|0|0
+    """)
+
+    // Both show as Accessibility, but each is its own answer to reset.
+    #expect(rows.map(\.service) == ["Accessibility", "Accessibility"])
+    #expect(rows.compactMap(Privacy.resetArguments) == [["reset", "Accessibility", "com.x.app"], ["reset", "PostEvent", "com.x.app"]])
+    #expect(Set(rows.map(\.id)).count == 2)
+}
+
 @Test func spaceLensBuildsATreeOfTheBiggest() {
     let du = """
     10\t/h/a/tiny

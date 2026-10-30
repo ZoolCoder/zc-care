@@ -4,6 +4,9 @@ import Foundation
 public struct BrowserTrace: Sendable, Equatable, Identifiable {
     public var browser: String
     public var bundleID: String
+    /// Every app that keeps these files: Firefox's channels share one
+    /// profiles folder, so any of them open holds the databases.
+    public var bundleIDs: [String]
     public var kind: String
     /// What clearing removes: database files, a cache folder's entries,
     /// each site's storage folder, or the saved session files.
@@ -17,6 +20,7 @@ public enum BrowserPrivacy {
     struct Browser {
         var name: String
         var bundleID: String
+        var others: [String] = []
         var history: [String] = []
         var cookies: [String] = []
         var caches: [String] = []
@@ -45,7 +49,7 @@ public enum BrowserPrivacy {
                 default: paths.flatMap(withSidecars)
                 }
                 let size = urls.reduce(0) { $0 + DiskUsage.allocated($1) }
-                return size > 0 ? BrowserTrace(browser: b.name, bundleID: b.bundleID, kind: kind, paths: urls, size: size) : nil
+                return size > 0 ? BrowserTrace(browser: b.name, bundleID: b.bundleID, bundleIDs: [b.bundleID] + b.others, kind: kind, paths: urls, size: size) : nil
             }
         }
     }
@@ -85,6 +89,7 @@ public enum BrowserPrivacy {
         }
         let firefox = subfolders(support + "Firefox/Profiles")
         all.append(Browser(name: "Firefox", bundleID: "org.mozilla.firefox",
+                           others: ["org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly"],
                            cookies: firefox.map { $0 + "/cookies.sqlite" },
                            caches: [caches + "Firefox/Profiles"],
                            siteData: firefox.map { $0 + "/storage/default" },
