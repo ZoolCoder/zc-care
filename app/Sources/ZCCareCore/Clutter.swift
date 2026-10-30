@@ -24,8 +24,9 @@ public struct DuplicateGroup: Codable, Sendable, Equatable, Identifiable {
 public enum Duplicates {
     /// Same-size files first, the cheap test, then their SHA-256: hashing
     /// runs only where sizes collide. Biggest waste first. A file in a git
-    /// working tree is the project's own copy, so it is never one.
-    public static func groups(paths: [String], home: String, minimum: Int64) -> [DuplicateGroup] {
+    /// working tree is the project's own copy, so it is never one. The
+    /// `limit` biggest wastes return.
+    public static func groups(paths: [String], home: String, minimum: Int64, limit: Int = .max) -> [DuplicateGroup] {
         let candidates = outsideRepos(LargeFiles.candidates(paths: paths, home: home, minimum: minimum), home: home)
         var bySize: [Int64: [LargeFile]] = [:]
         for file in candidates {
@@ -42,7 +43,7 @@ public enum Duplicates {
                 groups.append(DuplicateGroup(files: same.sorted { $0.id < $1.id }, size: size))
             }
         }
-        return groups.sorted { $0.wasted > $1.wasted }
+        return Array(groups.sorted { $0.wasted > $1.wasted }.prefix(limit))
     }
 
     /// The other copies that still hold the keeper's bytes: a scan may be

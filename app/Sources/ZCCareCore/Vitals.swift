@@ -10,7 +10,13 @@ public struct Vitals: Sendable, Equatable {
     public var sensors: Sensors?
     public var battery: Battery?
     public var network: Throughput?
+    /// Read while the panel shows, as the Disk detail does.
+    public var diskIO: DiskIO?
     public var devices: [Device] = []
+    /// What every Trash holds, read for the alerts only.
+    public var trash: Int64?
+    /// This user's processes, read for the alerts only.
+    public var processes: [Proc] = []
 
     public init() {}
 }
@@ -36,17 +42,69 @@ public struct Memory: Sendable, Equatable {
     public var used: Int64
     public var total: Int64
 
+    /// What used is made of: apps' own memory, what the kernel holds, what
+    /// is compressed; and files kept in memory, which macOS can free.
+    public var app: Int64 = 0
+    public var wired: Int64 = 0
+    public var compressed: Int64 = 0
+    public var cached: Int64 = 0
+    public var swapUsed: Int64 = 0
+
     public init(pressure: Int, used: Int64, total: Int64) {
         self.pressure = pressure
         self.used = used
         self.total = total
     }
+
+    /// From the page counts of `host_statistics64`.
+    public init(pressure: Int, total: Int64, pages: MemoryPages, pageSize: Int64) {
+        let app = max(0, pages.internal - pages.purgeable) * pageSize
+        let wired = pages.wired * pageSize, compressed = pages.compressed * pageSize
+        self.init(pressure: pressure, used: app + wired + compressed, total: total)
+        self.app = app
+        self.wired = wired
+        self.compressed = compressed
+        cached = (pages.external + pages.purgeable) * pageSize
+    }
+
+    /// Neither used nor cached.
+    public var free: Int64 { max(0, total - used - cached) }
+
+    /// Swap in use while memory is under pressure: the Mac is slowing.
+    public var isSwapping: Bool { swapUsed > 0 && pressure >= 50 }
 }
 
-/// CPU temperature and fans, which only macmon reads without sudo.
+public struct MemoryPages: Sendable, Equatable {
+    public var `internal`: Int64
+    public var purgeable: Int64
+    public var wired: Int64
+    public var compressed: Int64
+    public var external: Int64
+
+    public init(internal: Int64, purgeable: Int64, wired: Int64, compressed: Int64, external: Int64) {
+        self.internal = `internal`
+        self.purgeable = purgeable
+        self.wired = wired
+        self.compressed = compressed
+        self.external = external
+    }
+}
+
+/// Temperatures, fans and power draw, which only macmon reads without sudo.
 public struct Sensors: Sendable, Equatable {
     public var cpuTemp: Double
     public var fans: [Int]
+    /// Each fan's top speed, in the order of `fans`.
+    public var fanLimits: [Int] = []
+    public var gpuTemp: Double?
+    /// 0 to 1.
+    public var gpuLoad: Double?
+    /// Watts drawn by the CPU, the GPU and the whole Mac.
+    public var cpuPower: Double?
+    public var gpuPower: Double?
+    public var systemPower: Double?
+    /// Performance and efficiency cores, as macmon groups them.
+    public var tiers: [CoreTier] = []
 
     public init(cpuTemp: Double, fans: [Int] = []) {
         self.cpuTemp = cpuTemp
@@ -59,9 +117,79 @@ public struct Sensors: Sendable, Equatable {
               let obj = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
               let temp = ((obj["temp"] as? [String: Any])?["cpu_temp_avg"] as? NSNumber)?.doubleValue
         else { return nil }
-        let fans = (obj["fans"] as? [[String: Any]] ?? []).compactMap { ($0["rpm"] as? NSNumber)?.intValue }
-        return Sensors(cpuTemp: temp, fans: fans)
+        let fans = (obj["fans"] as? [[String: Any]] ?? []).filter { $0["rpm"] is NSNumber }
+        var sensors = Sensors(cpuTemp: temp, fans: fans.compactMap { ($0["rpm"] as? NSNumber)?.intValue })
+        let limits = fans.compactMap { ($0["max_rpm"] as? NSNumber)?.intValue }
+        if limits.count == fans.count { sensors.fanLimits = limits }
+        // 0 while the GPU sleeps, which reads as no sensor.
+        sensors.gpuTemp = ((obj["temp"] as? [String: Any])?["gpu_temp_avg"] as? NSNumber)?.doubleValue.nonZero
+        sensors.gpuLoad = ((obj["gpu_usage"] as? [Any])?.last as? NSNumber)?.doubleValue
+        sensors.cpuPower = (obj["cpu_power"] as? NSNumber)?.doubleValue
+        sensors.gpuPower = (obj["gpu_power"] as? NSNumber)?.doubleValue
+        sensors.systemPower = (obj["sys_power"] as? NSNumber)?.doubleValue.nonZero
+        sensors.tiers = CoreTier.parse(macmon: obj)
+        return sensors
     }
+}
+
+/// One kind of core: its load, 0 to 1, its clock and each core's load.
+public struct CoreTier: Sendable, Equatable {
+    /// Fastest first, as the panel lists them. M5 chips add super cores.
+    public enum Kind: Int, Sendable, Comparable {
+        case superCores, performance, efficiency
+
+        init?(label: String) {
+            switch label {
+            case "S": self = .superCores
+            case "P": self = .performance
+            case "E": self = .efficiency
+            default: return nil
+            }
+        }
+
+        public static func < (a: Kind, b: Kind) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    public var kind: Kind
+    public var load: Double
+    public var megahertz: Int
+    public var cores: [Double]
+
+    public init(kind: Kind, load: Double, megahertz: Int, cores: [Double] = []) {
+        self.kind = kind
+        self.load = load
+        self.megahertz = megahertz
+        self.cores = cores
+    }
+
+    public var title: String {
+        switch kind {
+        case .superCores: "Super cores"
+        case .performance: "Performance cores"
+        case .efficiency: "Efficiency cores"
+        }
+    }
+
+    /// Fastest first. Older macmon gives each kind's load and clock but not
+    /// each core's.
+    static func parse(macmon obj: [String: Any]) -> [CoreTier] {
+        let number = { (value: Any?) in (value as? NSNumber)?.doubleValue }
+        let tiers = (obj["cpu_tiers"] as? [[String: Any]] ?? []).compactMap { tier -> CoreTier? in
+            guard let kind = (tier["label"] as? String).flatMap(Kind.init(label:)),
+                  let load = number(tier["active_ratio"]) else { return nil }
+            let cores = (tier["cores"] as? [[String: Any]] ?? []).map { number($0["active_ratio"]) ?? 0 }
+            return CoreTier(kind: kind, load: load, megahertz: Int(number(tier["freq_mhz"]) ?? 0), cores: cores)
+        }
+        if !tiers.isEmpty { return tiers.sorted { $0.kind < $1.kind } }
+        return [("pcpu_usage", Kind.performance), ("ecpu_usage", .efficiency)].compactMap { key, kind in
+            guard let pair = obj[key] as? [Any], pair.count == 2, let mhz = number(pair[0]), let load = number(pair[1]) else { return nil }
+            return CoreTier(kind: kind, load: load, megahertz: Int(mhz))
+        }
+    }
+}
+
+private extension Double {
+    var nonZero: Double? { self > 0 ? self : nil }
 }
 
 public struct Battery: Sendable, Equatable {
@@ -74,6 +202,13 @@ public struct Battery: Sendable, Equatable {
     public var health: String?
     public var capacity: Int?
     public var cycles: Int?
+    /// Minutes to empty on battery, or to full while charging; nil while
+    /// macOS is still estimating.
+    public var minutes: Int?
+    /// In °C, from the battery's own sensor.
+    public var temperature: Double?
+    /// What the connected charger is rated for.
+    public var adapterWatts: Int?
 
     public init(percent: Int, charging: Bool = false, onAC: Bool = false, charged: Bool = false) {
         self.percent = percent
@@ -88,8 +223,36 @@ public struct Battery: Sendable, Equatable {
         return onAC ? "Not charging" : "On battery"
     }
 
-    public var needsService: Bool {
-        (health.map { $0 != "Good" } ?? false) || (capacity.map { $0 < 80 } ?? false)
+    /// Running down on battery or filling up on power; not when fully
+    /// charged, nor on power and not charging.
+    public var countsDown: Bool { !charged && (charging || !onAC) }
+
+    /// Minutes as a clock, "2:05"; nil when there is nothing to count down.
+    public var clock: String? {
+        guard let minutes, minutes >= 0, countsDown else { return nil }
+        return "\(minutes / 60):" + String(format: "%02d", minutes % 60)
+    }
+
+    /// "2:05 left" on battery, "0:40 to full" while charging.
+    public var timeLeft: String? {
+        clock.map { $0 + (charging ? " to full" : " left") }
+    }
+
+    /// macOS rates the battery anything but normal.
+    public var isWorn: Bool { health.map { $0 != "Good" } ?? false }
+
+    /// Holds less than 80 % of what it did new.
+    public var isFaded: Bool { capacity.map { $0 < 80 } ?? false }
+
+    public var needsService: Bool { isWorn || isFaded }
+
+    /// The smart battery's temperature from its registry properties, in
+    /// hundredths of a degree: on top on some Macs, inside BatteryData on
+    /// others.
+    public static func temperature(registry: [String: Any]) -> Double? {
+        let positive = { (value: Any?) in (value as? Int).flatMap { $0 > 0 ? $0 : nil } }
+        let raw = positive(registry["Temperature"]) ?? positive((registry["BatteryData"] as? [String: Any])?["Temperature"])
+        return raw.map { Double($0) / 100 }
     }
 
     /// Takes health, capacity and cycles from `system_profiler -json
@@ -103,6 +266,128 @@ public struct Battery: Sendable, Equatable {
             capacity = percentValue(info["sppower_battery_health_maximum_capacity"])
             cycles = (info["sppower_battery_cycle_count"] as? NSNumber)?.intValue
         }
+    }
+}
+
+/// A mounted volume, as the file system describes it.
+public struct Volume: Sendable, Equatable, Identifiable {
+    public var name: String
+    public var path: String
+    public var total: Int64
+    public var available: Int64
+    /// Nil for a disk image, which gives no answer.
+    public var isInternal: Bool? = true
+    public var isEjectable = false
+    public var isRemovable = false
+    public var isLocal = true
+
+    public var id: String { path }
+
+    public init(name: String, path: String, total: Int64, available: Int64) {
+        self.name = name
+        self.path = path
+        self.total = total
+        self.available = available
+    }
+
+    /// A network share, a disk image or a drive plugged in: unmounted from
+    /// Finder or ZC Care. The startup disk and its system volumes are not.
+    public var canEject: Bool {
+        let parts = path.split(separator: "/")
+        guard parts.count >= 2, parts[0] == "Volumes", !parts.contains(where: { $0.hasPrefix(".") }) else { return false }
+        return isEjectable || isRemovable || isInternal != true || !isLocal
+    }
+
+    public var kind: String {
+        if !isLocal { return "Network share" }
+        if isInternal == nil { return "Disk image" }
+        return isInternal == true ? "Card or disk" : "External drive"
+    }
+}
+
+/// The latest readings, oldest first, up to a fixed count. A reading that
+/// comes long after the last, after sleep or a stall, starts over, so a
+/// line drawn through them never joins two times as one.
+public struct Recent: Sendable, Equatable {
+    public let capacity: Int
+    public private(set) var values: [Double] = []
+    private var times: [Date] = []
+    public static let maxGap: TimeInterval = 10
+
+    public init(capacity: Int) {
+        self.capacity = max(1, capacity)
+    }
+
+    public mutating func append(_ value: Double, at time: Date) {
+        if let last = times.last, time.timeIntervalSince(last) > Self.maxGap || time < last { clear() }
+        values.append(value)
+        times.append(time)
+        if values.count > capacity {
+            values.removeFirst(values.count - capacity)
+            times.removeFirst(times.count - capacity)
+        }
+    }
+
+    public mutating func clear() {
+        values.removeAll()
+        times.removeAll()
+    }
+
+    public var peak: Double? { values.max() }
+
+    /// The readings as tab-separated rows, which Numbers, Excel and Sheets
+    /// split into columns on paste: the local time with its offset and the
+    /// share in percent.
+    public func table(column: String, timeZone: TimeZone = .current) -> String {
+        let format = ISO8601DateFormatter()
+        format.timeZone = timeZone
+        let header = "time\t\(column.components(separatedBy: .whitespacesAndNewlines).joined(separator: " ")) %"
+        let rows = zip(times, values).map { "\(format.string(from: $0))\t\(String(format: "%.1f", $1 * 100))" }
+        return ([header] + rows).joined(separator: "\n") + "\n"
+    }
+
+    /// The time the readings cover, as "40 s" or "5 min".
+    public var span: String {
+        guard let first = times.first, let last = times.last else { return "0 s" }
+        let seconds = Int(last.timeIntervalSince(first).rounded())
+        return seconds < 60 ? "\(seconds) s" : "\(Int((Double(seconds) / 60).rounded())) min"
+    }
+}
+
+/// Bytes read and written each second, across every drive.
+public struct DiskIO: Sendable, Equatable {
+    public var read: Double
+    public var write: Double
+
+    public init(read: Double, write: Double) {
+        self.read = read
+        self.write = write
+    }
+
+    /// What one drive has read and written since it attached.
+    public struct Counter: Sendable, Equatable {
+        public var read: UInt64
+        public var write: UInt64
+
+        public init(read: UInt64, write: UInt64) {
+            self.read = read
+            self.write = write
+        }
+    }
+
+    /// Compares each drive, by its registry ID, with its last read, so a
+    /// drive that attaches, ejects or goes missing from one read adds
+    /// nothing. Nil on the first read or when the reads are so far apart
+    /// the rate would be a long average rather than now.
+    public static func rate(from last: [UInt64: Counter], to now: [UInt64: Counter], seconds: Double) -> DiskIO? {
+        guard !last.isEmpty, seconds > 0, seconds <= 5 else { return nil }
+        var read: UInt64 = 0, write: UInt64 = 0
+        for (id, counter) in now {
+            guard let before = last[id], counter.read >= before.read, counter.write >= before.write else { continue }
+            read += counter.read - before.read
+            write += counter.write - before.write
+        }
+        return DiskIO(read: Double(read) / seconds, write: Double(write) / seconds)
     }
 }
 
@@ -167,22 +452,37 @@ public struct SpeedTest: Sendable, Equatable {
     }
 }
 
-/// A process from `ps -Aceo pid=,pcpu=,rss=,comm=`.
+/// A process from `ps -Aceo pid=,pcpu=,rss=,comm=`, or with `detailed`
+/// from `ps -Aceo pid=,pcpu=,rss=,uid=,ppid=,stat=,comm=`.
 public struct Proc: Sendable, Equatable, Identifiable {
     public var pid: Int32
     public var cpu: Double
     /// Resident memory in bytes.
     public var memory: Int64
     public var name: String
+    public var uid: UInt32? = nil
+    public var ppid: Int32? = nil
+    /// The ps state letters, such as "Ss" or "T".
+    public var state = ""
 
     public var id: Int32 { pid }
+    public var isStopped: Bool { state.contains("T") }
+    public var isZombie: Bool { state.contains("Z") }
 
-    public static func parse(ps: String) -> [Proc] {
-        ps.split(whereSeparator: \.isNewline).compactMap { line in
+    public static func parse(ps: String, detailed: Bool = false) -> [Proc] {
+        let leading = detailed ? 6 : 3
+        return ps.split(whereSeparator: \.isNewline).compactMap { line in
             // The name may hold spaces, so it takes the rest of the line.
-            let f = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-            guard f.count == 4, let pid = Int32(f[0]), let cpu = Double(f[1]), let rss = Int64(f[2]) else { return nil }
-            return Proc(pid: pid, cpu: cpu, memory: rss * 1024, name: String(f[3]))
+            let f = line.split(separator: " ", maxSplits: leading, omittingEmptySubsequences: true)
+            guard f.count == leading + 1, let pid = Int32(f[0]), let cpu = Double(f[1]), let rss = Int64(f[2]) else { return nil }
+            var proc = Proc(pid: pid, cpu: cpu, memory: rss * 1024, name: f[leading].trimmingCharacters(in: .whitespaces))
+            if detailed {
+                guard let uid = UInt32(f[3]), let ppid = Int32(f[4]) else { return nil }
+                proc.uid = uid
+                proc.ppid = ppid
+                proc.state = String(f[5])
+            }
+            return proc
         }
     }
 }

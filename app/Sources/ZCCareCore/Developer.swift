@@ -34,6 +34,15 @@ public enum ProjectDependencies {
         return found.sorted { $0.size > $1.size }
     }
 
+    /// The folders whose project changed within `days` since the list was
+    /// read: work resumed there needs its dependencies.
+    public static func touched(_ folders: [LargeFile], within days: Int = 90, now: Date = .now) -> [LargeFile] {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86400)
+        return folders.filter {
+            lastTouched(project: $0.url.deletingLastPathComponent(), skipping: $0.url.lastPathComponent) >= cutoff
+        }
+    }
+
     /// The folders whose project a running command points into: a dev
     /// server or a script there still loads its dependencies.
     public static func running(_ folders: [LargeFile], commands: [String]) -> [LargeFile] {
@@ -119,6 +128,23 @@ public enum AIModels {
             + huggingFace(hub: URL(fileURLWithPath: home + "/.cache/huggingface/hub"))
             + lmStudio(folders: [home + "/.lmstudio/models", home + "/.cache/lm-studio/models"].map(URL.init(fileURLWithPath:))))
             .sorted { $0.size > $1.size }
+    }
+
+    /// What removing a model listed earlier may trash now: its reviewed
+    /// paths it still owns alone. Nil when it is gone, or was pulled again
+    /// and owns paths no one reviewed: removing part would strand the rest.
+    public static func stillOwned(_ model: AIModel, in fresh: [AIModel]) -> [URL]? {
+        guard let now = fresh.first(where: { $0.id == model.id }) else { return nil }
+        let reviewed = Set(model.paths)
+        guard now.paths.allSatisfy(reviewed.contains), !now.paths.isEmpty else { return nil }
+        return now.paths
+    }
+
+    /// An `ollama pull` or `ollama create`: either may reuse a blob on disk.
+    public static func isOllamaWriting(_ command: String) -> Bool {
+        let words = command.split(separator: " ")
+        guard let at = words.firstIndex(where: { $0 == "ollama" || $0.hasSuffix("/ollama") }), at + 1 < words.count else { return false }
+        return ["pull", "create", "cp"].contains(words[at + 1])
     }
 
     private struct Manifest: Decodable {

@@ -6,6 +6,8 @@ import ZCCareCore
 
 struct ClutterView: View {
     @Bindable var care: Care
+    @State private var kind: FileKind?
+    @State private var unopenedOnly = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,8 +20,13 @@ struct ClutterView: View {
                     CareSection("Large Files") {
                         if care.largeFiles.isEmpty {
                             empty("No file over \(Store.bytes(Care.largeFile)) outside Library.")
+                        } else {
+                            largeFilter
+                            if shownLarge.isEmpty {
+                                Text("None match.").foregroundStyle(.secondary).padding(10)
+                            }
                         }
-                        ForEach(care.largeFiles) { FileRow(care: care, file: $0) }
+                        FileList(care: care, files: shownLarge) { files in Task { await care.trashFiles(files, title: "Large Files") } }
                     }
                     CareSection("Duplicates") {
                         if care.duplicates.isEmpty {
@@ -82,18 +89,53 @@ struct ClutterView: View {
                         if care.oldDownloads.isEmpty {
                             empty("Nothing in Downloads older than 30 days.")
                         }
-                        ForEach(care.oldDownloads) { FileRow(care: care, file: $0, dateLabel: "added") }
+                        FileList(care: care, files: care.oldDownloads, dateLabel: "added") { files in Task { await care.trashFiles(files, title: "Old Downloads") } }
                     }
                     CareSection("Installers") {
                         if care.diskImages.isEmpty {
                             empty("No disk images or packages in Downloads or on the Desktop.")
                         }
-                        ForEach(care.diskImages) { FileRow(care: care, file: $0, dateLabel: "added") }
+                        FileList(care: care, files: care.diskImages, dateLabel: "added") { files in Task { await care.trashFiles(files, title: "Installers") } }
                     }
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 70)
             }
+        }
+    }
+
+    private var shownLarge: [LargeFile] {
+        care.largeFiles.filter { file in
+            (kind == nil || FileKind.of(file.url) == kind) && (!unopenedOnly || FileKind.unopened(file))
+        }
+    }
+
+    /// Kind and age, as Finder's own searches slice files; only kinds the
+    /// scan found are offered.
+    private var largeFilter: some View {
+        let counts = Dictionary(grouping: care.largeFiles, by: { FileKind.of($0.url) }).mapValues(\.count)
+        return HStack(spacing: 12) {
+            Picker("Kind", selection: $kind) {
+                Text("All Kinds (\(care.largeFiles.count))").tag(FileKind?.none)
+                Divider()
+                ForEach(FileKind.allCases.filter { counts[$0] != nil }, id: \.self) { k in
+                    Text("\(k.rawValue) (\(counts[k] ?? 0))").tag(FileKind?.some(k))
+                }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            Toggle("Not opened for a year", isOn: $unopenedOnly)
+                .toggleStyle(.checkbox)
+                .help("Files last opened, or never opened and last changed, over a year ago")
+            Spacer()
+            if kind != nil || unopenedOnly {
+                Text(Store.bytes(shownLarge.reduce(0) { $0 + $1.size })).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .onChange(of: care.largeFiles.map(\.id)) {
+            if let kind, counts[kind] == nil { self.kind = nil }
         }
     }
 

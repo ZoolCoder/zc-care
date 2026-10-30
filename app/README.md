@@ -29,6 +29,7 @@ links it onto PATH:
 
 ```console
 $ brew tap zoolcoder/zc-care https://github.com/zoolcoder/zc-care
+$ brew trust zoolcoder/zc-care    # newer Homebrew loads a third-party tap only once you trust it
 $ brew install --cask zc-care
 ```
 
@@ -102,26 +103,39 @@ flowchart LR
 
 ## The panel
 
-Click the mark, or press ⌃⌥Z, to open the panel.
+Click the mark, or press ⌃⌥Z, to open the panel. It opens on the Mac
+page; the laptop button at its foot opens the other pages, *Plan* and
+*Apply*, and shows a dot when one of them holds something to do. The arrow beside
+it reads the Mac again (⌘R). The sparkle opens Smart Care.
 
-| Tab | Shows |
+| Page | Shows |
 |---|---|
 | Mac | Disk, memory, CPU, battery, network and sensors, the largest junk folders, and advice. |
 | Overview | Each target with what is in place and missing, and *Apply* per target. |
-| Updates | Outdated packages and runtimes, with *Update* per item and *Update All…*. |
+| Updates | macOS updates from Software Update, with *Open Software Update*; outdated packages and runtimes, with *Update* per item and *Update All…*. |
 | Health | `doctor` findings, with *Fix*, *Copy Fix* and *Ignore*. |
 | Services | Homebrew services and launchd agents, with *Start*, *Run Now* and logs. |
 
 The panel's settings turn on:
 
-- notifications
+- notifications, including one when an app dragged to the Trash left files
+  in the Library, which opens Leftovers
+- vitals alerts, with a limit each: free disk space, memory pressure, CPU
+  heat, battery capacity, the Trash's size, a Bluetooth device's battery
+  and one app hogging the CPU or memory for ten minutes
 - the ⌃⌥Z hotkey
 - the weekly Smart Care scan
 - opening at login
 
-Each tile on the Mac tab opens a detail. *Free Up* on Disk lists the
-folders it can clear, with their sizes. *Top Apps* on CPU lists what is
-busy. The bottom bar opens ZC Care and the settings.
+Each tile on the Mac tab opens a detail. *Free Up* on Disk shows
+what the drives read and write each second, lists connected drives, disk images and shares, each with an Eject button, then
+the folders it can clear, with their sizes. *Free Up* on Memory graphs the last five minutes and splits
+memory into app memory, wired, compressed, cached files, free and swap. *Top Apps* on CPU lists what is
+busy. *Details* on Battery shows its condition, capacity, cycles,
+temperature, time left and charger, what keeps the Mac or its screen awake and for how long, when it last slept and woke and why, its upkeep wakes and the battery used asleep over the past day, then the apps using the most CPU; *Top Apps* on CPU starts with a graph of the last five minutes (*Copy Readings* copies them for a spreadsheet) and each core's load, then the GPU, fan and
+power readings. *Details* on the network tile shows the connection's
+service, addresses, router, DNS, proxies and VPNs, on Wi-Fi the signal, standard, channel, rate and security, runs a speed test, lists the five
+processes moving the most data and how fast, and lists your apps listening on a port, marked Network when other devices can try to connect. *Details* on the devices tile lists the displays, with pixels and refresh rate, and what is plugged into USB. The bottom bar opens ZC Care and the settings.
 
 If [SketchyBar](https://github.com/FelixKratz/SketchyBar) is installed,
 ZC Care sends it the count of open items for its `zccare` item.
@@ -132,15 +146,15 @@ ZC Care sends it the count of open items for its `zccare` item.
 |---|---|
 | Smart Care | Scans everything at once: junk, clutter, updates, health. *Run* cleans up, then updates. |
 | Cleanup | Clears caches, logs, build output, npx packages and Mail downloads. Clears AI clutter: Claude Code temp files and old versions, and the caches and logs of Claude, Cursor, ChatGPT, Windsurf, Codex, Gemini CLI and Chrome DevTools MCP. Empties the Trash. |
-| Protection | Shows Gatekeeper's verdict per app, background apps, the privacy permissions apps hold, and each browser's history, cookies and cache, cleared only while that browser is closed. |
-| Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin Time Machine snapshots, reindex Spotlight, clean Homebrew, Docker and simulators. |
-| Applications | Uninstalls an app with what it keeps in the Library. *Adopt* replaces a hand-installed app with its Homebrew cask. Finds leftovers of removed apps. |
-| My Clutter | Finds large files, duplicates, similar images (Vision keeps the one with the most pixels), old downloads and installers. |
-| Space Lens | Maps what fills your home folder. |
+| Protection | Shows issues found and checks passed; FileVault, firewall, SIP and security responses beside Gatekeeper's verdict per app, background apps, extensions (Safari, Finder, Share, Quick Look, Spotlight, Notification Center, Action, Photos and system extensions, with host app, state, and a flag when the host app is gone or the developer unidentified), the privacy permissions apps hold (with Reset), Recent Items to clear, known Wi-Fi networks to forget, and each browser's history, cookies, cache, site data and saved tabs, cleared only while that browser is closed. |
+| Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin Time Machine snapshots, reindex Spotlight, verify the startup disk, reset Quick Look, clear font caches, clean Homebrew, Docker and simulators. Top processes by CPU or memory with *Quit* and *Force Quit*; ZC Care, system daemons and other users' processes cannot be quit. |
+| Applications | Uninstalls an app with what it keeps in the Library, its files split into app, data, caches, settings and logs. *Adopt* replaces a hand-installed app in `/Applications` with its Homebrew cask. Finds leftovers of removed apps. *Updates* lists newer versions from each app's own update feed, Homebrew and the App Store. *Intel Only* lists apps that need Rosetta. Apps in `~/Applications` are listed too; a copy installed twice is flagged, and uninstalling it leaves the settings the other copy uses. Leftovers also lists installer package receipts and whether their files remain. |
+| My Clutter | Finds large files, duplicates, similar images (Vision keeps the one with the most pixels), old downloads and installers. Large files filter by kind (videos, music, pictures, archives, installers, documents) and by not opened for a year. |
+| Space Lens | Maps what fills your home folder. *Startup Disk* shows hidden volumes, snapshots, purgeable space and the drive's health. |
 | Cloud Cleanup | Lists the files cloud drives keep downloaded; *Remove Download* frees them and keeps them in the cloud. |
-| Developer | Finds `node_modules` and virtualenvs of projects untouched for 90 days, and local models from Ollama, LM Studio and Hugging Face. |
+| Developer | Finds `node_modules` and virtualenvs of projects untouched for 90 days, and local models from Ollama, LM Studio and Hugging Face. Homebrew: unneeded dependencies with *Remove…* (never one the config declares), what `brew cleanup` would free, and `brew doctor` warnings. Simulator runtimes with *Delete* (permanent, Xcode downloads them again), and Android system images and AVDs with *Show in Finder*. |
 | My Tools | Lists every tool as a searchable card, including *Screen Cleaning Mode*. |
-| My Activity | Shows Mac health, disk use, what ZC Care freed by kind, recommendations and recent runs. |
+| My Activity | Shows Mac health, disk use, what ZC Care freed by kind, a tile each for protection, updates, maintenance and the startup drive, recommendations and recent runs. |
 
 <p align="center">
   <img src="../docs/modules/ROOT/images/care-cleanup.png" alt="Cleanup: system junk and AI clutter" width="49%">
@@ -182,7 +196,8 @@ outside what Cleanup clears.
 
 - **Full Disk Access** lets Protection read privacy permissions and browser
   history and cookies. An ad hoc signed build is a new app to macOS, so each
-  rebuild asks again.
+  rebuild asks again; once access has worked, the main window says when it
+  stops.
 - **Finder automation** lets Cleanup empty the Trash. It asks once.
 
 ## URLs

@@ -9,6 +9,9 @@ public struct Junk: Sendable, Equatable, Identifiable {
     public var path: String
     /// Entries inside the folder to leave alone, by name in any case.
     public var keep: Set<String> = []
+    /// Cleared by hand only, never by Clean All: what it holds does not
+    /// come back on its own.
+    public var optional = false
 
     public static func spots(home: String) -> [Junk] {
         [
@@ -32,6 +35,10 @@ public struct Junk: Sendable, Equatable, Identifiable {
                  path: home + "/Library/Developer/Xcode/iOS DeviceSupport"),
             Junk(id: "simulators", title: "Simulator caches", detail: "Dyld and runtime caches the simulators rebuild.",
                  path: home + "/Library/Developer/CoreSimulator/Caches"),
+            Junk(id: "devicelogs", title: "Xcode device logs", detail: "Crash logs copied from iPhones and iPads; Xcode copies them again when a device connects.",
+                 path: home + "/Library/Developer/Xcode/iOS Device Logs"),
+            Junk(id: "testdevices", title: "Xcode test devices", detail: "Simulators cloned for test runs; the next run makes them again.",
+                 path: home + "/Library/Developer/XCTestDevices"),
             Junk(id: "go", title: "Go build cache", detail: "Compiled packages go build makes again.",
                  path: home + "/Library/Caches/go-build"),
             Junk(id: "pip", title: "pip cache", detail: "Wheels pip downloads again when needed.",
@@ -44,12 +51,28 @@ public struct Junk: Sendable, Equatable, Identifiable {
                  path: home + "/.cargo/registry/cache"),
             Junk(id: "cocoapods", title: "CocoaPods cache", detail: "Pods downloaded for iOS projects.",
                  path: home + "/Library/Caches/CocoaPods"),
+            Junk(id: "pub", title: "Dart and Flutter pub cache", detail: "Hosted packages pub downloads again; a tool from dart pub global activate needs activating again.",
+                 path: home + "/.pub-cache/hosted", optional: true),
+            Junk(id: "gradlewrapper", title: "Gradle wrapper distributions", detail: "Gradle versions the wrapper downloads again when a project needs one.",
+                 path: home + "/.gradle/wrapper/dists"),
+            Junk(id: "pnpm", title: "pnpm store", detail: "Packages pnpm downloads again when needed; clear it while no install runs.",
+                 path: home + "/Library/pnpm/store"),
+            Junk(id: "pnpmxdg", title: "pnpm store (XDG)", detail: "Packages pnpm downloads again when needed; clear it while no install runs.",
+                 path: home + "/.local/share/pnpm/store"),
+            Junk(id: "bun", title: "Bun install cache", detail: "Packages Bun downloads again when needed; clear it while no install runs.",
+                 path: home + "/.bun/install/cache"),
+            Junk(id: "gomod", title: "Go module downloads", detail: "Module archives go downloads again while no build runs; the extracted copies in pkg/mod are read-only and stay.",
+                 path: home + "/go/pkg/mod/cache/download"),
+            Junk(id: "misedownloads", title: "mise downloads", detail: "Tool archives mise fetches again when it installs.",
+                 path: home + "/.local/share/mise/downloads"),
             Junk(id: "npx", title: "npx packages", detail: "Tools npx and MCP servers fetch; running ones keep theirs, the rest npx fetches again.",
                  path: home + "/.npm/_npx"),
             Junk(id: "mail", title: "Mail downloads", detail: "Copies of attachments Mail saved on opening; the mail keeps the originals.",
                  path: home + "/Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
             Junk(id: "logs", title: "Logs", detail: "What apps logged; ZC Care keeps its own.",
                  path: home + "/Library/Logs", keep: ["ZCCare"]),
+            Junk(id: "iosbackups", title: "iPhone and iPad backups", detail: "Backups the Finder made of a device. A new one takes a full backup again; iCloud backups stay.",
+                 path: home + "/Library/Application Support/MobileSync/Backup", optional: true),
         ]
     }
 

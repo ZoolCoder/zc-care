@@ -47,11 +47,13 @@ private func scratch(_ names: [String]) throws -> (folder: URL, files: [URL]) {
 }
 
 @Test func junkEmptiesToTheTrashByDefault() throws {
-    let (folder, files) = try scratch(["a.bin", "b.bin"])
+    // Names no other test trashes: tests run in parallel, and two files of
+    // one name moving to the Trash at once can collide.
+    let (folder, files) = try scratch(["junk-a.bin", "junk-b.bin"])
     defer { try? FileManager.default.removeItem(at: folder) }
     let spot = Junk(id: "t", title: "t", detail: "", path: folder.path)
-    let removal = spot.empty(only: ["a.bin"])
+    let removal = spot.empty(only: ["junk-a.bin"])
     defer { removal.trashed.forEach { try? FileManager.default.removeItem(atPath: $0.inTrash) } }
-    #expect(removal.trashed.map { URL(fileURLWithPath: $0.original).lastPathComponent } == ["a.bin"])
+    #expect(removal.trashed.map { URL(fileURLWithPath: $0.original).lastPathComponent } == ["junk-a.bin"])
     #expect(FileManager.default.fileExists(atPath: files[1].path))
 }

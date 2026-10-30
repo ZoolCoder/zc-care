@@ -1,13 +1,13 @@
 cask "zc-care" do
-  version "0.2.0"
-  sha256 "cffaf3fcac62c2a900c4271c91c927655f1131c063dd1b03e2dc90b9fd0bce86"
+  version "0.3.0"
+  sha256 "31ed1a4b70c0662025ee857db31eb4131f2dfc498005131db3321b94baa696f5"
 
   url "https://github.com/zoolcoder/zc-care/releases/download/v#{version}/ZCCare_#{version}.zip"
   name "ZC Care"
-  desc "Set up a Mac from one config, keep it that way, and keep it clean"
+  desc "Set up a machine from one config, keep it that way, and keep it clean"
   homepage "https://zoolcoder.github.io/zc-care/"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "ZCCare.app"
   binary "#{appdir}/ZCCare.app/Contents/MacOS/zc-care"
@@ -15,16 +15,16 @@ cask "zc-care" do
   # INTERIM until a Developer ID release: the app is signed ad hoc, so the
   # quarantine flag brew's download sets makes Gatekeeper kill the CLI (exit
   # 137). Clear it. Remove this block once the app is signed and notarised.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/ZCCare.app"]
+  postflight_steps do
+    run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{appdir}}/ZCCare.app"],
+        writable_paths: ["ZCCare.app"], writable_base: :appdir
   end
 
   uninstall quit: "dev.zoolcoder.zccare"
 
   zap trash: [
-    "~/Library/Application Support/ZCCare",
     "~/Library/Application Support/dev.zoolcoder.zccare",
+    "~/Library/Application Support/ZCCare",
     "~/Library/Caches/dev.zoolcoder.zccare",
     "~/Library/Logs/ZCCare",
     "~/Library/Preferences/dev.zoolcoder.zccare.plist",

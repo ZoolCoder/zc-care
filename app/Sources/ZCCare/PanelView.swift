@@ -2,43 +2,48 @@ import AppKit
 import SwiftUI
 import ZCCareCore
 
-/// The panel under the bar: a tab each for the Mac's vitals, coverage,
-/// updates, the doctor's findings and services, with plan and apply below.
+/// The panel under the bar. Its home is the Mac's vitals, with nothing above
+/// the grade, as CleanMyMac's menu draws it; coverage, updates, the doctor's
+/// findings and services are pages the footer's Mac menu opens.
 struct PanelView: View {
     @Bindable var store: Store
 
     var body: some View {
+        let home = store.setupProblem == nil && store.snapshot != nil && store.tab == .mac
         VStack(alignment: .leading, spacing: 10) {
-            Header(store: store)
+            if !home { Header(store: store) }
             if let problem = store.setupProblem {
                 SetupCard(problem: problem, setup: store.needsConfig ? store.openSetup : nil, choose: store.chooseConfig)
             } else if let snapshot = store.snapshot {
-                Tabs(store: store, snapshot: snapshot)
+                if !home { Tabs(store: store, snapshot: snapshot, system: store.system) }
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(snapshot.errors, id: \.self) { Text($0).font(.caption).foregroundStyle(Theme.bad) }
                         switch store.tab {
                         case .mac: MacTab(store: store, snapshot: snapshot)
                         case .overview: OverviewTab(store: store, snapshot: snapshot)
-                        case .updates: UpdatesTab(store: store, items: snapshot.outdated)
+                        case .updates: UpdatesTab(store: store, system: store.system, items: snapshot.outdated)
                         case .health: HealthTab(store: store)
                         case .services: ServicesTab(store: store, services: snapshot.services)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(height: 440)
+                // The home has the header's and the tabs' room too.
+                .frame(height: home ? 540 : 440)
             } else {
                 ProgressView("Reading this Mac…").frame(maxWidth: .infinity, minHeight: 200)
             }
             StatusLine(store: store)
             Rectangle().fill(Theme.rim).frame(height: 1).padding(.horizontal, -14)
-            Footer(store: store)
+            Footer(store: store, home: home)
         }
         .padding(14)
         .frame(width: 430)
         .themed()
         .onAppear { store.refreshIfStale() }
+        // Not .task: closing the panel would cancel a check that takes up to 40 s.
+        .onAppear { Task { await store.system.refreshIfStale() } }
     }
 }
 
@@ -57,23 +62,14 @@ private struct Header: View {
                     Text("ZC Care").font(.headline)
                     Image(systemName: icon).font(.caption).foregroundStyle(tint)
                 }
-                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(store.statusSummary).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button("Smart Care") { store.openCare?(nil) }
                 .controlSize(.small)
                 .disabled(store.setupProblem != nil)
                 .help("Open ZC Care's Smart Care")
-            Button {
-                Task { await store.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise").accessibilityLabel("Refresh")
-            }
-            .buttonStyle(.icon)
-            .keyboardShortcut("r")
-            .disabled(store.setupProblem != nil || store.refreshing)
-            .spinning(store.refreshing)
-            .help("Read this Mac again (⌘R)")
+            RefreshButton(store: store)
         }
     }
 
@@ -87,14 +83,35 @@ private struct Header: View {
         return store.attention == 0 ? Theme.good : Theme.warning
     }
 
-    private var subtitle: String {
-        if store.refreshing { return "Reading…" }
-        guard let at = store.refreshedAt else { return "" }
-        let n = store.attention
+}
+
+private struct RefreshButton: View {
+    let store: Store
+
+    var body: some View {
+        Button {
+            Task { await store.refresh() }
+        } label: {
+            Image(systemName: "arrow.clockwise").accessibilityLabel("Refresh")
+        }
+        .buttonStyle(.icon)
+        .keyboardShortcut("r")
+        .disabled(store.setupProblem != nil || store.refreshing)
+        .spinning(store.refreshing)
+        .help("Read this Mac again (⌘R). " + store.statusSummary)
+    }
+}
+
+extension Store {
+    /// How the workstation stands and when it was read, as the header says it.
+    var statusSummary: String {
+        if refreshing { return "Reading…" }
+        guard let at = refreshedAt else { return "" }
+        let n = attention
         let state = n == 0 ? "Everything in place" : "\(n) need\(n == 1 ? "s" : "") attention"
         var line = state + " · " + at.formatted(.relative(presentation: .named))
         // The daily check, which ran even while this panel was closed.
-        if let d = store.snapshot?.drift, d.error == nil, d.changes > 0 {
+        if let d = snapshot?.drift, d.error == nil, d.changes > 0 {
             line += " · drift \(d.changes) since " + d.at.formatted(date: .omitted, time: .shortened)
         }
         return line
@@ -105,6 +122,7 @@ private struct Header: View {
 private struct Tabs: View {
     @Bindable var store: Store
     let snapshot: Snapshot
+    let system: SystemUpdates
 
     var body: some View {
         HStack(spacing: 4) {
@@ -122,7 +140,7 @@ private struct Tabs: View {
                     .padding(.vertical, 5)
                     .frame(maxWidth: .infinity)
                     .foregroundStyle(store.tab == tab ? Color.white : Color.white.opacity(0.65))
-                    .background(RoundedRectangle(cornerRadius: 7).fill(store.tab == tab ? Color.white.opacity(0.16) : .clear))
+                    .background(RoundedRectangle(cornerRadius: 7).fill(store.tab == tab ? Theme.selected : .clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -133,11 +151,18 @@ private struct Tabs: View {
     }
 
     private func count(_ tab: Store.Tab) -> Int? {
+        store.pending(tab, snapshot: snapshot)
+    }
+}
+
+extension Store {
+    /// What a page holds that needs doing.
+    func pending(_ tab: Tab, snapshot: Snapshot) -> Int {
         switch tab {
-        case .mac: store.monitor.vitals.concerns(insecure: 0).count
+        case .mac: monitor.vitals.concerns(insecure: 0).count
         case .overview: snapshot.targets.map(\.gaps).reduce(0, +)
-        case .updates: snapshot.outdated.count
-        case .health: store.findings.count
+        case .updates: snapshot.outdated.count + system.updates.count
+        case .health: findings.count
         case .services: snapshot.services.filter { !$0.isRunning }.count
         }
     }
@@ -445,34 +470,77 @@ private struct PlanSection: View {
 
 // MARK: Updates
 
+/// What `softwareupdate -l` found, kept for six hours: it asks Apple's
+/// servers and takes up to 40 seconds.
+@MainActor @Observable
+final class SystemUpdates {
+    private(set) var updates: [MacUpdate] = []
+    private(set) var checking = false
+    private(set) var failure: String?
+    /// When the last check answered; a failed check leaves it, so the next open tries again.
+    private(set) var checkedAt: Date?
+    /// When the last check began. Offline, softwareupdate takes up to 40 s
+    /// to fail, so opening the panel again soon after does not ask again.
+    private var triedAt: Date?
+
+    func refreshIfStale() async {
+        if let checkedAt, Date.now.timeIntervalSince(checkedAt) < 6 * 3600 { return }
+        if let triedAt, Date.now.timeIntervalSince(triedAt) < 15 * 60 { return }
+        await check()
+    }
+
+    func check() async {
+        guard !checking else { return }
+        checking = true
+        triedAt = .now
+        defer { checking = false }
+        do {
+            updates = try await MacUpdate.list()
+            failure = nil
+            checkedAt = .now
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+}
+
 private struct UpdatesTab: View {
     let store: Store
+    let system: SystemUpdates
     let items: [Item]
     @State private var filter = ""
 
     var body: some View {
-        if items.isEmpty {
-            EmptyNote(text: "Everything is up to date.")
-        } else {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    if items.count > 6 {
-                        TextField("Filter", text: $filter)
-                            .textFieldStyle(.roundedBorder)
-                            .controlSize(.small)
-                    } else {
-                        Spacer()
-                    }
-                    Button("Update All…") { Task { await store.updateAll() } }
+        VStack(alignment: .leading, spacing: 10) {
+            MacUpdatesSection(system: system)
+            if !items.isEmpty {
+                cliUpdates
+            } else {
+                EmptyNote(text: "Packages and runtimes are up to date.")
+            }
+        }
+    }
+
+    /// "Update All…" applies these items only; macOS updates need Software Update.
+    private var cliUpdates: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                if items.count > 6 {
+                    TextField("Filter", text: $filter)
+                        .textFieldStyle(.roundedBorder)
                         .controlSize(.small)
-                        .disabled(store.busy != nil)
+                } else {
+                    Spacer()
                 }
-                ForEach(groups, id: \.0) { title, group in
-                    VStack(alignment: .leading, spacing: 4) {
-                        SectionTitle(title: title, count: group.count)
-                        ListCard {
-                            ForEach(group) { item in UpdateRow(store: store, item: item) }
-                        }
+                Button("Update All…") { Task { await store.updateAll() } }
+                    .controlSize(.small)
+                    .disabled(store.busy != nil)
+            }
+            ForEach(groups, id: \.0) { title, group in
+                VStack(alignment: .leading, spacing: 4) {
+                    SectionTitle(title: title, count: group.count)
+                    ListCard {
+                        ForEach(group) { item in UpdateRow(store: store, item: item) }
                     }
                 }
             }
@@ -488,6 +556,79 @@ private struct UpdatesTab: View {
             (rank.firstIndex(of: $0) ?? rank.count, $0) < (rank.firstIndex(of: $1) ?? rank.count, $1)
         }
         return kinds.map { kind in (titles[kind] ?? kind.capitalized, shown.filter { $0.kind == kind }) }
+    }
+}
+
+/// macOS updates are installed in Software Update, which needs a password
+/// and a restart: the button opens it.
+private struct MacUpdatesSection: View {
+    let system: SystemUpdates
+    private static let softwareUpdate = URL(string: "x-apple.systempreferences:com.apple.Software-Update-Settings.extension")!
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                SectionTitle(title: "macOS", count: system.updates.isEmpty ? nil : system.updates.count)
+                Spacer()
+                if system.checking {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("Check Again") { Task { await system.check() } }
+                        .buttonStyle(.zcLink).font(.caption)
+                }
+                if !system.updates.isEmpty {
+                    Button("Open Software Update") { NSWorkspace.shared.open(Self.softwareUpdate) }
+                        .controlSize(.small)
+                }
+            }
+            if let failure = system.failure {
+                Text("Could not check for macOS updates: \(failure)")
+                    .font(.caption).foregroundStyle(Theme.bad).lineLimit(1).help(failure)
+            } else if system.updates.isEmpty, !system.checking, let checkedAt = system.checkedAt {
+                Text("Up to date, checked \(checkedAt.formatted(date: .omitted, time: .shortened)).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !system.updates.isEmpty {
+                ListCard {
+                    ForEach(system.updates) { update in MacUpdateRow(update: update) }
+                }
+            }
+        }
+    }
+}
+
+private struct MacUpdateRow: View {
+    let update: MacUpdate
+
+    var body: some View {
+        HStack(spacing: 10) {
+            SymbolTile(symbol: "arrow.down.circle.fill", colors: Tint.blue)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(update.title).lineLimit(1)
+                Text(detail).font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            if let flag {
+                Text(flag)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(update.restart ? Theme.warning.opacity(0.85) : .white.opacity(0.25)))
+                    .foregroundStyle(.white)
+            }
+        }
+        .modifier(Hover())
+        .help(update.label)
+    }
+
+    private var detail: String {
+        let size = update.sizeKiB.map { ByteCountFormatter.string(fromByteCount: Int64($0) * 1024, countStyle: .file) }
+        return [update.version, size].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    private var flag: String? {
+        if update.restart { return "Restart" }
+        return update.recommended ? "Recommended" : nil
     }
 }
 
@@ -724,6 +865,8 @@ private struct StatusLine: View {
 
 private struct Footer: View {
     @Bindable var store: Store
+    /// The home has no header, so its refresh lives here.
+    let home: Bool
 
     var body: some View {
         ZStack {
@@ -732,25 +875,52 @@ private struct Footer: View {
                 .font(.callout.weight(.medium))
                 .disabled(store.busy != nil || store.setupProblem != nil)
             HStack(spacing: 6) {
-                Group {
-                    Button {
-                        store.tab = .overview
-                        Task { await store.showPlan() }
-                    } label: {
-                        Image(systemName: "list.bullet.rectangle").accessibilityLabel("Plan")
-                    }
-                    .help("Plan: show what apply would change")
-                    Button { Task { await store.apply() } } label: {
-                        Image(systemName: "wand.and.stars").accessibilityLabel("Apply")
-                    }
-                    .help("Apply…")
+                pages
+                if home { RefreshButton(store: store) }
+                Spacer()
+                Button { store.openCare?(.smartCare) } label: {
+                    Image(systemName: "sparkles").accessibilityLabel("Smart Care")
                 }
                 .buttonStyle(.icon)
-                .disabled(store.busy != nil || store.setupProblem != nil)
-                Spacer()
+                .disabled(store.setupProblem != nil)
+                .help("Open Smart Care")
                 settings
             }
         }
+    }
+
+    /// The pages beyond the Mac, with plan and apply; a dot says one needs doing.
+    private var pages: some View {
+        let snapshot = store.snapshot
+        let waiting = snapshot.map { s in Store.Tab.allCases.contains { $0 != .mac && store.pending($0, snapshot: s) > 0 } } ?? false
+        return IconTile {
+            Menu {
+                ForEach(Store.Tab.allCases, id: \.self) { tab in
+                    let n = snapshot.map { store.pending(tab, snapshot: $0) } ?? 0
+                    Button(tab == .mac ? "This Mac" : n > 0 && tab != .mac ? "\(tab.rawValue) (\(n))" : tab.rawValue) { store.tab = tab }
+                        .disabled(snapshot == nil)
+                }
+                Divider()
+                Group {
+                    Button("Plan") {
+                        store.tab = .overview
+                        Task { await store.showPlan() }
+                    }
+                    Button("Apply…") { Task { await store.apply() } }
+                }
+                .disabled(store.busy != nil)
+            } label: {
+                Image(systemName: "laptopcomputer").accessibilityLabel(waiting ? "Pages, something needs doing" : "Pages")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(store.setupProblem != nil)
+        }
+        .overlay(alignment: .topTrailing) {
+            if waiting { Circle().fill(Theme.warning).frame(width: 7, height: 7).offset(x: 2, y: -2) }
+        }
+        .help("Coverage, updates, health and services; plan and apply")
     }
 
     private var settings: some View {

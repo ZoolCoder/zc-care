@@ -50,33 +50,41 @@ struct CareView: View {
         HStack(spacing: 0) {
             Sidebar(care: care)
             ZStack(alignment: .bottom) {
-                Group {
-                    if care.showsIntro(care.module) {
-                        ModuleIntro(care: care, module: care.module)
-                    } else {
-                        switch care.module {
-                        case .smartCare: SmartCareView(care: care)
-                        case .cleanup: CleanupView(care: care)
-                        case .clutter: ClutterView(care: care)
-                        case .developer: DeveloperView(care: care)
-                        case .apps: ApplicationsView(care: care)
-                        case .performance: PerformanceView(care: care)
-                        case .protection: ProtectionView(care: care)
-                        case .spaceLens: SpaceLensView(care: care)
-                        case .cloud: CloudCleanupView(care: care)
-                        case .workstation: MyWorkstation(care: care)
-                        case .tools: MyTools(care: care)
-                        case .activity: MyActivity(care: care)
+                VStack(spacing: 0) {
+                    if care.store.accessLost { AccessLostBanner(store: care.store) }
+                    Group {
+                        if care.showsIntro(care.module) {
+                            ModuleIntro(care: care, module: care.module)
+                        } else {
+                            switch care.module {
+                            case .smartCare: SmartCareView(care: care)
+                            case .cleanup: CleanupView(care: care)
+                            case .clutter: ClutterView(care: care)
+                            case .developer: DeveloperView(care: care)
+                            case .apps: ApplicationsView(care: care)
+                            case .performance: PerformanceView(care: care)
+                            case .protection: ProtectionView(care: care)
+                            case .spaceLens: SpaceLensView(care: care)
+                            case .cloud: CloudCleanupView(care: care)
+                            case .workstation: MyWorkstation(care: care)
+                            case .tools: MyTools(care: care)
+                            case .activity: MyActivity(care: care)
+                            }
                         }
                     }
+                    // minHeight 0: a module taller than the window must not push the window's content.
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
                 }
-                // minHeight 0: a module taller than the window must not push the window's content.
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
                 Toast(store: care.store).padding(.bottom, 14)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .environment(\.colorScheme, .dark)
+        .sheet(item: $care.review) { ReviewSheet(prompt: $0) }
+        .sheet(item: $care.quitRequest) { QuitSheet(prompt: $0) }
+        .sheet(isPresented: Binding(get: { care.completed != nil }, set: { if !$0 { care.completed = nil } })) {
+            if let log = care.completed { CompletionSheet(log: log) { care.completed = nil } }
+        }
         .tint(Theme.accent)
         .buttonStyle(PillButtonStyle())
         .background(CareBackground(look: care.module.look).ignoresSafeArea())
@@ -85,16 +93,39 @@ struct CareView: View {
     }
 }
 
-/// CleanMyMac's floor: each module in its own colour, darker at the top
-/// left, lit from the bottom.
+/// Says Full Disk Access went missing, which an update causes, rather than
+/// letting permissions and Put Back fail without a word.
+private struct AccessLostBanner: View {
+    let store: Store
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lock.trianglebadge.exclamationmark.fill").foregroundStyle(Theme.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Full Disk Access stopped working").font(.callout.weight(.semibold))
+                Text("It worked before; after an update macOS no longer honours it, even if the switch still shows on. Switch ZC Care off and on again. Privacy permissions, Safari data and Put Back need it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Don't Remind Me") { store.forgetAccess() }.buttonStyle(.zcLink)
+            Button("Open Settings…") { Access.openFullDiskSettings() }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(Theme.warning.opacity(0.12))
+        .padding(.top, 28)
+    }
+}
+
+/// The same navy floor in every module; the module's colour shows only
+/// as a faint light from the top right.
 private struct CareBackground: View {
     let look: ModuleLook
 
     var body: some View {
         ZStack {
-            LinearGradient(colors: look.floor, startPoint: .topLeading, endPoint: .bottomTrailing)
-            RadialGradient(colors: [look.glow.opacity(0.35), .clear], center: .bottom, startRadius: 0, endRadius: 520)
-            RadialGradient(colors: [look.glow.opacity(0.22), .clear], center: .topTrailing, startRadius: 0, endRadius: 480)
+            LinearGradient(colors: [Theme.floor, Theme.hex(0x0C1538)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            RadialGradient(colors: [look.glow.opacity(0.10), .clear], center: .topTrailing, startRadius: 0, endRadius: 560)
         }
         .drawingGroup()
     }
@@ -202,8 +233,8 @@ private struct Sidebar: View {
         .padding(.bottom, 8)
         .frame(width: 210)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color.black.opacity(0.18).ignoresSafeArea())
-        .overlay(alignment: .trailing) { Rectangle().fill(Color.white.opacity(0.06)).frame(width: 1) }
+        .background(Theme.sidebar.ignoresSafeArea())
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
     }
 
     /// The first nine modules open with ⌘1 to ⌘9, as tabs do.
@@ -224,7 +255,7 @@ private struct Sidebar: View {
         case .activity:
             let n = care.recommendations.count
             return n > 0 ? "\(n)" : nil
-        case .cleanup: return care.junk + care.ai > 0 ? Store.bytes(care.junk + care.ai) : nil
+        case .cleanup: return care.junk + care.aiBeyondJunk > 0 ? Store.bytes(care.junk + care.aiBeyondJunk) : nil
         case .clutter: return care.clutter > 0 ? Store.bytes(care.clutter) : nil
         case .developer: return care.developer > 0 ? Store.bytes(care.developer) : nil
         case .apps:
@@ -267,7 +298,7 @@ private struct SidebarRow: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: 8)
-                .fill(Color.white.opacity(selected ? 0.16 : over ? 0.07 : 0)))
+                .fill(selected ? Theme.selected : Color.white.opacity(over ? 0.07 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

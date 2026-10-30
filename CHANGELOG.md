@@ -4,6 +4,257 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
+## v0.4.0 — 2026-10-30
+
+The app grows into a full Mac care tool: a menu panel with live readings,
+alerts, Sensors, Battery, Network and Devices details, privacy
+traces and security settings in Protection, an app updater, Startup Disk and
+installer receipts, and a hardening pass over every removal and Put Back.
+Plans that overwrite outside edits or run scripts now ask first.
+
+### ZC Care
+
+- Protection opens on three numbers, issues found, checks passed and when it
+  last checked, and its *Security Settings* read FileVault, the firewall,
+  System Integrity Protection and automatic security responses beside
+  Gatekeeper, each On or Off in words. One that is off has *Turn On…*, which
+  opens its System Settings pane.
+- Protection clears *Recent Items*: the Apple menu's recent applications,
+  documents, servers and hosts, and each app's Open Recent, list by list or
+  all at once. Favorites and the Finder sidebar are never touched.
+- Protection lists the *Known Wi-Fi Networks* this Mac joins on its own, with
+  *Forget…*, which asks for your password. A network counts as forgotten
+  only once it is gone from the list read again.
+- A privacy permission an app holds has *Reset*, through `tccutil`: the app
+  asks again next time. A reset counts only once the permission is gone when
+  read again. Eight more services are listed, such as Bluetooth, Reminders
+  and App Management.
+- Browser Privacy offers *Site Data*, each site's IndexedDB storage in
+  Chromium browsers and Firefox's per-site storage, and *Saved Tabs*.
+  Extensions' storage stays; Local Storage holds sites and extensions in one
+  database, so it is not offered. Vivaldi's sessions are left alone, since
+  its named sessions live there too.
+- The window is navy in every module, with the module's colour as a faint
+  light, and status in words as well as colour. Smart Care says under its
+  button that nothing changes until you confirm. Applications has a search
+  field, counts on its filters and checkboxes: *Uninstall N…* goes app by
+  app, each asking, and No stops the rest. Performance has segments to show
+  one section alone.
+- Performance can *Verify Startup Disk*, a read-only `diskutil verifyVolume`
+  that needs no password; repairs stay with Disk Utility's First Aid.
+- Applications has an *Updates* segment: apps with a newer version from
+  their own Sparkle update feed, beside the Homebrew and App Store updates
+  zc-care reads. Each row shows installed and available version, size,
+  release date, where it comes from, a *What's New* disclosure and *Open to
+  Update* or *Update*; a release that needs a newer macOS says so. Feeds
+  are read only on *Check Now*, since each vendor's server learns the app is
+  installed: https only, never this Mac or the local network, at most 5 MB,
+  beta channels skipped. My Tools' *App Updater* opens it.
+- Space Lens has a *Startup Disk* view: the APFS container's volumes,
+  including the ones Finder hides (System, VM, Preboot, Recovery), the space
+  snapshots and metadata take, what macOS frees on its own (purgeable space
+  and local Time Machine snapshots, with *Thin…*), and the drive's health
+  from `diskutil`: SMART status, wear, spare blocks, temperature, power-on
+  hours, data written and media errors. A failing or worn drive becomes a
+  Smart Care recommendation to back up.
+- Developer has a *Homebrew* section: formulae nothing depends on any more
+  (from `brew autoremove --dry-run`, never one your config declares) with
+  *Remove…*, what `brew cleanup` would free with *Clean Up…*, and each
+  `brew doctor` warning, expandable. Reading uses dry runs only, with
+  Homebrew's auto-update off.
+- Applications has an *Intel Only* filter: apps whose code needs Rosetta,
+  read from each app's executable.
+- The Simulator Runtimes and Android sections in Developer load again;
+  they never started while empty.
+- My Clutter's large files filter by kind and by *Not opened for a year*,
+  and each shows when it was last opened.
+- My Activity has a tile each for protection, updates, maintenance and the
+  startup drive, each opening its view; recommendations open the view they
+  name. The weekly scan notifies when the startup drive is failing.
+- The panel opens on the Mac page with the health grade on top, as
+  CleanMyMac's menu does; the other pages, *Plan* and *Apply* moved to a
+  menu at its foot, which shows a dot when a page holds something to do,
+  beside a refresh button (⌘R) and a Smart Care button.
+- Applications lists apps in `~/Applications` too and flags an app
+  installed twice; uninstalling one copy keeps the settings the other uses.
+  Smart Care recommends removing the extra copy.
+- Applications' Leftovers lists installer package receipts outside Apple's
+  and whether their files are still there.
+- A notification says when an app dragged to the Trash left more than 1 MB
+  in the Library; clicking it opens Leftovers, which lists that app even
+  when its vendor has another app installed. An app missing for one check
+  only, as an updater swaps it, stays quiet. Settings turns it off.
+- Leftovers lists what an app in the Trash left before the Trash is
+  emptied.
+- The panel's CPU and memory graphs have *Copy Readings*, which copies
+  each reading with its time as rows that paste into a spreadsheet.
+- An app's files in Applications open on where its space goes: the app,
+  its data, caches, settings and logs, largest first.
+- The panel's Network detail names the proxies in use (HTTP, HTTPS, SOCKS,
+  FTP, automatic configuration or discovery) and the VPNs up beside the main
+  connection.
+- The panel's Network detail shows the Wi-Fi link: signal and noise with
+  a quality word, standard, channel, transmit rate and security, warning
+  on an open, WEP or WPA network.
+- The panel's Battery detail shows when the Mac last slept and woke and
+  why, how often it woke briefly for upkeep over the past day, and how much
+  battery it used asleep, from the power management log.
+- The panel's Devices tile opens a detail with the displays in use,
+  external ones marked, their pixels and refresh rate, and what is plugged
+  into the USB ports, hubs included.
+- The panel's Network detail lists the five processes moving the most
+  data, with how fast each receives and sends, measured with nettop while
+  the detail is open; the first rates take about ten seconds.
+- The panel's Battery detail lists what keeps the Mac or its screen
+  awake, from the power assertions, with the process caffeinate runs for and
+  how long, and *Quit* for an app.
+- The panel's Battery detail lists the apps using the most CPU, a large
+  share of battery drain, with *Quit*.
+- The panel's Network detail lists the user's apps waiting for
+  connections, with the port and whether other devices can try to connect.
+- The panel's CPU and Memory details graph load and memory used over the
+  last five minutes, with the peak.
+- The panel's network tile opens a Network detail with the connection's
+  service, addresses, router and DNS, and the speed test.
+- The panel's Disk detail shows how fast the drives read and write.
+- The panel's CPU detail shows each kind of core, super, performance and efficiency, with
+  their load and clock, and a bar for each core, when macmon is installed.
+- The panel's Memory detail splits what is used into app memory, wired,
+  compressed and cached files, with a bar, what is free and the swap in
+  use, which it marks while memory is under pressure.
+- The panel's *Free Up* on Disk lists connected drives, disk images and
+  network shares with their free space and an Eject button; the Disk
+  tile counts them.
+- The panel's Battery tile opens *Details*: condition, maximum capacity,
+  charge cycles, temperature, time left or to full and the charger's
+  watts, with *Battery Settings*. The battery notification opens it.
+- The CPU tile's *Top Apps* starts with the sensors macmon reads: GPU
+  temperature and load, each fan against its top speed, and the power
+  the CPU, the GPU and the whole Mac draw.
+- Vitals alerts warn once a day when the Trash holds more than a limit
+  Settings sets, 5 GB at first; the notification opens Cleanup. Limits
+  saved by an older version are kept.
+- Vitals alerts warn when a connected Bluetooth device's battery falls to
+  a limit, 20 % at first, at most every six hours per device.
+- Vitals alerts warn when one app keeps a core busy (100 % at first) or
+  holds a lot of memory (8 GB at first) for ten minutes, at most every
+  three hours per app; the notification opens the CPU or Memory details.
+- Homebrew offers no formula for removal when `brew info` or `brew deps`
+  fails, and says why a kept formula stays.
+- Intel Only no longer hangs on an app whose executable is not a file.
+- Uninstall and Reset ignore a bundle id that would reach outside the
+  Library, such as `../../Documents` in a planted app's Info.plist.
+- Performance can *Reset Quick Look*, which clears thumbnails and reloads
+  preview plug-ins, and *Clear Font Caches* for this user; neither needs a
+  password.
+- Protection lists extensions: Safari, Share, Finder Sync, Quick Look,
+  Spotlight, Notification Center, Action and Photos extensions from
+  `pluginkit`, and system extensions from `systemextensionsctl`, each with
+  its host app and whether it is on. An extension whose host app is gone, or
+  a system extension without a team id, is flagged. Apple's own are left
+  out. *Open Extensions Settings* opens the pane that switches them.
+- The panel's Updates tab lists macOS updates from `softwareupdate -l`, with
+  version, size and a *Restart* or *Recommended* flag, and *Open Software
+  Update*. A check that answered holds for six hours; one that failed is
+  retried on the next open, and *Check Again* runs one now. The count joins
+  the tab's badge. *Update All…* still applies only the packages and
+  runtimes.
+- Performance's top processes show ten or twenty-five rows and have *Quit*
+  and *Force Quit*. An app gets the Quit it would from the Dock; anything
+  else, and every Force Quit, asks first. Stopped and zombie processes are
+  marked. ZC Care, what it started, pid 0 and 1, the session's daemons and
+  other users' processes have no button, with the reason on hover.
+- Cleanup knows more developer caches: the pub cache's hosted packages,
+  Gradle wrapper distributions, the pnpm store (both locations), Bun's
+  install cache, Go's module download cache and mise's downloads. Each says
+  what comes back on its own and what to run first. Go's extracted modules
+  under `~/go/pkg/mod` are read-only and stay. The Maven repository is not
+  offered: `mvn install` puts your own builds there and no remote has them.
+- Developer lists simulator runtimes from `xcrun simctl`, each with platform,
+  version, build, state and size, and *Delete*, which is permanent and says
+  so; a runtime Xcode bundles has the button greyed out. When an Android SDK
+  is installed, its system images and AVDs are listed with *Show in Finder*
+  only.
+- My Workstation has *Not in Your Config*: formulae, casks, App Store apps
+  and runtimes on this Mac that the config does not name, grouped by target.
+  *Add to Config…* asks for the why line and an optional section, runs
+  `zc-care add`, and reloads, so the next plan shows the item; a bulk add
+  covers the selected items of one target at a time.
+- The main window says when Full Disk Access stopped working after it had
+  worked: an update gives the ad hoc signed app a new signature, and macOS
+  stops honouring the old grant even with its switch still on. *Open
+  Settings…* goes to the list; *Don't Remind Me* stops the banner until
+  access works again. Access granted before this version is not known, so
+  the first update after it shows no banner.
+- Hardening: readings pause while the Mac or its displays sleep and start
+  afresh on wake, so rates are not averaged over the sleep; the process
+  list no longer runs `ps` every 4 s from the menu bar after Performance
+  showed; Performance and the panel keep separate process lists; the Mac tab
+  open in both the menu bar window and the ⌃⌥Z panel no longer stops when
+  one closes. Reads from `zc-care` time out after 5 minutes and service
+  starts and stops after 2, so a hung command cannot leave the app busy.
+  Vitals warnings remember their quiet time across relaunches; a finding,
+  drift or update notice posts once a day at most; a failed macOS update
+  check waits 15 minutes before the panel asks again.
+- Uninstalling or adopting a Homebrew cask no longer lets `brew` autoremove
+  formulae nobody confirmed. An app's settings and data stay when macOS
+  knows another copy of it anywhere (the alert names where; a mounted disk
+  image does not count), and folders named after the app stay when a
+  sibling such as Firefox Developer Edition shares them. A helper running
+  from inside the app counts as the app, and the app's own agents are
+  stopped before its files go. Uninstall and Reset list up to 24 paths.
+- Firefox's cookies, site data and tabs stay while Developer Edition or
+  Nightly runs, since they share its profiles. Accessibility and Input
+  event answers reset one at a time, and a reset that cannot be read back
+  says so. *Forget…* on a Wi-Fi network checks the list first and gives up
+  after five minutes. Cancelling a step that asked for your password says
+  it may still finish, not that nothing changed.
+- Removals check again at the moment they act, since a list may be days
+  old: an app reinstalled, or a vendor's app installed, since Applications'
+  Leftovers was read keeps its folders; an Ollama model removes only the
+  blobs it still owns alone, refuses while `ollama pull` or `create` runs,
+  and stops if the model was pulled again; a Space Lens item is measured
+  afresh and refused if a part of its path became a link; a dependency
+  folder stays if its project changed in the last 90 days; a Mail
+  attachment removed from its row asks for Mail to quit first; Keep Oldest
+  cannot run twice at once. Removing a cloud download no longer freezes the
+  window while the provider answers. Duplicates list the 500 biggest
+  wastes and Mail attachments the 1,000 biggest files.
+- Put Back moves an item only when it is still the one that went to the
+  Trash: the same file, tagged before the move with its old place, directly
+  in your Trash or this volume's, and going back to a path with no link in
+  it. A log another program edited, or a record from an older version,
+  moves nothing; Finder's Put Back still works for those. Without Full
+  Disk Access, Put Back says so and offers Finder.
+- Clean All skips a folder while the app that uses it runs (Xcode or the
+  Simulator for their caches, Mail for its downloads, a Gradle daemon for
+  Gradle) and says which. Freed space is measured before and after, and
+  *Empty Trash* no longer counts items that Put Back can still return.
+  Smart Care and Cleanup no longer count AI caches twice when they sit in a
+  folder Clean All clears, and the `pub` cache is opt-in like iOS backups.
+- Items on the ignore list stay out of Browser Privacy and Recent Items,
+  and the alert says how many stay.
+- A plan that overwrites an edit made outside zc-care or runs a script asks
+  first, like one that deletes, and says undo cannot take it back. A plan
+  that fails is never applied from a file the last plan left behind.
+  Uninstalling an app a manifest declares works again; it stopped at
+  `error: cancelled`. Installing apps with no target that declares any
+  stops instead of planning the whole config.
+
+### Docs
+
+- The install steps add `brew trust zoolcoder/zc-care`: Homebrew refuses to
+  load a cask from a third-party tap until the tap is trusted.
+
+### Release and CI
+
+- The cask uses `postflight_steps` and `depends_on macos: :sonoma`; Homebrew 7
+  deprecates `postflight` blocks and the `">= :sonoma"` string. Its
+  description no longer names the platform, so `brew style` passes.
+- The security workflow scans `go.mod` with osv-scanner; the scanner has no
+  extractor for `go.sum` and failed every run. `osv-scanner.toml` lists the
+  two findings it skips, with the reason for each.
+
 ## v0.3.0 — 2026-10-23
 
 Undo that refuses to overwrite a later edit, saved plans checked against the

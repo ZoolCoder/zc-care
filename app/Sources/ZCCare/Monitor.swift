@@ -5,7 +5,8 @@ import ZCCareCore
 /// Samples the Mac's vitals every two seconds while the Mac tab or the menu
 /// bar's readings show: rates from the kernel each time and the disk every
 /// ten seconds. For the Mac tab only, sensors every ten seconds, and devices
-/// and battery health, which system_profiler is slow to give, each minute.
+/// and battery health, which system_profiler is slow to give, each minute,
+/// and the connection's addresses each time.
 /// Each sample lands as one change, and only when something moved, so the
 /// panel redraws at most once a tick.
 @MainActor @Observable
@@ -14,8 +15,10 @@ final class Monitor {
     /// Set by the Store; what it names stays in the Free Up folders.
     var ignore = IgnoreList()
     var model = "Mac"
-    /// The busiest processes, while the memory or CPU tile is open.
+    /// The busiest processes, while the memory, CPU or battery detail is open.
     var top: [Proc] = []
+    /// Rows readTop keeps for the panel's tiles.
+    private let topCount = 6
     var order: Order? {
         didSet {
             guard order != oldValue else { return }
@@ -23,7 +26,26 @@ final class Monitor {
             Task { await readTop() }
         }
     }
+    /// Performance's own list, apart from the panel's, so each keeps its
+    /// order when both show.
+    var performanceTop: [Proc] = []
+    /// What Performance shows, while it does: the order and how many rows.
+    var performance: (order: Order, count: Int)?
+    /// External drives, disk images and shares, while the panel shows.
+    var volumes: [Volume] = []
+    /// Volumes being ejected, by path.
+    var ejecting: Set<String> = []
     var speed: SpeedTest?
+    /// The primary service's addresses, router and DNS, for the Network
+    /// detail.
+    var connection: Connection?
+    /// CPU load and the share of memory used over the last five minutes,
+    /// one reading a tick, for the CPU and Memory details.
+    var cpuHistory = Recent(capacity: 150)
+    var memoryHistory = Recent(capacity: 150)
+    /// False until the panel's first read, when no connection still means
+    /// unknown rather than offline.
+    var connectionRead = false
     var testingSpeed = false
     /// What each Free Up folder takes, once scanned.
     var junk: [String: Int64] = [:]
@@ -35,17 +57,71 @@ final class Monitor {
     /// the cheap ones.
     enum Reader { case panel, bar }
 
+    /// Where a Mac tab shows: the menu bar's window and the floating panel
+    /// can both show one, and one closing must not stop the other's.
+    enum Host: Hashable { case menu, window }
+
     private var sampler = Sampler()
     private var loop: Task<Void, Never>?
-    private var readers: Set<Reader> = []
+    private(set) var readers: Set<Reader> = []
+    private var hosts: Set<Host> = []
+    /// While the Mac or its displays sleep nothing samples, as no one sees
+    /// the readings; waking starts again afresh. Two flags, as the Mac can
+    /// wake for upkeep with its displays still off.
+    private var systemAsleep = false
+    private var screensAsleep = false
     private var tick = 0
     private let macmon = ["/opt/homebrew/bin/macmon", "/usr/local/bin/macmon"].first(where: FileManager.default.isExecutableFile)
 
-    func start(_ reader: Reader = .panel) {
+    init() {
+        let center = NSWorkspace.shared.notificationCenter
+        let names = [NSWorkspace.willSleepNotification, NSWorkspace.didWakeNotification,
+                     NSWorkspace.screensDidSleepNotification, NSWorkspace.screensDidWakeNotification]
+        for name in names {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let name = note.name
+                MainActor.assumeIsolated { self?.power(name) }
+            }
+        }
+    }
+
+    func start(_ reader: Reader = .panel, host: Host = .menu) {
         readers.insert(reader)
-        // The tab opening reads the slow parts at once.
-        if reader == .panel { tick = 0 }
-        guard loop == nil else { return }
+        if reader == .panel {
+            // The menu bar's loop does not read the disk: its last count is
+            // from when the tab last showed.
+            if hosts.isEmpty {
+                sampler.forgetDisk()
+                vitals.diskIO = nil
+            }
+            hosts.insert(host)
+            // The tab opening reads the slow parts at once, and the
+            // connection before them, so the Network detail never shows the
+            // last one.
+            tick = 0
+            connection = sampler.connection()
+            connectionRead = true
+        }
+        run()
+    }
+
+    func stop(_ reader: Reader = .panel, host: Host = .menu) {
+        if reader == .panel {
+            hosts.remove(host)
+            guard hosts.isEmpty else { return }
+            connectionRead = false
+        }
+        readers.remove(reader)
+        guard readers.isEmpty else { return }
+        halt()
+    }
+
+    private func run() {
+        guard loop == nil, !systemAsleep, !screensAsleep, !readers.isEmpty else { return }
+        // Rates are differences from the last read: one from before a stop
+        // would average over the whole gap.
+        sampler.forgetRates()
+        vitals.diskIO = nil
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.sample()
@@ -54,17 +130,41 @@ final class Monitor {
         }
     }
 
-    func stop(_ reader: Reader = .panel) {
-        readers.remove(reader)
-        guard readers.isEmpty else { return }
+    private func halt() {
         loop?.cancel()
         loop = nil
+        // A gap would join two times as one line.
+        cpuHistory.clear()
+        memoryHistory.clear()
+    }
+
+    private func power(_ name: NSNotification.Name) {
+        switch name {
+        case NSWorkspace.willSleepNotification: systemAsleep = true
+        case NSWorkspace.didWakeNotification: systemAsleep = false
+        case NSWorkspace.screensDidSleepNotification: screensAsleep = true
+        default: screensAsleep = false
+        }
+        if systemAsleep || screensAsleep {
+            halt()
+        } else if loop == nil {
+            tick = 0
+            run()
+        }
     }
 
     private func sample() async {
         var v = vitals
-        if let load = sampler.cpuLoad() { v.cpuLoad = load }
+        let now = Date.now
+        var cpu = cpuHistory, memoryUsed = memoryHistory
+        if let load = sampler.cpuLoad() {
+            v.cpuLoad = load
+            cpu.append(load, at: now)
+        }
         v.memory = sampler.memory()
+        if let memory = v.memory, memory.total > 0, memory.used > 0 {
+            memoryUsed.append(Double(memory.used) / Double(memory.total), at: now)
+        }
         v.network = sampler.network()
         var battery = sampler.battery()
         battery?.health = v.battery?.health
@@ -72,6 +172,10 @@ final class Monitor {
         battery?.cycles = v.battery?.cycles
         v.battery = battery
         let panel = readers.contains(.panel)
+        // Keeps the last rate through a read that gives none, so the row
+        // does not blink.
+        v.diskIO = panel ? sampler.diskIO() ?? v.diskIO : nil
+        if panel, case let now = sampler.connection(), now != connection { connection = now }
         if tick % 5 == 0 {
             v.disk = sampler.disk()
             if panel, let macmon, let r = try? await ProcessRunner(timeout: 15).run(macmon, ["pipe", "-s", "1", "-i", "200"], env: [:]) {
@@ -79,8 +183,19 @@ final class Monitor {
             }
         }
         if panel, tick % 30 == 0 { await readSystemProfile(into: &v) }
+        // A stop while it waited cleared the history: writing the copies
+        // back would bring it back, or overwrite a newer loop's readings.
+        guard !Task.isCancelled else { return }
+        // Written beside the vitals, so a tick stays one redraw.
+        cpuHistory = cpu
+        memoryHistory = memoryUsed
         if v != vitals { vitals = v }
-        if order != nil, tick % 2 == 1 { await readTop() }
+        // Apart from the copy above, which would bring back a drive ejected
+        // while it waited.
+        if panel, tick % 5 == 0 { await readVolumes() }
+        if panel, order != nil, tick % 2 == 1 { await readTop() }
+        // A loop started since counts from 0; this one must not move it on.
+        guard !Task.isCancelled else { return }
         tick += 1
     }
 
@@ -98,12 +213,27 @@ final class Monitor {
         }
     }
 
+    func readVolumes() async {
+        let next = await Task.detached { Sampler.volumes() }.value
+        if next != volumes { volumes = next }
+    }
+
     func readTop() async {
-        guard let order else { return }
-        let args = ["-Aceo", "pid=,pcpu=,rss=,comm=", order == .memory ? "-m" : "-r"]
-        guard let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", args, env: [:]), self.order == order else { return }
-        let next = Array(Proc.parse(ps: r.output).prefix(6))
+        guard let order, let next = await Self.busiest(order, count: topCount), self.order == order else { return }
         if next != top { top = next }
+    }
+
+    func readPerformanceTop() async {
+        guard let wanted = performance,
+              let next = await Self.busiest(wanted.order, count: wanted.count),
+              performance?.order == wanted.order else { return }
+        if next != performanceTop { performanceTop = next }
+    }
+
+    private static func busiest(_ order: Order, count: Int) async -> [Proc]? {
+        let args = ["-Aceo", "pid=,pcpu=,rss=,uid=,ppid=,stat=,comm=", order == .memory ? "-m" : "-r"]
+        guard let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", args, env: [:]) else { return nil }
+        return Array(Proc.parse(ps: r.output, detailed: true).prefix(count))
     }
 
     /// Sizes every Free Up folder at once, off the main thread: caches run
@@ -162,8 +292,9 @@ final class Monitor {
     }
 
     /// The vitals the background alerts need, read apart from the panel's
-    /// loop; battery health only when asked, as system_profiler is slow.
-    func watchSample(battery: Bool) async -> Vitals {
+    /// loop; battery health, Bluetooth devices, the Trash and running apps
+    /// only when asked, as the first three are slow.
+    func watchSample(battery: Bool, trash: Bool = false, devices: Bool = false, apps: Bool = false) async -> Vitals {
         var v = Vitals()
         v.disk = sampler.disk()
         v.memory = sampler.memory()
@@ -175,6 +306,19 @@ final class Monitor {
             b.read(systemProfiler: r.stdout)
             v.battery = b
         }
+        let args = ["-Aceo", "pid=,pcpu=,rss=,uid=,ppid=,stat=,comm="]
+        if apps, let r = try? await ProcessRunner(timeout: 15).run("/bin/ps", args, env: [:]) {
+            let user = getuid()
+            v.processes = Proc.parse(ps: r.output, detailed: true).filter { $0.uid == user }
+        }
+        if devices, let r = try? await ProcessRunner(timeout: 60).run("/usr/sbin/system_profiler", ["-json", "SPBluetoothDataType"], env: [:]) {
+            v.devices = Device.parse(systemProfiler: r.stdout)
+        }
+        if trash {
+            v.trash = await Task.detached(priority: .utility) {
+                TrashBins.find(home: NSHomeDirectory(), volumes: TrashBins.mountedVolumes()).reduce(0) { $0 + $1.size }
+            }.value
+        }
         return v
     }
 }
@@ -182,6 +326,29 @@ final class Monitor {
 // MARK: Actions
 
 extension Store {
+    /// Unmounts a volume and, for a drive, ejects it; Finder's own call,
+    /// off the main thread as it waits for the disk.
+    func eject(_ volume: Volume) async {
+        guard !monitor.ejecting.contains(volume.path) else { return }
+        monitor.ejecting.insert(volume.path)
+        defer { monitor.ejecting.remove(volume.path) }
+        let url = URL(fileURLWithPath: volume.path)
+        let failure = await Task.detached { () -> NSError? in
+            do {
+                try NSWorkspace.shared.unmountAndEjectDevice(at: url)
+                return nil
+            } catch {
+                return error as NSError
+            }
+        }.value
+        if let failure {
+            let busy = failure.code == fBsyErr ? " An app is still using it." : ""
+            message = Message(text: "“\(volume.name)” was not ejected: \(failure.localizedDescription)\(busy)", failed: true)
+        }
+        // A drive's other volumes go with it.
+        await monitor.readVolumes()
+    }
+
     /// Outside Caches: clearing caches must not clear the record of it.
     static let activityFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("dev.zoolcoder.zccare/activity.json")
@@ -200,10 +367,7 @@ extension Store {
     /// value: the log can move under a row while an alert is up.
     func putBack(_ entry: ActivityEntry) {
         guard busy == nil, activity.entries.contains(entry) else { return }
-        guard entry.canPutBack else {
-            message = Message(text: "\(entry.title) is no longer in the Trash, or something took its place.", failed: true)
-            return
-        }
+        // Without Full Disk Access the Trash cannot be looked into, so ask first.
         guard Access.fullDisk else {
             switch Alerts.trashClosed(entry.title) {
             case .finder:
@@ -211,6 +375,10 @@ extension Store {
             case .grant: Access.openFullDiskSettings()
             case nil: break
             }
+            return
+        }
+        guard entry.canPutBack else {
+            message = Message(text: "\(entry.title) is no longer in the Trash, or something took its place.", failed: true)
             return
         }
         // What stays in the Trash keeps its Put Back for another try.
@@ -226,6 +394,12 @@ extension Store {
             : Message(text: "Could not put back \(stuck.joined(separator: ", ")).", failed: true)
     }
 
+    /// Whether an entry offers Put Back. Without Full Disk Access the Trash
+    /// cannot be looked into: anything trashed offers it, and the click asks.
+    static func mayPutBack(_ entry: ActivityEntry, fullDisk: Bool) -> Bool {
+        fullDisk ? entry.canPutBack : entry.putBack == nil && !(entry.trashed ?? []).isEmpty
+    }
+
     private func busyScanning() {
         message = Message(text: "A scan is still running. Clean up once it finishes.", failed: true)
     }
@@ -234,6 +408,10 @@ extension Store {
     /// whose sizes `picked` gives.
     func clean(_ spot: Junk, only picked: [JunkEntry]? = nil) async {
         guard !monitor.scanning else { return busyScanning() }
+        if let user = await Self.user(of: spot) {
+            message = Message(text: "\(spot.title) stays while \(user) is using it. Clear it once \(user) is done.", failed: true)
+            return
+        }
         let size = monitor.junk[spot.id] ?? 0
         let verb = deletesPermanently ? "permanently deletes" : "moves to the Trash"
         let what = picked.map {
@@ -241,25 +419,36 @@ extension Store {
                 + Alerts.lines($0.map { "\($0.name) (\(Self.bytes($0.size)))" })
         } ?? "This \(verb) \(Self.bytes(size)) in \(spot.path)."
         let aftermath = deletesPermanently ? "It does not go to the Trash." : "My Activity can put it back until the Trash is emptied."
-        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\n\(aftermath)\n\n\(spot.detail)", button: "Clear") else { return }
+        guard busy == nil, Alerts.confirm("Clear \(spot.title)?", what + "\n\(aftermath)\n\n\(spot.detail)", button: "Clear"), busy == nil, !monitor.scanning else { return }
         busy = "Clearing \(spot.title)"
         defer { busy = nil }
         let keep = await monitor.keep(spot, open: monitor.runningApps())
         let only = picked.map { Set($0.map(\.name)) }
         let permanently = deletesPermanently
-        let removal = await Task.detached { spot.empty(keeping: keep, only: only, permanently: permanently) }.value
-        let left = await Task.detached { spot.size(keeping: keep) }.value
+        // Measured now with the same keep set: the scan's figure may count
+        // what an app opened since or the ignore list now keeps.
+        let (before, removal, left) = await Task.detached {
+            let before = spot.size(keeping: keep)
+            let removal = spot.empty(keeping: keep, only: only, permanently: permanently)
+            return (before, removal, spot.size(keeping: keep))
+        }.value
         monitor.junk[spot.id] = left
         monitor.readDisk()
-        record(.junk, spot.title, freed: max(size - left, 0), trashed: removal.trashed)
-        message = Message(text: "\(spot.title): freed \(Self.bytes(max(size - left, 0)))"
+        record(.junk, spot.title, freed: max(before - left, 0), trashed: removal.trashed)
+        message = Message(text: "\(spot.title): freed \(Self.bytes(max(before - left, 0)))"
                           + removal.ending, failed: !removal.failures.isEmpty)
+    }
+
+    /// The Free Up folders Clean All clears: those with something in them,
+    /// less the ones cleared by hand only.
+    var spotsToCleanAll: [Junk] {
+        Junk.spots(home: NSHomeDirectory()).filter { !$0.optional && (monitor.junk[$0.id] ?? 0) > 0 }
     }
 
     /// Clears every Free Up folder after one question, for Smart Care.
     func cleanAll() async {
         guard !monitor.scanning else { return busyScanning() }
-        let spots = Junk.spots(home: NSHomeDirectory()).filter { (monitor.junk[$0.id] ?? 0) > 0 }
+        let spots = spotsToCleanAll
         let total = spots.reduce(Int64(0)) { $0 + (monitor.junk[$1.id] ?? 0) }
         let list = spots.map { "\($0.title): \(Self.bytes(monitor.junk[$0.id] ?? 0))" }.joined(separator: "\n")
         guard busy == nil, !spots.isEmpty,
@@ -270,29 +459,69 @@ extension Store {
                              button: "Clean Up") else { return }
         busy = "Cleaning up"
         defer { busy = nil }
-        let open = monitor.runningApps()
-        var freed: Int64 = 0, removal = Removal()
-        let permanently = deletesPermanently
-        for spot in spots {
-            let keep = await monitor.keep(spot, open: open)
-            let size = monitor.junk[spot.id] ?? 0
-            let result = await Task.detached { spot.empty(keeping: keep, permanently: permanently) }.value
-            removal.failures += result.failures
-            removal.trashed += result.trashed
-            let left = await Task.detached { spot.size(keeping: keep) }.value
-            monitor.junk[spot.id] = left
-            freed += max(size - left, 0)
-        }
+        let (log, trashed) = await clean(spots, title: "System Junk")
         monitor.readDisk()
-        record(.junk, "System Junk", freed: freed, trashed: removal.trashed)
-        message = Message(text: "Freed \(Self.bytes(freed))" + removal.ending, failed: !removal.failures.isEmpty)
+        record(.junk, "System Junk", freed: log.freed, trashed: trashed)
+        message = Message(text: "Freed \(Self.bytes(log.freed))" + (log.allDone ? "." : "; \(Self.counted(log.failed.count, "item")) stayed."),
+                          failed: !log.allDone)
+    }
+
+    /// Clears the folders one after another and logs each: a line for what
+    /// a folder freed, and one per entry that stayed, with why.
+    func clean(_ spots: [Junk], title: String) async -> (log: RunLog, trashed: [Trashed]) {
+        let open = monitor.runningApps()
+        var log = RunLog(title: title, permanent: deletesPermanently)
+        var trashed: [Trashed] = []
+        let permanently = deletesPermanently
+        let commands = await Monitor.commands()
+        for spot in spots {
+            if let user = Self.user(of: spot, commands: commands) {
+                log.add(RunLog.Line(name: spot.title, detail: spot.path, size: 0, failure: "\(user) is using it"))
+                continue
+            }
+            let keep = await monitor.keep(spot, open: open)
+            let (before, result, left) = await Task.detached {
+                let before = spot.size(keeping: keep)
+                let result = spot.empty(keeping: keep, permanently: permanently)
+                return (before, result, spot.size(keeping: keep))
+            }.value
+            monitor.junk[spot.id] = left
+            trashed += result.trashed
+            log.add(RunLog.Line(name: spot.title, detail: spot.path, size: max(before - left, 0)))
+            for failure in result.failures {
+                log.add(RunLog.Line(name: failure.name, detail: spot.path, size: 0, failure: failure.reason.label))
+            }
+        }
+        return (log, trashed)
+    }
+
+    /// Who is using a folder now, when clearing it would pull files out
+    /// from under a build, a simulator or an open attachment.
+    nonisolated static func user(of spot: Junk, commands: [String]) -> String? {
+        let running = { (id: String) in !NSRunningApplication.runningApplications(withBundleIdentifier: id).isEmpty }
+        switch spot.id {
+        case "xcode", "devicesupport", "simulators", "testdevices":
+            if running("com.apple.dt.Xcode") { return "Xcode" }
+            if running("com.apple.iphonesimulator") { return "Simulator" }
+        case "mail":
+            if running("com.apple.mail") { return "Mail" }
+        case "gradle", "gradlewrapper":
+            if commands.contains(where: { $0.contains("GradleDaemon") }) { return "A Gradle daemon" }
+        default: break
+        }
+        return nil
+    }
+
+    nonisolated static func user(of spot: Junk) async -> String? {
+        user(of: spot, commands: spot.id.hasPrefix("gradle") ? await Monitor.commands() : [])
     }
 
     /// The Finder empties the Trash: the app cannot read it without Full
     /// Disk Access. macOS asks once to let ZC Care control the Finder.
     func emptyTrash() async {
-        let undoable = activity.entries.filter(\.canPutBack).count
-        let lost = undoable == 0 ? "" : "\n\n\(Self.counted(undoable, "cleanup")) in My Activity can no longer be put back."
+        let fullDisk = Access.fullDisk
+        let undoable = activity.entries.filter { Self.mayPutBack($0, fullDisk: fullDisk) }
+        let lost = undoable.isEmpty ? "" : "\n\n\(Self.counted(undoable.count, "cleanup")) in My Activity can no longer be put back."
         guard busy == nil, Alerts.confirm("Empty the Trash?", "What is in the Trash is deleted for good." + lost,
                                           button: "Empty Trash") else { return }
         busy = "Emptying the Trash"
@@ -302,7 +531,15 @@ extension Store {
             try await ProcessRunner().run("/usr/bin/osascript", ["-e", #"tell application "Finder" to empty trash"#], env: [:])
         }
         monitor.readDisk()
-        if failure == nil { record(.junk, "Trash Bins", freed: max((monitor.vitals.disk?.available ?? 0) - before, 0)) }
+        if failure == nil {
+            // What those cleanups trashed already counts as freed; nothing is left to put back.
+            let counted = undoable.reduce(Int64(0)) { $0 + $1.bytes }
+            for index in activity.entries.indices where activity.entries[index].putBack == nil {
+                activity.entries[index].trashed = nil
+            }
+            try? activity.save(to: Self.activityFile)
+            record(.junk, "Trash Bins", freed: max((monitor.vitals.disk?.available ?? 0) - before - counted, 0))
+        }
         message = failure.map { Message(text: "Trash not emptied. \($0)", failed: true) }
             ?? Message(text: "The Trash is empty.", failed: false)
     }

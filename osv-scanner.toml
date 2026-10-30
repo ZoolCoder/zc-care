@@ -1,0 +1,10 @@
+# Findings osv-scanner skips, each with the reason. Remove an entry once the
+# fix is reachable; Dependabot opens a pull request when it is.
+
+[[IgnoredVulns]]
+id = "GHSA-9pmc-p236-855h"
+reason = "css_parser 3 is unreachable: asciidoctor-pdf 2.3 pins prawn-svg 0.34, which pins css_parser 1.x. The docs PDF reads the local theme CSS only, never a remote file."
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+reason = "braces is a dev dependency of the docs build with no fixed release. Its patterns come from this repository's own scripts, not from input."

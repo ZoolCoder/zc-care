@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import ZCCareCore
 
 @main
 struct ZCCareApp: App {
@@ -79,11 +80,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// other vitals their tile in the panel.
     private func openAlert(_ id: String) {
         switch id {
+        case _ where ZCCareCore.Alert.summed(id) != nil:
+            // Every app it sums up is marked removed, so Leftovers lists
+            // them all; it opens where the first one's fix is.
+            let ids = ZCCareCore.Alert.summed(id) ?? []
+            for leftover in ids where leftover.hasPrefix("leftovers ") {
+                care.care.removedIDs.insert(String(leftover.dropFirst("leftovers ".count)))
+            }
+            if let first = ids.first { openAlert(first) } else { window.show() }
         case _ where id.hasPrefix("care"): care.show()
-        case "vitals disk": care.show(.cleanup)
+        case "vitals disk", "vitals trash": care.show(.cleanup)
+        case _ where id.hasPrefix("leftovers "):
+            care.care.removedIDs.insert(String(id.dropFirst("leftovers ".count)))
+            care.care.orphans = nil
+            care.care.showLeftovers = true
+            care.show(.apps)
+        case _ where id.hasPrefix("vitals app "):
+            store.tab = .mac
+            store.macDetail = id.hasPrefix("vitals app cpu") ? .cpu : .memory
+            window.show()
+        case _ where id.hasPrefix("vitals device"):
+            store.tab = .mac
+            store.macDetail = nil
+            window.show()
         case "vitals memory", "vitals heat", "vitals battery":
             store.tab = .mac
-            store.macDetail = id == "vitals memory" ? .memory : id == "vitals heat" ? .cpu : nil
+            store.macDetail = id == "vitals memory" ? .memory : id == "vitals heat" ? .cpu : .battery
             window.show()
         default: window.show()
         }

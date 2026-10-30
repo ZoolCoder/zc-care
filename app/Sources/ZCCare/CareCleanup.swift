@@ -10,11 +10,11 @@ struct CleanupView: View {
     var body: some View {
         VStack(spacing: 0) {
             CareHeader(title: "Cleanup", subtitle: "Caches, logs, build output and what AI tools leave behind",
-                   busy: care.monitor.scanning || care.scanningAI,
+                   busy: care.monitor.scanning || care.scanningAI || care.scanningCleanup,
                    action: ("Rescan", { Task { await care.enter(.cleanup) } }))
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Text("There are \(Store.bytes(care.junk + care.ai)) of junk files on your Mac.")
+                    Text("There are \(Store.bytes(care.junk + care.aiBeyondJunk)) of junk files on your Mac.")
                         .font(.system(size: 26, weight: .semibold))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -22,7 +22,7 @@ struct CleanupView: View {
                         ResultCard(title: "System Junk", symbol: "trash.fill", colors: Tint.green,
                                    figure: Store.bytes(care.junk), detail: "Caches, logs and build output",
                                    working: care.monitor.scanning && care.junk == 0,
-                                   link: care.junk > 0 && care.store.busy == nil ? ("Clean All", { Task { await care.store.cleanAll() } }) : nil)
+                                   link: care.junk > 0 && care.store.busy == nil ? ("Clean All", { Task { await care.cleanAll() } }) : nil)
                         ResultCard(title: "AI Clutter", symbol: "brain.head.profile", colors: Tint.violet,
                                    figure: Store.bytes(care.ai), detail: "Temp files, old versions, caches and logs of AI tools",
                                    working: care.scanningAI && care.ai == 0,
@@ -41,15 +41,42 @@ struct CleanupView: View {
                             JunkRow(care: care, spot: spot)
                         }
                         CareRow(icon: SymbolTile(symbol: "trash.fill", colors: Tint.gray, size: 32),
-                            title: "Trash", detail: trashRowDetail, value: "") {
+                            title: "Trash", detail: trashDetail, value: Store.bytes(care.trashBins.reduce(0) { $0 + $1.size })) {
                             Button("Empty") { Task { await care.store.emptyTrash() } }.controlSize(.small).gatedOnBusy(care.store)
                         }
+                    }
+                    CareSection("Broken Preferences") {
+                        if care.brokenPrefs.isEmpty {
+                            Text(care.scanningCleanup ? "Reading your preference files…" : "Every preference file in your Library reads fine.")
+                                .foregroundStyle(.secondary).padding(10)
+                        } else {
+                            Text("macOS cannot read these. The app writes a fresh one on its next launch; its settings in the file are already lost.")
+                                .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.top, 6)
+                        }
+                        FileList(care: care, files: care.brokenPrefs) { files in Task { await care.trashFiles(files, title: "Broken Preferences") } }
+                    }
+                    CareSection("Mail Attachments") {
+                        if care.mailAttachments.isEmpty {
+                            Text(care.scanningCleanup ? "Looking through Mail's folders…"
+                                 : "No attachment over \(Store.bytes(Care.mailAttachment)) is kept beside your online mail. Mail's folder needs Full Disk Access to be read.")
+                                .foregroundStyle(.secondary).padding(10)
+                        } else {
+                            Text("Copies Mail keeps beside messages of online accounts. The server keeps the original; Mail fetches it again when you open the message. Mailboxes On My Mac are left alone.")
+                                .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10).padding(.top, 6)
+                        }
+                        FileList(care: care, files: care.mailAttachments) { files in Task { await care.trashMailAttachments(files) } }
                     }
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 70)
             }
         }
+    }
+
+    /// The volumes' Trash sizes, when more than the startup disk has one.
+    private var trashDetail: String {
+        guard care.trashBins.count > 1 else { return trashRowDetail }
+        return care.trashBins.map { "\($0.name) \(Store.bytes($0.size))" }.joined(separator: " · ") + " · " + trashRowDetail.lowercased()
     }
 
     /// Each tool's junk together, biggest tool first.
@@ -267,7 +294,7 @@ struct CloudCleanupView: View {
     var body: some View {
         let scans = care.cloud ?? []
         VStack(spacing: 0) {
-            CareHeader(title: "Cloud Cleanup", subtitle: subtitle(scans), busy: care.scanningCloud,
+            CareHeader(title: "Cloud Cleanup", subtitle: subtitle(scans), busy: care.scanningCloud || care.store.busy != nil,
                    action: ("Rescan", { Task { await care.scanCloud() } }))
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -297,7 +324,7 @@ struct CloudCleanupView: View {
                                     }
                                     .controlSize(.small)
                                     .help("Show in Finder")
-                                    Button("Remove Download") { care.removeDownload(file, from: scan.drive) }
+                                    Button("Remove Download") { Task { await care.removeDownload(file, from: scan.drive) } }
                                         .controlSize(.small)
                                         .disabled(care.store.busy != nil)
                                 }
