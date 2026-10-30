@@ -80,6 +80,9 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's Network detail lists the five processes moving the most
+  data, with how fast each receives and sends, measured with nettop while
+  the detail is open; the first rates take about ten seconds.
 - The panel's Battery detail lists what keeps the Mac or its screen
   awake, from the power assertions, with the process caffeinate runs for and
   how long, and *Quit* for an app.
