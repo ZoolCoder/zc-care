@@ -13,7 +13,7 @@ struct DeveloperView: View {
             CareHeader(title: "Developer", subtitle: subtitle, busy: care.scanningDeveloper,
                    action: ("Rescan", { Task { await care.scanDeveloper() } }))
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+                SectionStack(spacing: 18) {
                     CareSection("Dependencies of Idle Projects") {
                         if care.dependencies.isEmpty {
                             Text(care.scanningDeveloper ? "Looking through your projects…"
@@ -46,6 +46,7 @@ struct DeveloperView: View {
                         }
                     }
                     if !care.xcodeSpots.isEmpty { xcode }
+                    HomebrewSection(care: care)
                     SimulatorRuntimesSection(care: care)
                     AndroidSection(care: care)
                     if let usage = care.docker, !usage.isEmpty {

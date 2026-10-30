@@ -21,6 +21,7 @@ struct MyActivity: View {
                         StorageCleaned(log: log)
                     }
                     .frame(height: 260)
+                    AtAGlance(care: care)
                     HStack(alignment: .top, spacing: 14) {
                         Recommendations(care: care)
                         Recent(store: care.store, log: log)
@@ -63,6 +64,88 @@ private struct MacHealth: View {
         }
         .modifier(Glass())
         .task { await care.monitor.readHealth() }
+    }
+}
+
+/// One tile per area that can need a look, each opening the view it names.
+private struct AtAGlance: View {
+    @Bindable var care: Care
+
+    var body: some View {
+        HStack(spacing: 14) {
+            protection
+            updates
+            maintenance
+            drive
+        }
+    }
+
+    private var protection: some View {
+        let settings = [care.gatekeeper] + care.securityChecks.map(\.on)
+        let issues = settings.filter { $0 == false }.count + care.untrusted.count
+        let checked = care.protectionCheckedAt != nil && !care.loadingProtection
+        return tile("Protection", symbol: "hand.raised.fill",
+                    value: !checked ? "Not checked" : issues == 0 ? "No issues" : Store.counted(issues, "issue"),
+                    tint: !checked ? .secondary : issues == 0 ? Theme.good : Theme.warning) { care.open(.protection) }
+    }
+
+    private var updates: some View {
+        let n = care.updateCount
+        return tile("Updates", symbol: "arrow.triangle.2.circlepath",
+                    value: n == 0 ? (care.updatesCheckedAt == nil ? "Not checked" : "Up to date") : Store.counted(n, "update"),
+                    tint: n > 0 ? Theme.warning : care.updatesCheckedAt == nil ? .secondary : Theme.good) {
+            care.showUpdates = true
+            care.open(.apps)
+        }
+    }
+
+    private var maintenance: some View {
+        let last = care.store.activity.entries.last { $0.kind == .maintenance }?.date
+        let stale = last.map { Date.now.timeIntervalSince($0) > 30 * 86400 } ?? true
+        return tile("Maintenance", symbol: "wrench.and.screwdriver.fill",
+                    value: last.map { "Ran " + relativeDate($0) } ?? "Never run",
+                    tint: stale ? Theme.warning : Theme.good) { care.open(.performance) }
+    }
+
+    private var drive: some View {
+        let verdict = care.diskHealth?.verdict
+        let value = switch verdict {
+        case .good: "Healthy"
+        case .watch: "Needs a look"
+        case .failing: "Back up now"
+        case .unknown: "No SMART data"
+        case nil: "Not read"
+        }
+        let tint: Color = switch verdict {
+        case .good: Theme.good
+        case .watch: Theme.warning
+        case .failing: Theme.bad
+        default: .secondary
+        }
+        return tile("Startup Drive", symbol: "internaldrive.fill", value: value, tint: tint) {
+            care.showStartupDisk = true
+            care.open(.spaceLens)
+        }
+    }
+
+    private func tile(_ title: String, symbol: String, value: String, tint: Color, open: @escaping () -> Void) -> some View {
+        Button(action: open) {
+            HStack(spacing: 10) {
+                Image(systemName: symbol).font(.title3).foregroundStyle(tint).frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(value).font(.callout.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .modifier(Card())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title): \(value)")
     }
 }
 
@@ -113,7 +196,11 @@ private struct Recommendations: View {
                     SymbolTile(symbol: r.symbol, colors: r.module.look.tint, size: 28)
                     Text(r.title).font(.callout).lineLimit(1)
                     Spacer()
-                    Button("Go") { care.open(r.module) }.controlSize(.small)
+                    Button("Go") {
+                        r.prepare?(care)
+                        care.open(r.module)
+                    }
+                    .controlSize(.small)
                 }
             }
         }

@@ -92,6 +92,10 @@ final class Care {
     /// Nil until looked for: what removed apps left in the Library.
     var orphans: [Orphan]?
     var loadingOrphans = false
+    /// Nil until read: the installer packages macOS keeps a receipt of.
+    var receipts: [PackageReceipt]?
+    var loadingReceipts = false
+    var receiptsUnread = false
     var maintenance: [MaintenanceTask] = []
     var scanningFiles = false
     /// Hashing for duplicates outlasts the rest of the file scan.
@@ -103,6 +107,26 @@ final class Care {
     var assessments: [String: Assessment] = [:]
     var gatekeeper: Bool?
     var securityChecks: [SecurityCheck] = []
+    /// Apps whose own update feed offers a newer release, and those whose
+    /// feed could not be read; nil until checked.
+    var feedUpdates: [AppUpdate]?
+    var feedFailures: [String] = []
+    var feedUnreadable: [String] = []
+    var updatesCheckedAt: Date?
+    var checkingUpdates = false
+    /// The startup disk's health, its APFS volumes, the space macOS can
+    /// purge on its own and the local Time Machine snapshots; nil until read.
+    var diskHealth: DiskHealth?
+    var containerSpace: ContainerSpace?
+    var purgeable: Int64?
+    var localSnapshots: [String] = []
+    var loadingDisk = false
+    /// Set to open Applications on its Updates list.
+    var showUpdates = false
+    /// Asks Space Lens to open on the startup disk rather than the home folder.
+    var showStartupDisk = false
+    /// When the startup disk was last read, failed or not.
+    var diskReadAt: Date?
     var protectionCheckedAt: Date?
     /// Nil until read; the TCC databases need Full Disk Access.
     var permissions: [Permission]?
@@ -185,12 +209,21 @@ final class Care {
         let files = Dictionary((largeFiles + oldDownloads + diskImages).map { ($0.id, $0.size) }, uniquingKeysWith: { a, _ in a })
         return files.values.reduce(0, +) + duplicates.reduce(0) { $0 + $1.wasted }
     }
-    var adoptable: [InstalledApp] {
-        apps.filter { $0.declared == nil && $0.source == .other && casks[$0.url.lastPathComponent] != nil }
+    var adoptable: [InstalledApp] { apps.filter(canAdopt) }
+    /// Homebrew adopts a copy in /Applications only; one in ~/Applications
+    /// would get a second, new copy beside it.
+    func canAdopt(_ app: InstalledApp) -> Bool {
+        app.inApplications && app.declared == nil && app.source == .other && casks[app.url.lastPathComponent] != nil
     }
     var untrusted: [InstalledApp] { apps.filter { assessments[$0.id].map { !$0.trusted } ?? false } }
-    var undeclared: [InstalledApp] { apps.filter { $0.declared == nil } }
+    /// A second copy in ~/Applications is flagged as such, not as missing from the Brewfile.
+    var undeclared: [InstalledApp] {
+        let copies = copies
+        return apps.filter { $0.declared == nil && !(copies.contains($0.id) && !$0.inApplications) }
+    }
     var unused: [InstalledApp] { apps.filter { $0.unused() } }
+    var intelOnly: [InstalledApp] { apps.filter { $0.intelOnly == true } }
+    var copies: Set<String> { AppCatalog.copies(apps) }
     var ai: Int64 { aiJunk.reduce(0) { $0 + $1.size } }
     var developer: Int64 { dependencies.reduce(0) { $0 + $1.size } + models.reduce(0) { $0 + $1.size } }
     var startup: [LaunchAgent] { agents.filter { $0.enabled && ($0.runAtLoad || $0.keepAlive) } }
@@ -249,7 +282,8 @@ final class Care {
         async let agents: Void = loadAgents()
         async let developer: Void = scanDeveloper()
         async let ai: Void = scanAI()
-        _ = await (junk, state, files, apps, agents, developer, ai)
+        async let disk: Void = loadDisk()
+        _ = await (junk, state, files, apps, agents, developer, ai, disk)
         scannedAt = .now
         fresh = true
         save()
@@ -327,7 +361,7 @@ final class Care {
         await scan()
         guard store.notifies else { return }
         store.notifier.post(CareSchedule.alerts(junk: junk, outdated: store.snapshot?.outdated.count ?? 0,
-                                                findings: store.findings.count))
+                                                findings: store.findings.count, drive: diskHealth))
     }
 
     /// Smart Care's Run: cleans up, then updates, each after its question.
@@ -759,6 +793,8 @@ final class Care {
         let symbol: String
         let title: String
         let module: Module
+        /// Picks the view inside the module the title names.
+        var prepare: (@MainActor (Care) -> Void)?
         var id: String { title }
     }
 
@@ -768,10 +804,20 @@ final class Care {
         if scannedAt.map({ Date.now.timeIntervalSince($0) > 7 * 86400 }) ?? true {
             r.append(Recommendation(symbol: "sparkles", title: "Run Smart Care: no scan this week", module: .smartCare))
         }
+        if let health = diskHealth, health.verdict == .failing || health.verdict == .watch {
+            r.append(Recommendation(symbol: "internaldrive.fill", title: health.verdict == .failing ? "Back up now: the startup drive is failing"
+                                    : "Check the startup drive's health", module: .spaceLens) { $0.showStartupDisk = true })
+        }
         if junk > 500_000_000 { r.append(Recommendation(symbol: "trash.fill", title: "Clean \(Store.bytes(junk)) of system junk", module: .cleanup)) }
         if ai > 200_000_000 { r.append(Recommendation(symbol: "brain.head.profile", title: "Clear \(Store.bytes(ai)) of AI clutter", module: .cleanup)) }
         let outdated = store.snapshot?.outdated.count ?? 0
         if outdated > 0 { r.append(Recommendation(symbol: "arrow.down.circle.fill", title: "Update " + Store.counted(outdated, "package"), module: .apps)) }
+        let feeds = shownFeedUpdates.filter(\.supported).count
+        if feeds > 0 {
+            r.append(Recommendation(symbol: "arrow.triangle.2.circlepath", title: "Open \(Store.counted(feeds, "app")) with an update", module: .apps) {
+                $0.showUpdates = true
+            })
+        }
         let findings = store.findings.count
         if findings > 0 { r.append(Recommendation(symbol: "stethoscope", title: findings == 1 ? "Look at 1 health finding" : "Look at \(findings) health findings", module: .smartCare)) }
         if !untrusted.isEmpty {
@@ -782,6 +828,9 @@ final class Care {
             r.append(Recommendation(symbol: "shippingbox.fill", title: "Remove \(Store.bytes(idle)) of idle dependencies", module: .developer))
         }
         if clutter > 1_000_000_000 { r.append(Recommendation(symbol: "doc.on.doc.fill", title: "Review \(Store.bytes(clutter)) of large files", module: .clutter)) }
+        let copies = copies
+        let twice = Set(apps.filter { copies.contains($0.id) }.compactMap(\.bundleID)).count
+        if twice > 0 { r.append(Recommendation(symbol: "square.on.square", title: "Remove the extra copy of \(Store.counted(twice, "app"))", module: .apps)) }
         if !unused.isEmpty { r.append(Recommendation(symbol: "square.grid.2x2.fill", title: "Uninstall \(Store.counted(unused.count, "unused app"))", module: .apps)) }
         let broken = agents.filter(\.broken).count
         if broken > 0 { r.append(Recommendation(symbol: "bolt.slash.fill", title: "Remove " + Store.counted(broken, "broken launch agent"), module: .performance)) }
@@ -903,7 +952,12 @@ final class Care {
         self.items = items
         if casks.isEmpty { casks = await Task.detached { Self.readCaskIndex() }.value }
         let folder = URL(fileURLWithPath: "/Applications")
-        let found = await Task.detached { AppCatalog.apps(in: folder, caskApps: caskApps, items: items) }.value
+        let home = URL(fileURLWithPath: NSHomeDirectory() + "/Applications")
+        let found = await Task.detached {
+            (AppCatalog.apps(in: folder, caskApps: caskApps, items: items)
+                + AppCatalog.apps(in: home, caskApps: caskApps, items: items, managed: false))
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }.value
         externalIDs = await Task.detached { Leftovers.externalAppIDs() }.value
         let old = Dictionary(apps.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         apps = found.map { app in
@@ -911,6 +965,7 @@ final class Care {
             app.size = old[app.id]?.size
             app.lastUsed = old[app.id]?.lastUsed
             app.added = old[app.id]?.added
+            app.intelOnly = old[app.id]?.intelOnly
             return app
         }
         applyIgnoreList()
@@ -923,10 +978,11 @@ final class Care {
             let item = NSMetadataItem(url: url)
             let used = item?.value(forAttribute: "kMDItemLastUsedDate") as? Date
             let added = item?.value(forAttribute: "kMDItemDateAdded") as? Date
-            return (url.path, DiskUsage.allocated(url), used, added)
-        } each: { id, size, used, added in
+            return (url.path, DiskUsage.allocated(url), used, added, Architectures.intelOnly(url))
+        } each: { id, size, used, added, intel in
             guard let i = apps.firstIndex(where: { $0.id == id }) else { return }
             apps[i].size = size
+            apps[i].intelOnly = intel
             apps[i].lastUsed = running.contains(URL(fileURLWithPath: id).standardizedFileURL.path) ? .now : used
             apps[i].added = added
         }
@@ -950,9 +1006,11 @@ final class Care {
         defer { removing = false }
         guard await closed(app, toDo: "uninstall \(app.name)") else { return .skipped }
         guard store.busy == nil else { return .busy }
-        // What the ignore list names stays behind; the rest still goes.
-        let leftovers = Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
-            .filter { !store.ignoreList.touches($0) }
+        // What the ignore list names stays behind; the rest still goes. With
+        // another copy installed, its settings and data are that copy's too.
+        let leftovers = copies.contains(app.id) ? []
+            : Leftovers.paths(bundleID: app.bundleID, name: app.name, home: NSHomeDirectory(), installed: installedIDs)
+                .filter { !store.ignoreList.touches($0) }
         let method = Uninstall.method(declared: app.declared, source: app.source)
         var how: String
         switch method {
@@ -1346,10 +1404,11 @@ final class Care {
         for step in task.steps {
             let failed = await store.failure("\(step[0]) failed") {
                 let arguments = Array(step.dropFirst())
+                let env = self.store.loginEnv.merging(task.env) { $1 }
                 if task.docker {
-                    return try await Docker.run(step[0], arguments, env: self.store.loginEnv, runner: ProcessRunner())
+                    return try await Docker.run(step[0], arguments, env: env, runner: ProcessRunner())
                 }
-                return try await ProcessRunner().run(step[0], arguments, env: self.store.loginEnv)
+                return try await ProcessRunner().run(step[0], arguments, env: env)
             }
             if let failed { return failed }
         }

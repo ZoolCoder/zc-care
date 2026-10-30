@@ -10,12 +10,26 @@ struct SpaceLensView: View {
     @Bindable var care: Care
     @State private var focus: String?
     @State private var hover: SpaceNode?
+    @State private var part = Part.home
+
+    enum Part: String, CaseIterable { case home = "Home Folder", disk = "Startup Disk" }
 
     var body: some View {
         VStack(spacing: 0) {
             CareHeader(title: "Space Lens", subtitle: subtitle, busy: care.scanningSpace,
                    action: (care.space == nil ? "Scan" : "Rescan", { Task { await care.scanSpace() } }))
-            if let root = care.space?.root {
+            Picker("", selection: $part) {
+                ForEach(Part.allCases, id: \.self) { Text($0.rawValue) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 28)
+            .padding(.bottom, 12)
+            if part == .disk {
+                StartupDiskView(care: care)
+            } else if let root = care.space?.root {
                 let node = focus.flatMap(root.find) ?? root
                 HStack(alignment: .top, spacing: 24) {
                     Sunburst(node: node, hover: $hover) { focus = $0.path }
@@ -100,6 +114,14 @@ struct SpaceLensView: View {
                 .frame(maxWidth: .infinity)
             }
         }
+        .onAppear(perform: takeDiskRequest)
+        .onChange(of: care.showStartupDisk) { takeDiskRequest() }
+    }
+
+    private func takeDiskRequest() {
+        guard care.showStartupDisk else { return }
+        care.showStartupDisk = false
+        part = .disk
     }
 
     /// What grew most since the previous scan inside this folder, each with
@@ -146,7 +168,7 @@ struct SpaceLensView: View {
     }
 }
 
-private struct Sunburst: View {
+struct Sunburst: View {
     let node: SpaceNode
     @Binding var hover: SpaceNode?
     let open: (SpaceNode) -> Void

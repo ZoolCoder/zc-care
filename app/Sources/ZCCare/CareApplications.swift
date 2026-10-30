@@ -11,12 +11,13 @@ struct ApplicationsView: View {
     @State private var query = ""
     @State private var picked: Set<String> = []
 
-    enum Filter: String, CaseIterable { case all = "All", undeclared = "Not in Brewfile", unused = "Unused", leftovers = "Leftovers" }
+    enum Filter: String, CaseIterable { case all = "All", updates = "Updates", undeclared = "Not in Brewfile", unused = "Unused", intel = "Intel Only", leftovers = "Leftovers" }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let copies = care.copies
+        return VStack(spacing: 0) {
             CareHeader(title: "Applications", subtitle: "\(Store.counted(care.apps.count, "app")), \(Store.bytes(total)) in all",
-                   busy: care.loadingApps, action: ("Rescan", { care.orphans = nil; Task { await care.loadApps() } }))
+                   busy: care.loadingApps, action: ("Rescan", { care.orphans = nil; care.receipts = nil; Task { await care.loadApps() } }))
             HStack {
                 Picker("", selection: $filter) {
                     ForEach(Filter.allCases, id: \.self) { Text(label($0)) }
@@ -40,6 +41,8 @@ struct ApplicationsView: View {
             .padding(.bottom, 12)
             if filter == .leftovers {
                 LeftoverList(care: care)
+            } else if filter == .updates {
+                UpdateList(care: care, query: query)
             } else {
             ScrollView {
                 CareSection(filter.rawValue) {
@@ -53,14 +56,14 @@ struct ApplicationsView: View {
                         PickBox(id: app.id, picked: $picked).padding(.leading, 8)
                         CareRow(icon: icon(app), title: app.name, detail: detail(app),
                             value: app.size.map { Store.bytes($0) } ?? "…",
-                            flag: app.declared == nil ? "Not in Brewfile" : nil) {
+                            flag: copies.contains(app.id) ? "Installed Twice" : app.declared == nil ? "Not in Brewfile" : nil) {
                             Button { expanded = expanded == app.id ? nil : app.id } label: {
                                 Image(systemName: expanded == app.id ? "chevron.up" : "chevron.down")
                                     .accessibilityLabel("Show what uninstalling removes")
                             }
                             .controlSize(.small)
                             .help("Show what uninstalling removes")
-                            if app.source == .other, app.declared == nil, let token = care.casks[app.url.lastPathComponent] {
+                            if care.canAdopt(app), let token = care.casks[app.url.lastPathComponent] {
                                 Button("Adopt") { Task { await care.adopt(app) } }
                                     .controlSize(.small)
                                     .help("Install as cask \(token) over this copy, and add it to the Brewfile")
@@ -94,6 +97,8 @@ struct ApplicationsView: View {
             }
         }
         .onChange(of: care.apps.map(\.id)) { _, ids in picked.formIntersection(ids) }
+        .onAppear(perform: takeUpdatesRequest)
+        .onChange(of: care.showUpdates) { takeUpdatesRequest() }
     }
 
     /// What is ticked, and one button that uninstalls it app by app: each
@@ -124,6 +129,12 @@ struct ApplicationsView: View {
         .padding(.bottom, 54)
     }
 
+    private func takeUpdatesRequest() {
+        guard care.showUpdates else { return }
+        care.showUpdates = false
+        filter = .updates
+    }
+
     private var total: Int64 { care.apps.reduce(0) { $0 + ($1.size ?? 0) } }
 
     private var shown: [InstalledApp] {
@@ -131,7 +142,8 @@ struct ApplicationsView: View {
         case .all: care.apps
         case .undeclared: care.undeclared
         case .unused: care.unused
-        case .leftovers: [InstalledApp]()
+        case .intel: care.intelOnly
+        case .updates, .leftovers: [InstalledApp]()
         }
         let term = query.trimmingCharacters(in: .whitespaces)
         return list.filter { term.isEmpty || $0.name.localizedCaseInsensitiveContains(term) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(term) }
@@ -144,7 +156,9 @@ struct ApplicationsView: View {
         case .all: care.apps.count
         case .undeclared: care.undeclared.count
         case .unused: care.unused.count
+        case .intel: care.intelOnly.count
         case .leftovers: care.orphans?.count
+        case .updates: care.updatesCheckedAt == nil ? (care.outdatedApps.isEmpty ? nil : care.outdatedApps.count) : care.updateCount
         }
         guard let n, !care.apps.isEmpty else { return f.rawValue }
         return "\(f.rawValue) \(n)"
@@ -159,6 +173,8 @@ struct ApplicationsView: View {
     }
 
     private func detail(_ app: InstalledApp) -> String {
+        let home = NSHomeDirectory() + "/Applications/"
+        let place = app.url.path.hasPrefix(home) ? "~/Applications · " : ""
         let source = switch (app.source, app.declared) {
         case (_, let item?): "Brewfile · \(item.resource)"
         case (.cask(let token), nil): "Homebrew cask \(token)"
@@ -167,7 +183,7 @@ struct ApplicationsView: View {
         }
         // Spotlight keeps no use date for some apps in daily use.
         let when = app.lastUsed.map { " · last used " + relativeDate($0) } ?? app.added.map { " · added " + relativeDate($0) } ?? ""
-        return source + when
+        return place + source + when
     }
 }
 
@@ -205,8 +221,11 @@ private struct AppFiles: View {
         .padding(.bottom, 8)
         .task(id: [app.id] + care.store.ignoreList.paths) {
             let app = app, home = NSHomeDirectory(), ignore = care.store.ignoreList, installed = care.installedIDs
+            let shared = care.copies.contains(app.id)
             let found = await Task.detached(priority: .userInitiated) {
-                Leftovers.files(of: app, home: home, ignoring: ignore, installed: installed)
+                // Another copy uses the same settings and data, so only the app goes.
+                shared ? [LargeFile(url: app.url, size: DiskUsage.allocated(app.url))]
+                    : Leftovers.files(of: app, home: home, ignoring: ignore, installed: installed)
             }.value
             // A newer task owns `files` once this one is cancelled.
             guard !Task.isCancelled else { return }
@@ -222,6 +241,7 @@ private struct LeftoverList: View {
 
     var body: some View {
         ScrollView {
+            VStack(spacing: 0) {
             CareSection("Leftovers of Removed Apps") {
                 if let orphans = care.orphans {
                     if orphans.isEmpty {
@@ -257,7 +277,11 @@ private struct LeftoverList: View {
                 }
             }
             .padding(.horizontal, 28)
-            .padding(.bottom, 70)
+            InstallerPackages(care: care)
+                .padding(.horizontal, 28)
+                .padding(.top, 18)
+                .padding(.bottom, 70)
+            }
         }
         .task(id: care.orphans == nil) { if care.orphans == nil { await care.loadOrphans() } }
     }
