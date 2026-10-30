@@ -180,6 +180,16 @@ here with what to edit.
   Settings…* goes to the list; *Don't Remind Me* stops the banner until
   access works again. Access granted before this version is not known, so
   the first update after it shows no banner.
+- Hardening: readings pause while the Mac or its displays sleep and start
+  afresh on wake, so rates are not averaged over the sleep; the process
+  list no longer runs `ps` every 4 s from the menu bar after Performance
+  showed; Performance and the panel keep separate process lists; the Mac tab
+  open in both the menu bar window and the ⌃⌥Z panel no longer stops when
+  one closes. Reads from `zc-care` time out after 5 minutes and service
+  starts and stops after 2, so a hung command cannot leave the app busy.
+  Vitals warnings remember their quiet time across relaunches; a finding,
+  drift or update notice posts once a day at most; a failed macOS update
+  check waits 15 minutes before the panel asks again.
 
 ### Docs
 
