@@ -11,6 +11,7 @@ import ZCCareCore
 struct Sampler {
     private var lastTicks: (busy: UInt64, total: UInt64)?
     private var lastBytes: (interface: String, down: UInt64, up: UInt64, at: Date)?
+    private var lastDisk: (drives: [UInt64: DiskIO.Counter], at: Date)?
     /// Made once: a dynamic store is a connection to configd.
     private let store = SCDynamicStoreCreate(nil, "ZCCare" as CFString, nil, nil)
     /// Wi-Fi interface names, asked of CoreWLAN once.
@@ -145,6 +146,42 @@ struct Sampler {
         let seconds = now.timeIntervalSince(last.at)
         return Throughput(interface: name, wifi: wifi,
                           down: Double(down - last.down) / seconds, up: Double(up - last.up) / seconds)
+    }
+
+    mutating func diskIO() -> DiskIO? {
+        let at = Date.now
+        guard let drives = Self.diskCounters() else { return nil }
+        defer { lastDisk = (drives, at) }
+        guard let last = lastDisk else { return nil }
+        return DiskIO.rate(from: last.drives, to: drives, seconds: at.timeIntervalSince(last.at))
+    }
+
+    /// Each drive's block storage statistics, by registry ID. Disk images
+    /// are left out: what they read, the drive holding the image reads too.
+    /// Nil when a drive came or went while the list was read.
+    private static func diskCounters() -> [UInt64: DiskIO.Counter]? {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOBlockStorageDriver"), &iterator) == KERN_SUCCESS
+        else { return nil }
+        defer { IOObjectRelease(iterator) }
+        var drives: [UInt64: DiskIO.Counter] = [:]
+        while case let service = IOIteratorNext(iterator), service != 0 {
+            defer { IOObjectRelease(service) }
+            var id: UInt64 = 0
+            guard IORegistryEntryGetRegistryEntryID(service, &id) == KERN_SUCCESS, !isDiskImage(service),
+                  let stats = IORegistryEntryCreateCFProperty(service, "Statistics" as CFString, kCFAllocatorDefault, 0)?
+                      .takeRetainedValue() as? [String: Any] else { continue }
+            drives[id] = DiskIO.Counter(read: (stats["Bytes (Read)"] as? NSNumber)?.uint64Value ?? 0,
+                                        write: (stats["Bytes (Write)"] as? NSNumber)?.uint64Value ?? 0)
+        }
+        return IOIteratorIsValid(iterator) != 0 ? drives : nil
+    }
+
+    private static func isDiskImage(_ service: io_object_t) -> Bool {
+        let options = IOOptionBits(kIORegistryIterateRecursively | kIORegistryIterateParents)
+        let characteristics = IORegistryEntrySearchCFProperty(service, kIOServicePlane, "Protocol Characteristics" as CFString,
+                                                       kCFAllocatorDefault, options) as? [String: Any]
+        return characteristics?["Physical Interconnect"] as? String == "Virtual Interface"
     }
 
     private func primaryInterface() -> String? {

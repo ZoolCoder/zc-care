@@ -10,6 +10,8 @@ public struct Vitals: Sendable, Equatable {
     public var sensors: Sensors?
     public var battery: Battery?
     public var network: Throughput?
+    /// Read while the panel shows, as the Disk detail does.
+    public var diskIO: DiskIO?
     public var devices: [Device] = []
     /// What every Trash holds, read for the alerts only.
     public var trash: Int64?
@@ -300,6 +302,43 @@ public struct Volume: Sendable, Equatable, Identifiable {
         if !isLocal { return "Network share" }
         if isInternal == nil { return "Disk image" }
         return isInternal == true ? "Card or disk" : "External drive"
+    }
+}
+
+/// Bytes read and written each second, across every drive.
+public struct DiskIO: Sendable, Equatable {
+    public var read: Double
+    public var write: Double
+
+    public init(read: Double, write: Double) {
+        self.read = read
+        self.write = write
+    }
+
+    /// What one drive has read and written since it attached.
+    public struct Counter: Sendable, Equatable {
+        public var read: UInt64
+        public var write: UInt64
+
+        public init(read: UInt64, write: UInt64) {
+            self.read = read
+            self.write = write
+        }
+    }
+
+    /// Compares each drive, by its registry ID, with its last read, so a
+    /// drive that attaches, ejects or goes missing from one read adds
+    /// nothing. Nil on the first read or when the reads are so far apart
+    /// the rate would be a long average rather than now.
+    public static func rate(from last: [UInt64: Counter], to now: [UInt64: Counter], seconds: Double) -> DiskIO? {
+        guard !last.isEmpty, seconds > 0, seconds <= 5 else { return nil }
+        var read: UInt64 = 0, write: UInt64 = 0
+        for (id, counter) in now {
+            guard let before = last[id], counter.read >= before.read, counter.write >= before.write else { continue }
+            read += counter.read - before.read
+            write += counter.write - before.write
+        }
+        return DiskIO(read: Double(read) / seconds, write: Double(write) / seconds)
     }
 }
 

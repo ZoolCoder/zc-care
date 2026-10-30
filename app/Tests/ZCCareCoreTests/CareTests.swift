@@ -1120,3 +1120,17 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(parse(#"{"temp":{"cpu_temp_avg":50},"cpu_tiers":[{"label":"X","active_ratio":1}],"# + older) == pairs)
     #expect(parse(#"{"temp":{"cpu_temp_avg":50}}"#) == [])
 }
+
+@Test func diskIORatesEachDriveAgainstItsLastRead() {
+    let c = { (r: UInt64, w: UInt64) in DiskIO.Counter(read: r, write: w) }
+    let last: [UInt64: DiskIO.Counter] = [1: c(1000, 500), 2: c(10, 10)]
+    #expect(DiskIO.rate(from: last, to: [1: c(5000, 2500), 2: c(10, 10)], seconds: 2) == DiskIO(read: 2000, write: 1000))
+    // A drive that attaches brings its lifetime bytes; one that ejects or
+    // resets leaves; neither counts.
+    #expect(DiskIO.rate(from: last, to: [1: c(1000, 500), 3: c(900_000, 900_000)], seconds: 2) == DiskIO(read: 0, write: 0))
+    #expect(DiskIO.rate(from: last, to: [1: c(1200, 400), 2: c(30, 20)], seconds: 2) == DiskIO(read: 10, write: 5))
+    #expect(DiskIO.rate(from: last, to: last, seconds: 5) == DiskIO(read: 0, write: 0))
+    #expect(DiskIO.rate(from: last, to: last, seconds: 5.01) == nil)
+    #expect(DiskIO.rate(from: last, to: last, seconds: 0) == nil)
+    #expect(DiskIO.rate(from: [:], to: last, seconds: 2) == nil)
+}

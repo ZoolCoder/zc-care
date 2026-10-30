@@ -50,6 +50,7 @@ struct MacTab: View {
             Group {
                 switch open {
                 case .disk:
+                    DiskActivity(io: vitals.diskIO)
                     if !store.monitor.volumes.isEmpty { DriveList(store: store, volumes: store.monitor.volumes) }
                     FreeUpList(store: store)
                 case .memory:
@@ -353,6 +354,21 @@ private struct Recommendation: View {
         case .updates: Tint.blue
         case .security: Tint.orange
         default: Tint.pink
+        }
+    }
+}
+
+/// What every drive reads and writes now. A dash until the second read.
+private struct DiskActivity: View {
+    let io: DiskIO?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Activity")
+            ListCard {
+                ValueRow(title: "Reading", value: io.map { Store.rate(Int64($0.read)) } ?? "–")
+                ValueRow(title: "Writing", value: io.map { Store.rate(Int64($0.write)) } ?? "–")
+            }
         }
     }
 }

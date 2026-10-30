@@ -78,6 +78,9 @@ final class Monitor {
         battery?.cycles = v.battery?.cycles
         v.battery = battery
         let panel = readers.contains(.panel)
+        // Keeps the last rate through a read that gives none, so the row
+        // does not blink.
+        v.diskIO = panel ? sampler.diskIO() ?? v.diskIO : nil
         if tick % 5 == 0 {
             v.disk = sampler.disk()
             if panel, let macmon, let r = try? await ProcessRunner(timeout: 15).run(macmon, ["pipe", "-s", "1", "-i", "200"], env: [:]) {
