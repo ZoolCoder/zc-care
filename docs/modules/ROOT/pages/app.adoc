@@ -178,7 +178,12 @@ by the start of its name, such as `zccare://care/cleanup`. The scheme is case-in
 
 Everything ZC Care removes goes to the Trash by default: junk, caches, browser
 data, AI clutter, files, apps, leftovers, dependencies and models. *Put Back*
-in My Activity restores an entry and recreates missing parent folders as private (0700). Space frees once the Trash is emptied. To
+in My Activity restores an entry and recreates missing parent folders as private (0700).
+Before an item moves, ZC Care tags it with its old place in the extended
+attribute `dev.zoolcoder.zccare.origin`. Put Back moves it only when it is the
+same file, carries that tag, sits directly in your Trash or this volume's, and
+goes back to a path on the same volume with no link in it. Without Full Disk
+Access the Trash cannot be read, so Put Back offers Finder's instead. Space frees once the Trash is emptied. To
 skip the Trash, turn on *Delete permanently instead of moving to the Trash* in
 Settings; then those items are deleted for good. Docker's prune buttons always
 delete for good. A Homebrew app is uninstalled through `zc-care remove`,

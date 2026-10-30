@@ -214,6 +214,26 @@ here with what to edit.
   cannot run twice at once. Removing a cloud download no longer freezes the
   window while the provider answers. Duplicates list the 500 biggest
   wastes and Mail attachments the 1,000 biggest files.
+- Put Back moves an item only when it is still the one that went to the
+  Trash: the same file, tagged before the move with its old place, directly
+  in your Trash or this volume's, and going back to a path with no link in
+  it. A log another program edited, or a record from an older version,
+  moves nothing; Finder's Put Back still works for those. Without Full
+  Disk Access, Put Back says so and offers Finder.
+- Clean All skips a folder while the app that uses it runs (Xcode or the
+  Simulator for their caches, Mail for its downloads, a Gradle daemon for
+  Gradle) and says which. Freed space is measured before and after, and
+  *Empty Trash* no longer counts items that Put Back can still return.
+  Smart Care and Cleanup no longer count AI caches twice when they sit in a
+  folder Clean All clears, and the `pub` cache is opt-in like iOS backups.
+- Items on the ignore list stay out of Browser Privacy and Recent Items,
+  and the alert says how many stay.
+- A plan that overwrites an edit made outside zc-care or runs a script asks
+  first, like one that deletes, and says undo cannot take it back. A plan
+  that fails is never applied from a file the last plan left behind.
+  Uninstalling an app a manifest declares works again; it stopped at
+  `error: cancelled`. Installing apps with no target that declares any
+  stops instead of planning the whole config.
 
 ### Docs
 
