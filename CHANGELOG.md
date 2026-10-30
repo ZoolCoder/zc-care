@@ -80,6 +80,9 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's Network detail shows the Wi-Fi link: signal and noise with
+  a quality word, standard, channel, transmit rate and security, warning
+  on an open, WEP or WPA network.
 - The panel's Battery detail shows when the Mac last slept and woke and
   why, how often it woke briefly for upkeep over the past day, and how much
   battery it used asleep, from the power management log.

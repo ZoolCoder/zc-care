@@ -134,7 +134,7 @@ memory into app memory, wired, compressed, cached files, free and swap. *Top App
 busy. *Details* on Battery shows its condition, capacity, cycles,
 temperature, time left and charger, what keeps the Mac or its screen awake and for how long, when it last slept and woke and why, its upkeep wakes and the battery used asleep over the past day, then the apps using the most CPU; *Top Apps* on CPU starts with a graph of the last five minutes and each core's load, then the GPU, fan and
 power readings. *Details* on the network tile shows the connection's
-service, addresses, router and DNS, runs a speed test, lists the five
+service, addresses, router and DNS, on Wi-Fi the signal, standard, channel, rate and security, runs a speed test, lists the five
 processes moving the most data and how fast, and lists your apps listening on a port, marked Network when other devices can try to connect. *Details* on the devices tile lists the displays, with pixels and refresh rate, and what is plugged into USB. The bottom bar opens ZC Care and the settings.
 
 If [SketchyBar](https://github.com/FelixKratz/SketchyBar) is installed,
