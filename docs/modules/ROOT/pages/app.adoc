@@ -182,7 +182,11 @@ in My Activity restores an entry and recreates missing parent folders as private
 skip the Trash, turn on *Delete permanently instead of moving to the Trash* in
 Settings; then those items are deleted for good. Docker's prune buttons always
 delete for good. A Homebrew app is uninstalled through `zc-care remove`,
-so it also leaves the Brewfile. Maintenance tasks that need an administrator
+so it also leaves the Brewfile. An app keeps its settings and data when macOS knows
+another copy of it outside the Trash, or when an app such as Firefox
+Developer Edition shares the folder named after it; the alert names the other copy.
+Before the files go, its helpers are quit and the agents it runs from inside
+its bundle, labelled with its own id, are stopped. Maintenance tasks that need an administrator
 ask for your password in a macOS dialog.
 
 ZC Care keeps its last scan in `~/Library/Caches/dev.zoolcoder.zccare` and the

@@ -190,6 +190,19 @@ here with what to edit.
   Vitals warnings remember their quiet time across relaunches; a finding,
   drift or update notice posts once a day at most; a failed macOS update
   check waits 15 minutes before the panel asks again.
+- Uninstalling or adopting a Homebrew cask no longer lets `brew` autoremove
+  formulae nobody confirmed. An app's settings and data stay when macOS
+  knows another copy of it anywhere (the alert names where; a mounted disk
+  image does not count), and folders named after the app stay when a
+  sibling such as Firefox Developer Edition shares them. A helper running
+  from inside the app counts as the app, and the app's own agents are
+  stopped before its files go. Uninstall and Reset list up to 24 paths.
+- Firefox's cookies, site data and tabs stay while Developer Edition or
+  Nightly runs, since they share its profiles. Accessibility and Input
+  event answers reset one at a time, and a reset that cannot be read back
+  says so. *Forget…* on a Wi-Fi network checks the list first and gives up
+  after five minutes. Cancelling a step that asked for your password says
+  it may still finish, not that nothing changed.
 - Removals check again at the moment they act, since a list may be days
   old: an app reinstalled, or a vendor's app installed, since Applications'
   Leftovers was read keeps its folders; an Ollama model removes only the
