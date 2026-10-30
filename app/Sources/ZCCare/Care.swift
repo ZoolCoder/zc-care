@@ -123,6 +123,11 @@ final class Care {
     var loadingDisk = false
     /// Set to open Applications on its Updates list.
     var showUpdates = false
+    /// Set to open Applications on its Leftovers list.
+    var showLeftovers = false
+    /// Apps a notification said were removed: Leftovers lists what they
+    /// left even when their vendor has another app installed.
+    var removedIDs: Set<String> = []
     /// Asks Space Lens to open on the startup disk rather than the home folder.
     var showStartupDisk = false
     /// When the startup disk was last read, failed or not.
@@ -1146,12 +1151,21 @@ final class Care {
     /// Library entries named for apps Launch Services no longer knows. A
     /// launch agent or a running process with the id is no leftover: tools
     /// without an app bundle keep their settings under it too.
+    /// Launch Services still knows an app in the Trash until it is emptied:
+    /// only a copy outside it counts.
+    nonisolated static func installedOutsideTrash(_ id: String) -> Bool {
+        // Launch Services also keeps records of bundles deleted since.
+        NSWorkspace.shared.urlsForApplications(withBundleIdentifier: id)
+            .contains { !Leftovers.inTrash($0.path) && FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     func loadOrphans() async {
         guard !loadingOrphans else { return }
         loadingOrphans = true
         defer { loadingOrphans = false }
         let home = NSHomeDirectory()
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let removed = removedIDs
         let external = await Task.detached { Leftovers.externalAppIDs() }.value
         externalIDs = external
         orphans = await Task.detached(priority: .utility) {
@@ -1163,11 +1177,18 @@ final class Care {
             }
             let vendors = Set(apps.compactMap { Bundle(path: $0)?.bundleIdentifier }.map(Leftovers.vendor))
                 .union(external.map(Leftovers.vendor))
-            return Leftovers.orphans(home: home, vendors: vendors) {
-                inUse.contains($0) || external.contains($0) || NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil
+            return Leftovers.orphans(home: home, vendors: vendors, removed: removed) {
+                inUse.contains($0) || external.contains($0) || Self.installedOutsideTrash($0)
             }
         }.value
+        // Told about once listed: an app back since, or cleared, is no longer news.
+        removedIDs.subtract(removed.subtracting(orphans?.map(\.bundleID) ?? []))
         applyIgnoreList()
+        // A notification clicked while this ran named an app it missed.
+        if !removedIDs.isSubset(of: removed) {
+            loadingOrphans = false
+            await loadOrphans()
+        }
     }
 
     func trashOrphans(_ picked: [Orphan]) async {

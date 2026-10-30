@@ -11,6 +11,8 @@ public struct Vitals: Sendable, Equatable {
     public var battery: Battery?
     public var network: Throughput?
     public var devices: [Device] = []
+    /// What every Trash holds, read for the alerts only.
+    public var trash: Int64?
 
     public init() {}
 }

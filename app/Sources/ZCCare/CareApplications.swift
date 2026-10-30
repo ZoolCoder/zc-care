@@ -97,8 +97,9 @@ struct ApplicationsView: View {
             }
         }
         .onChange(of: care.apps.map(\.id)) { _, ids in picked.formIntersection(ids) }
-        .onAppear(perform: takeUpdatesRequest)
-        .onChange(of: care.showUpdates) { takeUpdatesRequest() }
+        .onAppear(perform: takeRequest)
+        .onChange(of: care.showUpdates) { takeRequest() }
+        .onChange(of: care.showLeftovers) { takeRequest() }
     }
 
     /// What is ticked, and one button that uninstalls it app by app: each
@@ -129,10 +130,15 @@ struct ApplicationsView: View {
         .padding(.bottom, 54)
     }
 
-    private func takeUpdatesRequest() {
-        guard care.showUpdates else { return }
-        care.showUpdates = false
-        filter = .updates
+    /// Opens the list a notification or recommendation asked for.
+    private func takeRequest() {
+        if care.showUpdates {
+            care.showUpdates = false
+            filter = .updates
+        } else if care.showLeftovers {
+            care.showLeftovers = false
+            filter = .leftovers
+        }
     }
 
     private var total: Int64 { care.apps.reduce(0) { $0 + ($1.size ?? 0) } }

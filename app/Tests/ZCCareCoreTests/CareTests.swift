@@ -495,6 +495,20 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(orphans.map(\.bundleID) == ["com.gone.app"])
 }
 
+@Test func orphansListAnAppSeenRemovedWhateverItsVendor() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    try write(home.appendingPathComponent("Library/Caches/com.microsoft.teams2/a"), bytes: 10)
+    try write(home.appendingPathComponent("Library/Caches/com.microsoft.shared/a"), bytes: 10)
+    let orphans = Leftovers.orphans(home: home.path, vendors: ["com.microsoft"], removed: ["com.microsoft.teams2"]) { _ in false }
+    #expect(orphans.map(\.bundleID) == ["com.microsoft.teams2"])
+    // Seen removed, yet installed somewhere: its data stays off the list.
+    let installed = Leftovers.orphans(home: home.path, vendors: ["com.microsoft"], removed: ["com.microsoft.teams2"]) {
+        $0 == "com.microsoft.teams2"
+    }
+    #expect(installed.isEmpty)
+}
+
 @Test func maintenanceQuotesAdminSteps() {
     let script = Maintenance.adminScript([["/usr/bin/killall", "-HUP", "it's"], ["/bin/echo", "a \"b\""]])
     #expect(script == #"do shell script "'/usr/bin/killall' '-HUP' 'it'\\''s' && '/bin/echo' 'a \"b\"'" with administrator privileges"#)
@@ -827,6 +841,24 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(watch.alerts(for: v).isEmpty)
     watch.limits.batteryCapacity = 80
     #expect(watch.alerts(for: v).map(\.id) == ["vitals battery"])
+}
+
+@Test func vitalsWatchWarnsOfAFullTrashOncePerDay() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    let now = Date(timeIntervalSince1970: 0)
+    v.trash = 4_000_000_000
+    #expect(watch.alerts(for: v, now: now).isEmpty)
+    v.trash = 6_000_000_000
+    #expect(watch.alerts(for: v, now: now).map(\.id) == ["vitals trash"])
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(3600)).isEmpty)
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(86400)).map(\.id) == ["vitals trash"])
+}
+
+@Test func vitalLimitsKeepOldSettings() throws {
+    let old = #"{"diskFreeGB":40,"memoryPressure":90,"cpuTemp":100,"batteryCapacity":60}"#
+    let limits = try JSONDecoder().decode(VitalLimits.self, from: Data(old.utf8))
+    #expect(limits.diskFreeGB == 40 && limits.batteryCapacity == 60 && limits.trashGB == 5)
 }
 
 @Test func largeFilesLeaveAppLibrariesAlone() {

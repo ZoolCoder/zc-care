@@ -80,7 +80,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func openAlert(_ id: String) {
         switch id {
         case _ where id.hasPrefix("care"): care.show()
-        case "vitals disk": care.show(.cleanup)
+        case "vitals disk", "vitals trash": care.show(.cleanup)
+        case _ where id.hasPrefix("leftovers "):
+            care.care.removedIDs.insert(String(id.dropFirst("leftovers ".count)))
+            care.care.orphans = nil
+            care.care.showLeftovers = true
+            care.show(.apps)
         case "vitals memory", "vitals heat", "vitals battery":
             store.tab = .mac
             store.macDetail = id == "vitals memory" ? .memory : id == "vitals heat" ? .cpu : nil

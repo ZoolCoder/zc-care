@@ -6,8 +6,20 @@ public struct VitalLimits: Codable, Sendable, Equatable {
     public var memoryPressure = 80
     public var cpuTemp = 95
     public var batteryCapacity = 80
+    public var trashGB = 5
 
     public init() {}
+
+    // Settings saved by an older version lack the newer limits: those take
+    // their default, and the rest are kept.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        diskFreeGB = try c.decodeIfPresent(Int.self, forKey: .diskFreeGB) ?? diskFreeGB
+        memoryPressure = try c.decodeIfPresent(Int.self, forKey: .memoryPressure) ?? memoryPressure
+        cpuTemp = try c.decodeIfPresent(Int.self, forKey: .cpuTemp) ?? cpuTemp
+        batteryCapacity = try c.decodeIfPresent(Int.self, forKey: .batteryCapacity) ?? batteryCapacity
+        trashGB = try c.decodeIfPresent(Int.self, forKey: .trashGB) ?? trashGB
+    }
 }
 
 /// Turns vitals samples into alerts. Memory and heat must hold for a few
@@ -21,7 +33,7 @@ public struct VitalsWatch: Sendable {
     /// Checks in a row before memory or heat counts.
     static let sustained = 3
     static let quiet: [String: TimeInterval] = [
-        "disk": 6 * 3600, "memory": 3600, "heat": 3600, "battery": 7 * 86400,
+        "disk": 6 * 3600, "memory": 3600, "heat": 3600, "battery": 7 * 86400, "trash": 86400,
     ]
 
     public init(limits: VitalLimits = VitalLimits()) {
@@ -59,6 +71,12 @@ public struct VitalsWatch: Sendable {
             check("battery", capacity < limits.batteryCapacity || battery.health.map { $0 != "Good" } ?? false) {
                 Alert(id: "vitals battery", title: "The battery is wearing out",
                       body: "\(capacity)% of its new capacity" + (battery.health.map { ", \($0)." } ?? "."))
+            }
+        }
+        if let trash = v.trash {
+            check("trash", trash >= Int64(limits.trashGB) * 1_000_000_000) {
+                Alert(id: "vitals trash", title: "The Trash holds \(Self.gb(trash))",
+                      body: "Files in the Trash still take space until it is emptied. Cleanup can empty it.")
             }
         }
         return alerts

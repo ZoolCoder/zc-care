@@ -93,6 +93,8 @@ struct SettingsView: View {
                 Toggle("Open ZC Care at login", isOn: $store.opensAtLogin)
                 Toggle("Open the panel with ⌃⌥Z", isOn: $store.hotkey)
                 Toggle("Notify me when something needs attention", isOn: $store.notifies)
+                Toggle("Notify me when a removed app leaves files behind", isOn: $store.leftoverAlerts)
+                    .disabled(!store.notifies)
                 if store.notifies, store.notificationsBlocked {
                     HStack {
                         Label("macOS is not showing ZC Care's notifications", systemImage: "bell.slash")
@@ -129,6 +131,8 @@ struct SettingsView: View {
                             value: $store.vitalLimits.cpuTemp, in: 70...105, step: 5)
                     Stepper("Battery capacity under \(store.vitalLimits.batteryCapacity)%",
                             value: $store.vitalLimits.batteryCapacity, in: 50...95, step: 5)
+                    Stepper("Trash over \(store.vitalLimits.trashGB) GB",
+                            value: $store.vitalLimits.trashGB, in: 1...100, step: 1)
                 }
                 .disabled(!store.vitalsAlerts || !store.notifies)
             } header: {

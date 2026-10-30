@@ -164,8 +164,8 @@ final class Monitor {
     }
 
     /// The vitals the background alerts need, read apart from the panel's
-    /// loop; battery health only when asked, as system_profiler is slow.
-    func watchSample(battery: Bool) async -> Vitals {
+    /// loop; battery health and the Trash only when asked, as both are slow.
+    func watchSample(battery: Bool, trash: Bool = false) async -> Vitals {
         var v = Vitals()
         v.disk = sampler.disk()
         v.memory = sampler.memory()
@@ -176,6 +176,11 @@ final class Monitor {
            let r = try? await ProcessRunner(timeout: 60).run("/usr/sbin/system_profiler", ["-json", "SPPowerDataType"], env: [:]) {
             b.read(systemProfiler: r.stdout)
             v.battery = b
+        }
+        if trash {
+            v.trash = await Task.detached(priority: .utility) {
+                TrashBins.find(home: NSHomeDirectory(), volumes: TrashBins.mountedVolumes()).reduce(0) { $0 + $1.size }
+            }.value
         }
         return v
     }

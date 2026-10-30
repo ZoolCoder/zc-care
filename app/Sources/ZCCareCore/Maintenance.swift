@@ -139,12 +139,16 @@ extension Leftovers {
     /// could be a helper of, answers to. Apple's own are left out, and so is
     /// what a vendor with an app still installed shares between its apps,
     /// such as com.microsoft.shared: `vendors` holds those apps' vendors.
-    public static func orphans(home: String, vendors: Set<String> = [], isInstalled: (String) -> Bool) -> [Orphan] {
+    /// An id in `removed` belongs to an app seen leaving the Applications
+    /// folders, so it is listed whatever its vendor, unless it is installed.
+    public static func orphans(home: String, vendors: Set<String> = [], removed: Set<String> = [],
+                               isInstalled: (String) -> Bool) -> [Orphan] {
         var byID: [String: [String]] = [:]
         for folder in folders {
             let path = home + "/Library/" + folder
             for name in (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [] {
-                guard let id = bundleID(name), !isApple(id), !vendors.contains(vendor(id)), !owned(id, isInstalled) else { continue }
+                guard let id = bundleID(name), !isApple(id),
+                      !owned(id, isInstalled), removed.contains(id) || !vendors.contains(vendor(id)) else { continue }
                 byID[id, default: []].append(path + "/" + name)
             }
         }
@@ -153,6 +157,23 @@ extension Leftovers {
                    size: paths.reduce(0) { $0 + DiskUsage.allocated(URL(fileURLWithPath: $1)) })
         }
         .sorted { $0.size > $1.size }
+    }
+
+    /// What one app left in the folders `orphans` reads, the same entries it
+    /// would list for that id; nothing for Apple's own.
+    public static func orphanPaths(of id: String, home: String) -> [String] {
+        guard !isApple(id) else { return [] }
+        return folders.flatMap { folder in
+            let path = home + "/Library/" + folder
+            return ((try? FileManager.default.contentsOfDirectory(atPath: path)) ?? [])
+                .filter { bundleID($0) == id }.map { path + "/" + $0 }
+        }
+    }
+
+    /// Whether a path lies in a Trash: the home folder's or a volume's.
+    public static func inTrash(_ path: String) -> Bool {
+        let parts = (path as NSString).pathComponents
+        return parts.contains(".Trash") || parts.contains(".Trashes")
     }
 
     /// Bundle ids of the apps Launch Services may not know: Setapp's and

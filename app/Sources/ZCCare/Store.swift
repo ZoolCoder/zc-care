@@ -84,6 +84,7 @@ final class Store {
         static let vitalLimits = "vitalLimits"
         static let barStats = "barStats"
         static let deletesPermanently = "deletesPermanently"
+        static let leftoverAlerts = "leftoverAlerts"
     }
 
     /// A reading the menu bar can show beside the mark.
@@ -109,6 +110,7 @@ final class Store {
     private var discovery: Task<Void, Never>?
     private var watcher: Task<Void, Never>?
     private var watch = VitalsWatch()
+    private var leftoverWatch = LeftoverWatch()
     private let planFile = FileManager.default.temporaryDirectory.appendingPathComponent("zccare-plan.json").path
     let notifier = Notifier()
     /// Set by the app delegate, which owns the hotkey.
@@ -129,12 +131,14 @@ final class Store {
     init() {
         ignored = Set(UserDefaults.standard.stringArray(forKey: Keys.ignored) ?? [])
         UserDefaults.standard.register(defaults: [Keys.notifies: true, Keys.hotkey: true, Keys.weeklyScan: true,
-                                                  Keys.vitalsAlerts: true, Keys.barStats: ["cpu", "memory"]])
+                                                  Keys.vitalsAlerts: true, Keys.leftoverAlerts: true,
+                                                  Keys.barStats: ["cpu", "memory"]])
         notifies = UserDefaults.standard.bool(forKey: Keys.notifies)
         hotkey = UserDefaults.standard.bool(forKey: Keys.hotkey)
         weeklyScan = UserDefaults.standard.bool(forKey: Keys.weeklyScan)
         ignoreList = IgnoreList(UserDefaults.standard.stringArray(forKey: Keys.ignoreList) ?? [])
         vitalsAlerts = UserDefaults.standard.bool(forKey: Keys.vitalsAlerts)
+        leftoverAlerts = UserDefaults.standard.bool(forKey: Keys.leftoverAlerts)
         deletesPermanently = UserDefaults.standard.bool(forKey: Keys.deletesPermanently)
         vitalLimits = UserDefaults.standard.data(forKey: Keys.vitalLimits)
             .flatMap { try? JSONDecoder().decode(VitalLimits.self, from: $0) } ?? VitalLimits()
@@ -162,10 +166,16 @@ final class Store {
         Task { notificationsBlocked = !(await notifier.authorize()) }
     }
 
-    /// Notifies of a full disk, memory pressure, heat and battery wear,
-    /// checked each minute whether the panel shows or not.
+    /// Notifies of a full disk, memory pressure, heat, battery wear and a
+    /// full Trash, checked each minute whether the panel shows or not.
     var vitalsAlerts: Bool {
         didSet { UserDefaults.standard.set(vitalsAlerts, forKey: Keys.vitalsAlerts) }
+    }
+
+    /// Notifies when an app leaves the Applications folders and its files
+    /// stay in the Library.
+    var leftoverAlerts: Bool {
+        didSet { UserDefaults.standard.set(leftoverAlerts, forKey: Keys.leftoverAlerts) }
     }
 
     /// Every removal goes to the Trash, where My Activity can put it back,
@@ -195,13 +205,42 @@ final class Store {
             while !Task.isCancelled {
                 guard let self else { return }
                 if notifies, vitalsAlerts {
-                    let vitals = await monitor.watchSample(battery: check % 60 == 0)
+                    let vitals = await monitor.watchSample(battery: check % 60 == 0, trash: check % 30 == 0)
                     notifier.post(watch.alerts(for: vitals))
-                    check += 1
                 }
+                if notifies, leftoverAlerts {
+                    if check % 5 == 0 { await watchLeftovers() }
+                } else {
+                    // Turned back on, it starts from what is installed then.
+                    leftoverWatch = LeftoverWatch()
+                }
+                check += 1
                 try? await Task.sleep(for: .seconds(60))
             }
         }
+    }
+
+    /// Every five minutes: what an app removed by dragging it to the Trash
+    /// left in the Library.
+    private func watchLeftovers() async {
+        let ignore = ignoreList
+        let home = NSHomeDirectory()
+        let watch = leftoverWatch
+        let alerts = await Task.detached(priority: .utility) {
+            var watch = watch
+            let installed = LeftoverWatch.installed(in: [URL(fileURLWithPath: "/Applications"),
+                                                         URL(fileURLWithPath: home + "/Applications")])
+            let external = Leftovers.externalAppIDs()
+            let alerts = watch.alerts(installed: installed,
+                                      elsewhere: { external.contains($0) || Care.installedOutsideTrash($0) }) { id, _ in
+                Leftovers.orphanPaths(of: id, home: home)
+                    .filter { !ignore.touches($0) }
+                    .reduce(0) { $0 + DiskUsage.allocated(URL(fileURLWithPath: $1)) }
+            }
+            return (watch, alerts)
+        }.value
+        leftoverWatch = alerts.0
+        if notifies, leftoverAlerts { notifier.post(alerts.1) }
     }
 
     /// Files and folders ZC Care never lists, cleans or trashes.
