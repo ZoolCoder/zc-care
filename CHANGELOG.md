@@ -80,6 +80,8 @@ here with what to edit.
   only, as an updater swaps it, stays quiet. Settings turns it off.
 - Leftovers lists what an app in the Trash left before the Trash is
   emptied.
+- The panel's Battery detail lists the apps using the most CPU, a large
+  share of battery drain, with *Quit*.
 - The panel's Network detail lists the user's apps waiting for
   connections, with the port and whether other devices can try to connect.
 - The panel's CPU and Memory details graph load and memory used over the
