@@ -56,6 +56,7 @@ struct MacTab: View {
                     if let memory = vitals.memory, memory.total > 0, memory.used > 0 { MemoryList(memory: memory) }
                     TopList(store: store, order: .memory)
                 case .cpu:
+                    if let tiers = vitals.sensors?.tiers, !tiers.isEmpty { CoreList(tiers: tiers) }
                     if let sensors = vitals.sensors { SensorList(sensors: sensors) }
                     TopList(store: store, order: .cpu)
                 case .battery: if let battery = vitals.battery { BatteryDetail(battery: battery) }
@@ -554,6 +555,53 @@ private struct MemoryList: View {
         .accessibilityElement()
         .accessibilityLabel("\(Store.bytes(memory.used, .memory)) of \(Store.bytes(memory.total, .memory)) used")
     }
+}
+
+/// Each kind of core with its load and clock, and a bar for each core.
+private struct CoreList: View {
+    let tiers: [CoreTier]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            SectionTitle(title: "Cores", count: tiers.reduce(0) { $0 + $1.cores.count }.nonZero)
+            ListCard {
+                ForEach(Array(tiers.enumerated()), id: \.offset) { _, tier in
+                    VStack(alignment: .leading, spacing: 4) {
+                        ValueRow(title: tier.title, value: value(tier), warn: tier.load >= 0.9)
+                        if !tier.cores.isEmpty { bars(tier) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func value(_ tier: CoreTier) -> String {
+        let clock = tier.megahertz > 0 ? String(format: "%.1f GHz · ", Double(tier.megahertz) / 1000) : ""
+        return clock + "\(Int((tier.load * 100).rounded())) %"
+    }
+
+    private func bars(_ tier: CoreTier) -> some View {
+        HStack(alignment: .bottom, spacing: 3) {
+            ForEach(Array(tier.cores.enumerated()), id: \.offset) { _, load in
+                ZStack(alignment: .bottom) {
+                    Capsule().fill(.quaternary)
+                    Capsule().fill(load >= 0.9 ? Theme.warning : Theme.accent)
+                        .frame(height: max(2, 22 * min(1, load)))
+                }
+                .frame(maxWidth: 14)
+                .frame(height: 22)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 2)
+        .accessibilityElement()
+        .accessibilityLabel(tier.title + ": " + tier.cores.enumerated()
+            .map { "core \($0.offset + 1) \(Int(($0.element * 100).rounded())) %" }.joined(separator: ", "))
+    }
+}
+
+private extension Int {
+    var nonZero: Int? { self > 0 ? self : nil }
 }
 
 /// What macmon reads beyond the CPU tile: the GPU, each fan against its

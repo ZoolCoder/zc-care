@@ -101,6 +101,8 @@ public struct Sensors: Sendable, Equatable {
     public var cpuPower: Double?
     public var gpuPower: Double?
     public var systemPower: Double?
+    /// Performance and efficiency cores, as macmon groups them.
+    public var tiers: [CoreTier] = []
 
     public init(cpuTemp: Double, fans: [Int] = []) {
         self.cpuTemp = cpuTemp
@@ -123,7 +125,64 @@ public struct Sensors: Sendable, Equatable {
         sensors.cpuPower = (obj["cpu_power"] as? NSNumber)?.doubleValue
         sensors.gpuPower = (obj["gpu_power"] as? NSNumber)?.doubleValue
         sensors.systemPower = (obj["sys_power"] as? NSNumber)?.doubleValue.nonZero
+        sensors.tiers = CoreTier.parse(macmon: obj)
         return sensors
+    }
+}
+
+/// One kind of core: its load, 0 to 1, its clock and each core's load.
+public struct CoreTier: Sendable, Equatable {
+    /// Fastest first, as the panel lists them. M5 chips add super cores.
+    public enum Kind: Int, Sendable, Comparable {
+        case superCores, performance, efficiency
+
+        init?(label: String) {
+            switch label {
+            case "S": self = .superCores
+            case "P": self = .performance
+            case "E": self = .efficiency
+            default: return nil
+            }
+        }
+
+        public static func < (a: Kind, b: Kind) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    public var kind: Kind
+    public var load: Double
+    public var megahertz: Int
+    public var cores: [Double]
+
+    public init(kind: Kind, load: Double, megahertz: Int, cores: [Double] = []) {
+        self.kind = kind
+        self.load = load
+        self.megahertz = megahertz
+        self.cores = cores
+    }
+
+    public var title: String {
+        switch kind {
+        case .superCores: "Super cores"
+        case .performance: "Performance cores"
+        case .efficiency: "Efficiency cores"
+        }
+    }
+
+    /// Fastest first. Older macmon gives each kind's load and clock but not
+    /// each core's.
+    static func parse(macmon obj: [String: Any]) -> [CoreTier] {
+        let number = { (value: Any?) in (value as? NSNumber)?.doubleValue }
+        let tiers = (obj["cpu_tiers"] as? [[String: Any]] ?? []).compactMap { tier -> CoreTier? in
+            guard let kind = (tier["label"] as? String).flatMap(Kind.init(label:)),
+                  let load = number(tier["active_ratio"]) else { return nil }
+            let cores = (tier["cores"] as? [[String: Any]] ?? []).map { number($0["active_ratio"]) ?? 0 }
+            return CoreTier(kind: kind, load: load, megahertz: Int(number(tier["freq_mhz"]) ?? 0), cores: cores)
+        }
+        if !tiers.isEmpty { return tiers.sorted { $0.kind < $1.kind } }
+        return [("pcpu_usage", Kind.performance), ("ecpu_usage", .efficiency)].compactMap { key, kind in
+            guard let pair = obj[key] as? [Any], pair.count == 2, let mhz = number(pair[0]), let load = number(pair[1]) else { return nil }
+            return CoreTier(kind: kind, load: load, megahertz: Int(mhz))
+        }
     }
 }
 

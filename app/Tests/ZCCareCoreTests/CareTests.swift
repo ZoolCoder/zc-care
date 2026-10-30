@@ -1103,3 +1103,20 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     swapping.pressure = 20
     #expect(!swapping.isSwapping)
 }
+
+@Test func coreTiersFromMacmon() {
+    let parse = { (json: String) in Sensors.parse(macmon: Data(json.utf8))?.tiers ?? [] }
+    let e = #"{"label":"E","active_ratio":0.8,"freq_mhz":2058,"cores":[{"active_ratio":0.9},{"core_id":1}]}"#
+    let p = #"{"label":"P","active_ratio":0.4,"freq_mhz":3228,"cores":[{"active_ratio":0.5},{"active_ratio":0.3},{"active_ratio":0.4}]}"#
+    let s = #"{"label":"S","active_ratio":0.2}"#
+    let read = parse(#"{"temp":{"cpu_temp_avg":50},"cpu_tiers":["# + e + "," + p + "," + s + #",{"label":"X","active_ratio":1}]}"#)
+    #expect(read.map(\.kind) == [.superCores, .performance, .efficiency])
+    #expect(read[0].title == "Super cores" && read[0].cores.isEmpty && read[0].megahertz == 0)
+    #expect(read[1].cores == [0.5, 0.3, 0.4] && read[1].megahertz == 3228 && read[1].title == "Performance cores")
+    #expect(read[2].load == 0.8 && read[2].cores == [0.9, 0])
+    let older = #""ecpu_usage":[1000,0.25],"pcpu_usage":[3000,0.5]}"#
+    let pairs = [CoreTier(kind: .performance, load: 0.5, megahertz: 3000), CoreTier(kind: .efficiency, load: 0.25, megahertz: 1000)]
+    #expect(parse(#"{"temp":{"cpu_temp_avg":50},"# + older) == pairs)
+    #expect(parse(#"{"temp":{"cpu_temp_avg":50},"cpu_tiers":[{"label":"X","active_ratio":1}],"# + older) == pairs)
+    #expect(parse(#"{"temp":{"cpu_temp_avg":50}}"#) == [])
+}
