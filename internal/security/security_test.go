@@ -157,6 +157,7 @@ func TestListeningIgnoresLoopback(t *testing.T) {
 		"tcp4  0  0  192.168.1.5.22  *.*  LISTEN":                true,
 		"tcp4  0  0  127.0.0.1.22  *.*  LISTEN":                  false,
 		"tcp6  0  0  ::1.22  *.*  LISTEN":                        false,
+		"tcp6  0  0  fe80::1%lo0.22  *.*  LISTEN":                false,
 		"tcp4  0  0  192.168.1.5.22  10.0.0.2.5000  ESTABLISHED": false,
 		"tcp4  0  0  *.222  *.*  LISTEN":                         false,
 	}
@@ -164,6 +165,95 @@ func TestListeningIgnoresLoopback(t *testing.T) {
 		if got := listens("22")(line); got != want {
 			t.Errorf("%q: %v, want %v", line, got, want)
 		}
+	}
+}
+
+// nettopTable is what nettop printed on macOS 27.0.1, cut to its first columns.
+const nettopTable = `time,,interface,state,bytes_in,bytes_out
+13:51:25.700000,sshd-keygen.123,,,,
+13:51:25.727761,tcp4 *:5900<->*:*,,Listen,,,
+13:51:25.727831,tcp6 *.22<->*.*,,Listen,,,
+13:51:25.727910,tcp4 127.0.0.1:445<->*:*,lo0,Listen,,,
+13:51:25.727990,tcp6 ::1.445<->*.*,lo0,Listen,,,
+13:51:25.728070,tcp6 fe80::1%lo0.445<->*.*,lo0,Listen,,,
+13:51:25.728150,tcp4 192.168.1.5:50000<->192.168.1.9:445,en0,Established,,,
+`
+
+const nettopCmd = "nettop -L1 -m tcp -n"
+
+func TestHiddenTableIsReadFromNettop(t *testing.T) {
+	out := secure()
+	out["netstat -an -p tcp"] = ""
+	out[nettopCmd] = nettopTable
+	got := results(t, out, "")
+	for _, name := range []string{"Remote Login off", "Screen Sharing off"} {
+		if r := got[name]; r.OK || r.Unknown {
+			t.Errorf("%s: %+v, want a failure", name, r)
+		}
+	}
+	if r := got["File Sharing off"]; !r.OK {
+		t.Errorf("a server on loopback only: %+v, want ok", r)
+	}
+}
+
+func TestTableOfOwnConnectionsIsNotAnAnswer(t *testing.T) {
+	out := secure()
+	out["netstat -an -p tcp"] = "tcp4  0  0  192.168.1.5.50000  10.0.0.2.443  ESTABLISHED\n"
+	out[nettopCmd] = nettopTable
+	if r := results(t, out, "")["Remote Login off"]; r.OK || r.Unknown {
+		t.Errorf("a server netstat left out: %+v, want a failure", r)
+	}
+}
+
+// outputCounter counts each command read.
+type outputCounter struct {
+	*sh.Fake
+	reads map[string]int
+}
+
+func (c outputCounter) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	c.reads[sh.Line(name, args...)]++
+	return c.Fake.Output(ctx, name, args...)
+}
+
+func TestTableIsReadOnce(t *testing.T) {
+	out := secure()
+	out["netstat -an -p tcp"] = ""
+	out[nettopCmd] = nettopTable
+	counter := outputCounter{Fake: &sh.Fake{Out: out}, reads: map[string]int{}}
+	New(counter).Run(context.Background())
+	for _, line := range []string{"netstat -an -p tcp", nettopCmd} {
+		if got := counter.reads[line]; got != 1 {
+			t.Errorf("%s: read %d times, want once", line, got)
+		}
+	}
+}
+
+func TestHiddenTableNeverPasses(t *testing.T) {
+	const sharing = "File Sharing off"
+	cases := map[string]func(map[string]string){
+		"nettop shows no servers": func(out map[string]string) { out[nettopCmd] = "time,,interface,state\n" },
+		"nettop prints nothing":   func(out map[string]string) { out[nettopCmd] = "" },
+		"nettop fails":            func(map[string]string) {},
+	}
+	for name, change := range cases {
+		out := secure()
+		out["netstat -an -p tcp"] = ""
+		change(out)
+		if r := results(t, out, "")[sharing]; !r.Unknown || r.OK {
+			t.Errorf("%s: %+v, want unknown", name, r)
+		}
+	}
+}
+
+func TestNetstatRows(t *testing.T) {
+	want := "tcp4 0 0 *.5900 *.* LISTEN\n" +
+		"tcp6 0 0 *.22 *.* LISTEN\n" +
+		"tcp4 0 0 127.0.0.1.445 *.* LISTEN\n" +
+		"tcp6 0 0 ::1.445 *.* LISTEN\n" +
+		"tcp6 0 0 fe80::1%lo0.445 *.* LISTEN\n"
+	if got := netstatRows(nettopTable); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}
 }
 
@@ -398,7 +488,7 @@ func TestTouchIDFixKeepsOtherLines(t *testing.T) {
 
 func TestLoopbackForms(t *testing.T) {
 	cases := map[string]bool{
-		"::1": true, "::1%lo0": true, "127.0.0.1": true, "localhost": true,
+		"::1": true, "::1%lo0": true, "fe80::1%lo0": true, "fe80:1::1": true, "192.168.1.5%lo0": false, "fe80::2%en0": false, "fe80:5::1": false, "127.0.0.1": true, "localhost": true,
 		"*": false, "fe80::1%en0": false, "192.168.1.5": false, "10.0.0.2%en0": false,
 	}
 	for host, want := range cases {
@@ -410,7 +500,7 @@ func TestLoopbackForms(t *testing.T) {
 
 func TestLsofAddressForms(t *testing.T) {
 	cases := map[string]bool{
-		"[::1]:8080": true, "127.0.0.1:*": true, "localhost:8080": true, "[::1%lo0]:8080": true,
+		"[::1]:8080": true, "127.0.0.1:*": true, "localhost:8080": true, "[::1%lo0]:8080": true, "[fe80::1%lo0]:8080": true, "[fe80:1::1]:8080": true,
 		"*:8080": false, "[fe80::1%en0]:8080": false,
 	}
 	for name, want := range cases {
