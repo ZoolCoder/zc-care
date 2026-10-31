@@ -35,12 +35,14 @@ public enum Duplicates {
         }
         var groups: [DuplicateGroup] = []
         for (size, files) in bySize where files.count > 1 && size > 0 {
-            var byHash: [String: [LargeFile]] = [:]
-            for file in files {
-                if let hash = sha256(file.url) { byHash[hash, default: []].append(file) }
-            }
-            for same in byHash.values where same.count > 1 {
-                groups.append(DuplicateGroup(files: same.sorted { $0.id < $1.id }, size: size))
+            for rivals in sameFirstBytes(separateFiles(files), size: size) {
+                var byHash: [String: [LargeFile]] = [:]
+                for file in rivals {
+                    if let hash = sha256(file.url) { byHash[hash, default: []].append(file) }
+                }
+                for same in byHash.values where same.count > 1 {
+                    groups.append(DuplicateGroup(files: same.sorted { $0.id < $1.id }, size: size))
+                }
             }
         }
         return Array(groups.sorted { $0.wasted > $1.wasted }.prefix(limit))
@@ -52,6 +54,30 @@ public enum Duplicates {
         guard let kept = sha256(group.keeper.url) else { return [] }
         return group.others.filter { sha256($0.url) == kept }
     }
+
+    /// Hard links to one file are one file: removing a link frees nothing.
+    static func separateFiles(_ files: [LargeFile]) -> [LargeFile] {
+        var seen = Set<[UInt64]>()
+        return files.filter { file in
+            var info = stat()
+            guard lstat(file.url.path, &info) == 0 else { return true }
+            return seen.insert([UInt64(truncatingIfNeeded: info.st_dev), info.st_ino]).inserted
+        }
+    }
+
+    /// Groups files by their first megabyte, so a pair of large files that
+    /// differ early is told apart without reading either to the end.
+    static func sameFirstBytes(_ files: [LargeFile], size: Int64) -> [[LargeFile]] {
+        guard files.count > 1 else { return [] }
+        guard size > prefix else { return [files] }
+        var byStart: [String: [LargeFile]] = [:]
+        for file in files {
+            if let hash = sha256(file.url, limit: prefix) { byStart[hash, default: []].append(file) }
+        }
+        return byStart.values.filter { $0.count > 1 }
+    }
+
+    private static let prefix = 1 << 20
 
     static func outsideRepos(_ files: [LargeFile], home: String) -> [LargeFile] {
         var repos: [String: Bool] = [:]
@@ -69,12 +95,27 @@ public enum Duplicates {
         return found
     }
 
-    static func sha256(_ url: URL) -> String? {
+    /// The file's hash, or only its first `limit` bytes'. Nil when it cannot
+    /// be read to the end: half a hash proves nothing.
+    static func sha256(_ url: URL, limit: Int = .max) -> String? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
+        return sha256(limit: limit) { try handle.read(upToCount: $0) }
+    }
+
+    /// What `read` gives until nil, an empty chunk or `limit` bytes; nil if
+    /// it throws.
+    static func sha256(limit: Int, read: (Int) throws -> Data?) -> String? {
         var hasher = SHA256()
-        while let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty {
-            hasher.update(data: chunk)
+        var left = limit
+        do {
+            // Nil here is the end of the file; an error throws.
+            while left > 0, let chunk = try read(min(left, 1 << 20)), !chunk.isEmpty {
+                hasher.update(data: chunk)
+                left -= chunk.count
+            }
+        } catch {
+            return nil
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
