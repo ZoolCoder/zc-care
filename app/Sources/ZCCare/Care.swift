@@ -222,14 +222,18 @@ final class Care {
         return files.values.reduce(0, +) + duplicates.reduce(0) { $0 + $1.wasted }
     }
     var adoptable: [InstalledApp] { apps.filter(canAdopt) }
+    /// A target could not be read, so no app is known to be undeclared.
+    var declaredUnknown = false
     /// Homebrew adopts a copy in /Applications only; one in ~/Applications
     /// would get a second, new copy beside it.
     func canAdopt(_ app: InstalledApp) -> Bool {
-        app.inApplications && app.declared == nil && app.source == .other && casks[app.url.lastPathComponent] != nil
+        !declaredUnknown && app.inApplications && app.declared == nil && app.source == .other
+            && casks[app.url.lastPathComponent] != nil
     }
     var untrusted: [InstalledApp] { apps.filter { assessments[$0.id].map { !$0.trusted } ?? false } }
     /// A second copy in ~/Applications is flagged as such, not as missing from the Brewfile.
     var undeclared: [InstalledApp] {
+        if declaredUnknown { return [] }
         let copies = copies
         return apps.filter { $0.declared == nil && !(copies.contains($0.id) && !$0.inApplications) }
     }
@@ -318,6 +322,7 @@ final class Care {
         guard let last = CareScan.load(from: Self.saved) else { return }
         scannedAt = last.scannedAt
         spotlightOff = last.spotlightOff ?? false
+        declaredUnknown = last.declaredUnknown ?? false
         if monitor.junk.isEmpty { monitor.junk = last.junk }
         // What went since the scan, by hand or another app, leaves the lists.
         let here = { (url: URL) in FileManager.default.fileExists(atPath: url.path) }
@@ -348,6 +353,7 @@ final class Care {
         scan.dependencies = dependencies
         scan.models = models
         scan.spotlightOff = spotlightOff
+        scan.declaredUnknown = declaredUnknown
         try? scan.save(to: Self.saved)
     }
 
@@ -1043,7 +1049,9 @@ final class Care {
            let r = try? await ProcessRunner(timeout: 120).run(brew, ["info", "--json=v2", "--installed", "--cask"], env: store.loginEnv) {
             caskApps = AppCatalog.caskApps(brewInfo: r.stdout)
         }
-        let items = (try? await store.cli?.items()) ?? []
+        let read = try? await store.cli?.itemList()
+        declaredUnknown = read?.errors.isEmpty != true
+        let items = read?.items ?? []
         self.items = items
         if casks.isEmpty { casks = await Task.detached { Self.readCaskIndex() }.value }
         let folder = URL(fileURLWithPath: "/Applications")
@@ -1115,6 +1123,9 @@ final class Care {
         case .remove(_, let resource): how = "zc-care removes \(resource) and drops it from the Brewfile."
         case .cask(let token): how = "Homebrew uninstalls the cask \(token)."
         case .trash: how = store.deletesPermanently ? "The app is deleted for good." : "The app moves to the Trash."
+        }
+        if declaredUnknown {
+            how += "\n\nYour config could not be fully read. If it declares this app, the next apply brings it back."
         }
         if !leftovers.isEmpty {
             how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n")
@@ -1516,10 +1527,12 @@ final class Care {
     /// outlives the plist, and the agent stops or starts now too.
     func setEnabled(_ agent: LaunchAgent, _ on: Bool) async {
         guard store.busy == nil else { return }
-        if !on, managed(agent) {
+        if !on, managed(agent) || servicesUnknown {
             guard Alerts.confirm("Turn off \(agent.label)?",
-                                 "Your zc-care config declares it, so this shows as drift and the next apply "
-                                     + "turns it back on. To stop it for good, remove it from the config.",
+                                 managed(agent)
+                                     ? "Your zc-care config declares it, so this shows as drift and the next apply "
+                                         + "turns it back on. To stop it for good, remove it from the config."
+                                     : "Your config could not be fully read. If it declares this agent, the next apply turns it back on.",
                                  button: "Turn Off"), store.busy == nil else { return }
         }
         store.busy = "\(on ? "Enabling" : "Disabling") \(agent.label)"
@@ -1534,6 +1547,8 @@ final class Care {
         await loadAgents()
     }
 
+    private var servicesUnknown: Bool { store.snapshot?.servicesUnknown == true }
+
     func managed(_ agent: LaunchAgent) -> Bool {
         Launchd.managed(agent.label, services: store.snapshot?.services ?? [])
     }
@@ -1542,7 +1557,8 @@ final class Care {
     /// Trash. Only the user's own: /Library's need an administrator.
     func remove(_ agent: LaunchAgent) async {
         guard store.busy == nil, agent.path.hasPrefix(NSHomeDirectory() + "/"), allowed([URL(fileURLWithPath: agent.path)]) else { return }
-        let drift = managed(agent) ? " Your zc-care config declares it, so this shows as drift and the next apply recreates it; remove it from the config too." : ""
+        let drift = managed(agent) ? " Your zc-care config declares it, so this shows as drift and the next apply recreates it; remove it from the config too."
+            : servicesUnknown ? " Your config could not be fully read. If it declares this agent, the next apply recreates it." : ""
         guard Alerts.confirm("Remove \(agent.label)?",
                              "It runs \((agent.program as NSString).abbreviatingWithTildeInPath), which is gone. "
                                  + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash.") + drift, button: "Remove"), store.busy == nil else { return }

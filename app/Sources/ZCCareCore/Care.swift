@@ -399,6 +399,7 @@ public struct CareScan: Codable, Sendable, Equatable {
     public var dependencies: [LargeFile]?
     public var models: [AIModel]?
     public var spotlightOff: Bool?
+    public var declaredUnknown: Bool?
 
     public init(scannedAt: Date, junk: [String: Int64], largeFiles: [LargeFile], apps: [InstalledApp], agents: [LaunchAgent]) {
         self.scannedAt = scannedAt

@@ -34,7 +34,9 @@ struct ApplicationsView: View {
             ScrollView {
                 CareSection {
                     if shown.isEmpty {
-                        Text(query.isEmpty ? "No app here." : "No app matches \u{201C}\(query)\u{201D}.")
+                        Text(!query.isEmpty ? "No app matches \u{201C}\(query)\u{201D}."
+                                : filter == .undeclared && care.declaredUnknown ? "Your config could not be fully read."
+                                : "No app here.")
                             .foregroundStyle(.secondary).padding(10)
                     }
                     ForEach(shown) { app in
@@ -184,7 +186,7 @@ struct ApplicationsView: View {
     private func count(_ f: Filter) -> Int? {
         let n: Int? = switch f {
         case .all: care.apps.count
-        case .undeclared: care.undeclared.count
+        case .undeclared: care.declaredUnknown ? nil : care.undeclared.count
         case .unused: care.unused.count
         case .intel: care.intelOnly.count
         case .leftovers: care.orphans?.count

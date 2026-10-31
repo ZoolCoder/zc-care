@@ -92,6 +92,15 @@ public struct Check: Decodable, Sendable, Equatable, Identifiable {
 public struct ItemGroup: Decodable, Sendable {
     public var target: String
     public var items: [Item]?
+    /// Why the target could not be read; `list` still exits 0.
+    public var error: String?
+}
+
+/// `list -json` as far as it could read: the items, and a line for each
+/// target that could not be read.
+public struct ItemList: Sendable, Equatable {
+    public var items: [Item]
+    public var errors: [String]
 }
 
 public struct Item: Codable, Sendable, Equatable, Identifiable {

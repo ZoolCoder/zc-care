@@ -23,6 +23,31 @@ public struct Snapshot: Sendable, Equatable {
         self.errors = errors
     }
 
+    /// `list` failed, so no pending update does not mean there are none. A
+    /// target that never has updates, like dotfiles, changes nothing here.
+    public var updatesUnknown: Bool {
+        errors.contains { line in
+            line.hasPrefix("list: ") && !targets.contains { t in
+                !["packages", "tools"].contains(t.provider) && line.hasPrefix("list: \(t.target): ")
+            }
+        }
+    }
+
+    /// A services target could not be read, or there is no telling if any exist.
+    public var servicesUnknown: Bool {
+        statusError != nil || errors.contains { $0.hasPrefix("services: ") }
+    }
+
+    var doctorUnknown: Bool { errors.contains { $0.hasPrefix("doctor: ") } }
+
+    /// Why `status` could not be read.
+    public var statusError: String? {
+        errors.first { $0.hasPrefix("status: ") }.map { String($0.dropFirst("status: ".count)) }
+    }
+
+    /// No targets because none could be read must not pass for all clear.
+    public var targetsUnknown: Bool { targets.isEmpty && statusError != nil }
+
     /// The findings the owner has not chosen to ignore. A target's own check
     /// repeats its coverage bar, so it is left out.
     public func findings(ignoring ignored: Set<String>) -> [Check] {
@@ -32,6 +57,19 @@ public struct Snapshot: Sendable, Equatable {
     /// The number on the icon: missing things, findings, and one for all
     /// pending updates, which would otherwise drown the rest.
     public func attention(ignoring ignored: Set<String>) -> Int {
-        targets.map(\.gaps).reduce(0, +) + (outdated.isEmpty ? 0 : 1) + findings(ignoring: ignored).count + errors.count
+        targets.map(\.gaps).reduce(0, +) + (outdated.isEmpty ? 0 : 1) + findings(ignoring: ignored).count + failures
+    }
+
+    /// One failure counts once: each read of a target meets the same one,
+    /// and a target's status row is a gap already.
+    private var failures: Int {
+        var seen = Set<String>()
+        for line in errors {
+            let read = ["list: ", "services: "].first(where: line.hasPrefix)
+            let part = read.map { String(line.dropFirst($0.count)) } ?? line
+            if read != nil, targets.contains(where: { $0.error != nil && part.hasPrefix($0.target + ": ") }) { continue }
+            seen.insert(part)
+        }
+        return seen.count
     }
 }

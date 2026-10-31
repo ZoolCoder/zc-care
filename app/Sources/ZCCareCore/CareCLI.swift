@@ -283,17 +283,28 @@ public struct CareCLI: Sendable {
         return dec
     }
 
-    public func outdated() async throws -> [Item] { try await items(states: ["outdated"]) }
+    public func outdated() async throws -> ItemList { try await itemList(states: ["outdated"]) }
 
     /// What targets declare, each item knowing its target; no targets is all.
+    /// A target that cannot be read stops this: what it declares must not
+    /// pass for undeclared.
     public func items(targets: [String] = [], states: [String] = []) async throws -> [Item] {
+        let list = try await itemList(targets: targets, states: states)
+        if let error = list.errors.first { throw CLIError(message: error) }
+        return list.items
+    }
+
+    /// What `items` reads, keeping the targets that could be read.
+    public func itemList(targets: [String] = [], states: [String] = []) async throws -> ItemList {
         var args = ["list", "-json"]
         for t in targets { args += ["-target", t] }
         if !states.isEmpty { args += ["-state", states.joined(separator: ",")] }
         let groups: [ItemGroup] = try await json(args)
-        return groups.flatMap { g in
-            (g.items ?? []).map { var i = $0; i.target = g.target; return i }
-        }
+        return ItemList(
+            items: groups.flatMap { g in
+                (g.items ?? []).map { var i = $0; i.target = g.target; return i }
+            },
+            errors: groups.compactMap { g in g.error.map { "\(g.target): \($0)" } })
     }
 
     /// Plans and saves the plan to file, so apply runs what was shown.
@@ -352,7 +363,9 @@ public struct CareCLI: Sendable {
         case .failure(let e): errors.append("status: " + e.localizedDescription)
         }
         switch await o {
-        case .success(let v): s.outdated = v
+        case .success(let v):
+            s.outdated = v.items
+            errors += v.errors.map { "list: " + $0 }
         case .failure(let e): errors.append("list: " + e.localizedDescription)
         }
         switch await f {
@@ -363,7 +376,11 @@ public struct CareCLI: Sendable {
         }
         let services = s.targets.filter { $0.provider == "services" }.map(\.target)
         if !services.isEmpty {
-            do { s.services = try await items(targets: services) } catch {
+            do {
+                let read = try await itemList(targets: services)
+                s.services = read.items
+                errors += read.errors.map { "services: " + $0 }
+            } catch {
                 errors.append("services: " + error.localizedDescription)
             }
         }

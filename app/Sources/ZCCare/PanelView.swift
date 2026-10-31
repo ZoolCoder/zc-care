@@ -22,9 +22,9 @@ struct PanelView: View {
                         switch store.tab {
                         case .mac: MacTab(store: store, snapshot: snapshot)
                         case .overview: OverviewTab(store: store, snapshot: snapshot)
-                        case .updates: UpdatesTab(store: store, system: store.system, items: snapshot.outdated)
+                        case .updates: UpdatesTab(store: store, system: store.system, items: snapshot.outdated, unknown: snapshot.updatesUnknown)
                         case .health: HealthTab(store: store)
-                        case .services: ServicesTab(store: store, services: snapshot.services)
+                        case .services: ServicesTab(store: store, services: snapshot.services, unknown: snapshot.servicesUnknown)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -233,11 +233,15 @@ private struct OverviewTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionTitle(title: "Targets")
-            ListCard {
-                ForEach(snapshot.targets) { t in
-                    TargetBlock(store: store, target: t)
+            if !snapshot.targets.isEmpty {
+                SectionTitle(title: "Targets")
+                ListCard {
+                    ForEach(snapshot.targets) { t in
+                        TargetBlock(store: store, target: t)
+                    }
                 }
+            } else if snapshot.errors.isEmpty {
+                EmptyNote(text: "This config declares no targets.", symbol: "square.dashed")
             }
         }
         if !store.jobs.isEmpty {
@@ -508,6 +512,7 @@ private struct UpdatesTab: View {
     let store: Store
     let system: SystemUpdates
     let items: [Item]
+    let unknown: Bool
     @State private var filter = ""
 
     var body: some View {
@@ -515,6 +520,8 @@ private struct UpdatesTab: View {
             MacUpdatesSection(system: system)
             if !items.isEmpty {
                 cliUpdates
+            } else if unknown {
+                EmptyNote(text: "Packages could not be read.", symbol: "questionmark.circle")
             } else {
                 EmptyNote(text: "Packages and runtimes are up to date.")
             }
@@ -772,10 +779,12 @@ private struct FindingRow: View {
 private struct ServicesTab: View {
     let store: Store
     let services: [Item]
+    let unknown: Bool
 
     var body: some View {
         if services.isEmpty {
-            EmptyNote(text: "No services target in this config.", symbol: "gearshape.2")
+            EmptyNote(text: unknown ? "Services could not be read." : "No services target in this config.",
+                      symbol: unknown ? "questionmark.circle" : "gearshape.2")
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle(title: "Services", count: services.count)

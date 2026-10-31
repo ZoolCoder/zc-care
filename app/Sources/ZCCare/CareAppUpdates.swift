@@ -112,13 +112,15 @@ struct UpdateList: View {
     }
 
     private var outdated: Int { care.store.snapshot?.outdated.count ?? 0 }
+    private var unknown: Bool { care.store.snapshot?.updatesUnknown == true }
 
     private var title: String {
         if care.checkingUpdates { return "Checking for updates…" }
         if care.updatesCheckedAt == nil {
             return outdated == 0 ? "Apps not checked yet" : "\(Store.counted(outdated, "update")) found, app feeds not checked yet"
         }
-        return care.allUpdates == 0 ? "Everything is up to date" : "\(Store.counted(care.allUpdates, "update")) available"
+        if care.allUpdates > 0 { return "\(Store.counted(care.allUpdates, "update")) available" }
+        return unknown ? "Packages could not be read" : "Everything is up to date"
     }
 
     private func note(_ text: String) -> some View {
@@ -129,7 +131,8 @@ struct UpdateList: View {
         if care.checkingUpdates { return "Reading update feeds…" }
         if !query.isEmpty { return "No update matches \u{201C}\(query)\u{201D}." }
         if care.allUpdates > 0 { return "These are packages, not apps: the Update button installs them." }
-        return care.updatesCheckedAt == nil ? "Check Now reads each app's own update feed." : "No update waiting."
+        if care.updatesCheckedAt == nil { return "Check Now reads each app's own update feed." }
+        return unknown ? "No app update waiting. Packages could not be read." : "No update waiting."
     }
 
     private var term: String { query.trimmingCharacters(in: .whitespaces) }
