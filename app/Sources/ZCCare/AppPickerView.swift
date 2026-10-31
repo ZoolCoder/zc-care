@@ -203,7 +203,7 @@ private struct PickList: View {
         var body: some View {
             let installed = AppChoice.isInstalled(item)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Toggle("", isOn: Binding { installed || picked } set: { _ in toggle() })
+                Toggle(item.app ?? item.name, isOn: Binding { installed || picked } set: { _ in toggle() })
                     .toggleStyle(.checkbox).labelsHidden()
                     .disabled(installed)
                 VStack(alignment: .leading, spacing: 2) {
