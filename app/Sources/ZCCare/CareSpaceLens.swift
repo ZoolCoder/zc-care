@@ -17,8 +17,9 @@ struct SpaceLensView: View {
     var body: some View {
         VStack(spacing: 0) {
             CareHeader(title: "Space Lens", subtitle: subtitle, busy: care.scanningSpace,
-                   action: (care.space == nil ? "Scan" : "Rescan", { Task { await care.scanSpace() } }))
-            Picker("", selection: $part) {
+                   action: (care.space == nil ? "Scan" : "Rescan", { Task { await care.scanSpace() } }),
+                   stop: care.stopSpaceScan)
+            Picker("Show", selection: $part) {
                 ForEach(Part.allCases, id: \.self) { Text($0.rawValue) }
             }
             .pickerStyle(.segmented)

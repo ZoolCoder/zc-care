@@ -148,6 +148,7 @@ final class Care {
     var scanningCloud = false
     var space: SpaceScan?
     var scanningSpace = false
+    @ObservationIgnored private var spaceRun: Task<CommandResult, any Error>?
     var apps: [InstalledApp] = []
     /// Ids of Setapp and other-volume apps, read once per scan.
     var externalIDs: Set<String> = []
@@ -1789,9 +1790,14 @@ final class Care {
         scanningSpace = true
         defer { scanningSpace = false }
         let home = NSHomeDirectory()
+        let run = Task { try await ProcessRunner(timeout: 900).run("/usr/bin/du", SpaceLens.arguments(root: home), env: [:]) }
+        spaceRun = run
+        defer { spaceRun = nil }
         let r: CommandResult
         do {
-            r = try await ProcessRunner(timeout: 900).run("/usr/bin/du", SpaceLens.arguments(root: home), env: [:])
+            r = try await run.value
+        } catch is CancellationError {
+            return
         } catch {
             let why = (error as? CLIError)?.timedOut == true ? "took too long to measure \(home)" : "could not measure \(home): \(error.localizedDescription)"
             store.message = Store.Message(text: "Space Lens \(why).", failed: true)
@@ -1805,6 +1811,11 @@ final class Care {
         let scan = space?.followed(by: root) ?? SpaceScan(scannedAt: .now, root: root)
         space = scan
         try? scan.save(to: Self.savedSpace)
+    }
+
+    /// The last result stays on screen; only this run stops.
+    func stopSpaceScan() {
+        spaceRun?.cancel()
     }
 
     // MARK: Cloud Cleanup

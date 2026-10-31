@@ -60,11 +60,34 @@ struct RoundButton: View {
     }
 }
 
+/// ⌘F puts the cursor in a search field, wherever it was.
+private struct FindShortcut: ViewModifier {
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focused($focused)
+            .background {
+                Button("Find") { focused = true }
+                    .keyboardShortcut("f")
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            }
+    }
+}
+
+extension View {
+    func findShortcut() -> some View { modifier(FindShortcut()) }
+}
+
 struct CareHeader: View {
     let title: String
     let subtitle: String
     var busy = false
+    var search: Binding<String>?
     var action: (title: String, run: () -> Void)?
+    /// Replaces the action while busy, for work that can stop.
+    var stop: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
@@ -74,7 +97,15 @@ struct CareHeader: View {
             }
             Spacer()
             if busy { ProgressView().controlSize(.small) }
-            if let action {
+            if let search {
+                TextField("Search", text: search)
+                    .textFieldStyle(.roundedBorder)
+                    .findShortcut()
+                    .frame(width: 200)
+            }
+            if busy, let stop {
+                Button("Stop", action: stop)
+            } else if let action {
                 if action.title == "Rescan" {
                     Button(action.title, action: action.run).disabled(busy)
                         .keyboardShortcut("r")
