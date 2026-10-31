@@ -259,7 +259,7 @@ private struct Sidebar: View {
         case .clutter: return care.clutter > 0 ? Store.bytes(care.clutter) : nil
         case .developer: return care.developer > 0 ? Store.bytes(care.developer) : nil
         case .apps:
-            let n = care.store.snapshot?.outdated.count ?? 0
+            let n = care.allUpdates
             return n > 0 ? "\(n)" : nil
         case .performance: return care.startup.isEmpty ? nil : "\(care.startup.count)"
         case .protection: return care.untrusted.isEmpty ? nil : "\(care.untrusted.count)"

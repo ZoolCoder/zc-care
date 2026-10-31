@@ -175,6 +175,29 @@ public struct InstalledApp: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// The orders the Applications list can take.
+public enum AppSort: Sendable {
+    case name, size, lastUsed
+
+    /// A to Z, largest first, or most recently used first; reversed turns
+    /// that round. Apps with no size yet, or no use date, stay last either
+    /// way: Spotlight keeps no date for some apps in daily use, so they are
+    /// not the oldest.
+    public func ordered(_ apps: [InstalledApp], reversed: Bool = false) -> [InstalledApp] {
+        let byName = apps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        switch self {
+        case .name:
+            return reversed ? byName.reversed() : byName
+        case .size:
+            let sized = byName.filter { $0.size != nil }.sorted { ($0.size ?? 0) > ($1.size ?? 0) }
+            return (reversed ? sized.reversed() : sized) + byName.filter { $0.size == nil }
+        case .lastUsed:
+            let dated = byName.filter { $0.lastUsed != nil }.sorted { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }
+            return (reversed ? dated.reversed() : dated) + byName.filter { $0.lastUsed == nil }
+        }
+    }
+}
+
 public enum AppCatalog {
     /// `brew info --json=v2 --installed --cask`: each app bundle's cask.
     public static func caskApps(brewInfo: Data) -> [String: String] {

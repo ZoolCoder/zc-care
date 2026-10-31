@@ -23,6 +23,9 @@ extension Care {
         await refresh
         guard let result else { return }
         feedUpdates = result.updates
+        // Dropped for good: once Homebrew updates such an app it leaves
+        // `outdated`, and its row would come back with an old version.
+        feedUpdates = shownFeedUpdates
         feedFailures = result.unreachable
         feedUnreadable = result.unreadable
         updatesCheckedAt = .now
@@ -35,17 +38,18 @@ extension Care {
 
     /// Feed updates that Homebrew does not already offer.
     var shownFeedUpdates: [AppUpdate] {
-        let casks = Set(outdatedApps.filter { $0.kind == "cask" }.map(\.name))
+        let casks = outdatedApps.filter { $0.kind == "cask" }
         let byPath = Dictionary(apps.map { ($0.url.path, $0) }, uniquingKeysWith: { a, _ in a })
         return (feedUpdates ?? []).filter { update in
-            guard case .cask(let token)? = byPath[update.app.url.path]?.source else { return true }
-            return !casks.contains(token)
+            var token: String?
+            if case .cask(let cask)? = byPath[update.app.url.path]?.source { token = cask }
+            return !casks.contains { AppUpdates.sameApp($0, token: token, name: update.app.name) }
         }
     }
 
-    /// Updates this Mac can install; a release for another macOS is listed
-    /// but not counted.
-    var updateCount: Int { shownFeedUpdates.filter(\.supported).count + outdatedApps.count }
+    /// Everything waiting: formulae and runtimes have no row in the list. A
+    /// release for another macOS is listed but not counted.
+    var allUpdates: Int { shownFeedUpdates.filter(\.supported).count + (store.snapshot?.outdated.count ?? 0) }
 }
 
 /// Apps with a newer version: from each app's own feed, the App Store and
@@ -80,7 +84,7 @@ struct UpdateList: View {
 
     private var summary: some View {
         HStack(spacing: 14) {
-            SymbolTile(symbol: "arrow.triangle.2.circlepath", colors: care.updateCount > 0 ? Tint.orange : Tint.green, size: 40)
+            SymbolTile(symbol: "arrow.triangle.2.circlepath", colors: care.allUpdates > 0 ? Tint.orange : Tint.green, size: 40)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.headline)
@@ -95,6 +99,10 @@ struct UpdateList: View {
             }
             Spacer()
             if care.checkingUpdates { ProgressView().controlSize(.small) }
+            if outdated > 0 {
+                Button("Update \(Store.counted(outdated, "Package"))") { Task { await care.store.updateAll() } }
+                    .disabled(care.store.busy != nil)
+            }
             // Not tied to this view: leaving the list must not cancel the check.
             Button(care.updatesCheckedAt == nil ? "Check Now" : "Check Again") { Task { await care.checkUpdates() } }
                 .disabled(care.checkingUpdates)
@@ -103,12 +111,14 @@ struct UpdateList: View {
         .modifier(Card())
     }
 
+    private var outdated: Int { care.store.snapshot?.outdated.count ?? 0 }
+
     private var title: String {
         if care.checkingUpdates { return "Checking for updates…" }
         if care.updatesCheckedAt == nil {
-            return care.outdatedApps.isEmpty ? "Apps not checked yet" : "\(Store.counted(care.outdatedApps.count, "update")) from Homebrew and the App Store"
+            return outdated == 0 ? "Apps not checked yet" : "\(Store.counted(outdated, "update")) found, app feeds not checked yet"
         }
-        return care.updateCount == 0 ? "Everything is up to date" : "\(Store.counted(care.updateCount, "update")) available"
+        return care.allUpdates == 0 ? "Everything is up to date" : "\(Store.counted(care.allUpdates, "update")) available"
     }
 
     private func note(_ text: String) -> some View {
@@ -117,8 +127,9 @@ struct UpdateList: View {
 
     private var emptyText: String {
         if care.checkingUpdates { return "Reading update feeds…" }
-        if care.updatesCheckedAt == nil && query.isEmpty { return "Check Now reads each app's own update feed." }
-        return query.isEmpty ? "No update waiting." : "No update matches \u{201C}\(query)\u{201D}."
+        if !query.isEmpty { return "No update matches \u{201C}\(query)\u{201D}." }
+        if care.allUpdates > 0 { return "These are packages, not apps: the Update button installs them." }
+        return care.updatesCheckedAt == nil ? "Check Now reads each app's own update feed." : "No update waiting."
     }
 
     private var term: String { query.trimmingCharacters(in: .whitespaces) }

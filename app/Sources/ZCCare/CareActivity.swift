@@ -90,7 +90,7 @@ private struct AtAGlance: View {
     }
 
     private var updates: some View {
-        let n = care.updateCount
+        let n = care.allUpdates
         return tile("Updates", symbol: "arrow.triangle.2.circlepath",
                     value: n == 0 ? (care.updatesCheckedAt == nil ? "Not checked" : "Up to date") : Store.counted(n, "update"),
                     tint: n > 0 ? Theme.warning : care.updatesCheckedAt == nil ? .secondary : Theme.good) {
