@@ -411,7 +411,7 @@ private final class AppcastReader: NSObject, XMLParserDelegate {
         case "sparkle:maximumSystemVersion": if !value.isEmpty { current?.maximumSystem = value }
         case "sparkle:channel": if !value.isEmpty { skip = true }
         case "sparkle:releaseNotesLink":
-            if let url = URL(string: value), url.scheme == "https" { current?.notesLink = url }
+            if let url = URL(string: value), AppUpdates.isPublic(url) { current?.notesLink = url }
         case "pubDate": current?.date = Self.dates.lazy.compactMap { $0.date(from: value) }.first
         default: break
         }

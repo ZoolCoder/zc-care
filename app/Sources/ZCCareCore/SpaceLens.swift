@@ -172,8 +172,7 @@ public struct SpaceScan: Codable, Sendable, Equatable {
     }
 
     public func save(to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(self).write(to: url, options: .atomic)
+        try PrivateFile.write(JSONEncoder().encode(self), to: url)
     }
 }
 

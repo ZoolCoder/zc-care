@@ -76,6 +76,29 @@ private func os(_ major: Int, _ minor: Int = 0) -> OperatingSystemVersion {
     #expect(release.notes == "Fixes crash")
 }
 
+@Test func releaseNotesLinkMustBePublic() throws {
+    func link(_ url: String) throws -> URL? {
+        let feed = Data("""
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item>
+          <sparkle:version>1</sparkle:version>
+          <sparkle:releaseNotesLink>\(url)</sparkle:releaseNotesLink>
+        </item></channel></rss>
+        """.utf8)
+        return try #require(AppUpdates.releases(in: feed)?.first).notesLink
+    }
+    #expect(try link("https://example.com/notes")?.absoluteString == "https://example.com/notes")
+    for sneaky in ["https://10.0.0.1/notes", "https://0177.0.0.1/notes", "https://012.0.0.1/notes", "http://example.com/notes"] {
+        #expect(try link(sneaky) == nil, "\(sneaky)")
+    }
+}
+
+@Test func fakeIPProxyNamesStayReachable() {
+    #expect(PublicHost.isFakeIP([198, 18, 0, 1]) && PublicHost.isFakeIP([198, 19, 255, 1]))
+    #expect(!PublicHost.isFakeIP([198, 20, 0, 1]) && !PublicHost.isFakeIP([127, 0, 0, 1]))
+    // Refused when written as an address, whatever the proxy does with names.
+    #expect(!PublicHost.named("198.18.0.1"))
+}
+
 @Test func updatePrefersReleaseThisMacRuns() throws {
     let releases = [FeedRelease(version: "300", minimumSystem: "16.0"), FeedRelease(version: "250", minimumSystem: "14.0"),
                     FeedRelease(version: "150")]
@@ -116,11 +139,16 @@ private func os(_ major: Int, _ minor: Int = 0) -> OperatingSystemVersion {
     for sneaky in ["https://127.1/", "https://0x7f.1/", "https://2130706433/", "https://0x7f000001/", "https://10.1/",
                    "https://0xa9fea9fe/", "https://0/", "https://[::ffff:127.0.0.1]/", "https://[::ffff:7f00:1]/",
                    "https://[0:0:0:0:0:0:0:1]/", "https://[0::1]/", "https://[64:ff9b::7f00:1]/", "https://[febf::1]/",
-                   "https://[fec0::1]/", "https://[fd00::1]/", "https://localhost./", "https://foo.local./"] {
+                   "https://[fec0::1]/", "https://[fd00::1]/", "https://localhost./", "https://foo.local./",
+                   "https://198.18.0.1/", "https://198.19.255.1/", "https://192.0.0.8/", "https://[2002:7f00:1::]/",
+                   "https://[2002:c0a8:101::]/", "https://[64:ff9b:1::1]/"] {
         #expect(!AppUpdates.isPublic(URL(string: sneaky)!), "\(sneaky)")
     }
     #expect(AppUpdates.isPublic(URL(string: "https://[2606:4700::1111]/")!))
     #expect(AppUpdates.isPublic(URL(string: "https://8.8.8.8/")!))
+    #expect(AppUpdates.isPublic(URL(string: "https://198.20.0.1/")!))
+    #expect(AppUpdates.isPublic(URL(string: "https://192.0.1.1/")!))
+    #expect(AppUpdates.isPublic(URL(string: "https://[2002:808:808::]/")!))
     let found = AppUpdates.feedApp(at: url, info: ["SUFeedURL": " https://example.com/a.xml ", "CFBundleVersion": "7",
                                                    "CFBundleShortVersionString": "1.2", "CFBundleName": "Thing"])
     #expect(found?.name == "Thing" && found?.version == "1.2" && found?.build == "7")

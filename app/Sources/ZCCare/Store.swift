@@ -642,11 +642,9 @@ final class Store {
 
     /// Keeps the last change's whole output, for the Show log link.
     private func writeLog(_ r: CommandResult) -> URL? {
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/ZCCare")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let file = dir.appendingPathComponent("last-change.log")
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/ZCCare/last-change.log")
         let text = r.output + (r.stderr.isEmpty ? "" : "\n--- stderr\n" + r.stderr)
-        return (try? text.write(to: file, atomically: true, encoding: .utf8)) == nil ? nil : file
+        return (try? PrivateFile.write(Data(text.utf8), to: file)) == nil ? nil : file
     }
 
     // MARK: Apps
