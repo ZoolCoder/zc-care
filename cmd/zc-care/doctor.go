@@ -35,6 +35,9 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := noOperands("doctor", flags); err != nil {
+		return err
+	}
 	if *fix && *asJSON {
 		return errors.New("-fix prints a plan and asks; it cannot also be -json")
 	}
@@ -60,7 +63,7 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 					r.Add("program "+p, doctor.OK, path)
 				}
 			}
-			for _, st := range eng.Status(context.Background()) {
+			for _, st := range eng.Status(ctx) {
 				switch {
 				case st.Error != "":
 					r.Add("target "+st.Target, doctor.Fail, st.Error)
@@ -71,16 +74,16 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 				}
 			}
 		}
-		addShadows(r, cfg)
+		addShadows(ctx, r, cfg)
 	}
-	found := security.New(sh.System()).Run(context.Background())
+	found := security.New(sh.System()).Run(ctx)
 	for _, res := range found {
 		addSecurity(r, "security ", res)
 	}
 	// Keys, commits, shell history and AI configs live in the home folder on
 	// every system, so these run everywhere.
 	user := security.NewUser(sh.System())
-	for _, res := range user.Account(context.Background()) {
+	for _, res := range user.Account(ctx) {
 		addSecurity(r, "security ", res)
 	}
 	for _, res := range user.AI() {
@@ -99,7 +102,7 @@ func runDoctor(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 // mise, not from a copy earlier on PATH such as Homebrew's. Only a shell
 // that activated mise has the PATH to judge: the menu bar app runs doctor
 // with a login shell's, which never reads .zshrc.
-func addShadows(r *doctor.Report, cfg config.Config) {
+func addShadows(ctx context.Context, r *doctor.Report, cfg config.Config) {
 	runner := sh.System()
 	if !runner.Has("mise") || os.Getenv("MISE_SHELL") == "" {
 		return
@@ -108,7 +111,7 @@ func addShadows(r *doctor.Report, cfg config.Config) {
 		if t.Provider != "tools" || !t.For(cfg.Profiles) {
 			continue
 		}
-		shadows, err := tools.Shadowed(context.Background(), runner, filepath.Dir(cfg.Resolve(t).File), exec.LookPath)
+		shadows, err := tools.Shadowed(ctx, runner, filepath.Dir(cfg.Resolve(t).File), exec.LookPath)
 		check := "path " + t.Name
 		switch {
 		case err != nil:

@@ -17,6 +17,7 @@ import (
 
 	"github.com/zoolcoder/zc-care/internal/config"
 	"github.com/zoolcoder/zc-care/internal/engine"
+	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/sh"
 )
 
@@ -87,6 +88,9 @@ func runExport(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	var targets targetList
 	flags.Var(&targets, "target", "limit to this target")
 	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if err := noOperands("export", flags); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -194,7 +198,8 @@ func writeDiff(w io.Writer, a, b string, diffs []targetDiff) error {
 		section(&sb, "only in B", d.OnlyB, func(e diffEntry) string { return e.B })
 		section(&sb, "different", d.Different, func(e diffEntry) string { return e.A + " -> " + e.B })
 	}
-	_, err := io.WriteString(w, sb.String())
+	// The other side can be a snapshot from any Mac.
+	_, err := io.WriteString(w, plan.Clean(sb.String()))
 	return err
 }
 

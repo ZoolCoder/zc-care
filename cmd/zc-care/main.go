@@ -132,7 +132,8 @@ func main() {
 	err := runCLI(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
 	code := exitCode(err)
 	if code == 1 {
-		fmt.Fprintln(os.Stderr, "error:", err)
+		// An error can quote a saved plan or a command's output.
+		fmt.Fprintln(os.Stderr, "error:", plan.Clean(err.Error()))
 	}
 	os.Exit(code)
 }
@@ -213,6 +214,15 @@ func isCommand(word string) bool {
 	return ok
 }
 
+// noOperands refuses a word the command does not take. Flag parsing stops at
+// the first one, so `undo 3 -plan` would drop -plan and revert for real.
+func noOperands(cmd string, flags *flag.FlagSet) error {
+	if flags.NArg() == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s takes no %q: flags go first, see %s %s -h", cmd, flags.Arg(0), name, cmd)
+}
+
 // rejectTrailingFlags fails when a flag follows an operand, where the flag
 // package no longer parses it: `remove brew:htop -yes` would drop -yes.
 func rejectTrailingFlags(cmd string, operands []string) error {
@@ -275,8 +285,17 @@ func parseCLIFlags(cmd string, args []string, stderr io.Writer) (cliFlags, error
 		}
 		return f, fmt.Errorf("put flags after the subcommand: %s %s %s", name, flags.Arg(0), strings.Join(rest, " "))
 	}
+	// Only apply takes one: a saved plan.
+	if cmd != "apply" {
+		if err := noOperands(cmd, flags); err != nil {
+			return f, err
+		}
+	}
 	if err := rejectTrailingFlags(cmd, flags.Args()); err != nil {
 		return f, err
+	}
+	if flags.NArg() > 1 {
+		return f, fmt.Errorf("apply takes one saved plan, not %q too", flags.Arg(1))
 	}
 	f.path = findConfig(f.path)
 	f.file = flags.Arg(0)
@@ -533,7 +552,7 @@ func writeStatus(w io.Writer, rows []engine.TargetStatus, asJSON bool) error {
 		if r.Error != "" {
 			line = "error: " + r.Error
 		}
-		if _, err := fmt.Fprintf(w, "%-*s  %s\n", width, r.Target, line); err != nil {
+		if _, err := fmt.Fprintln(w, plan.Plain(fmt.Sprintf("%-*s  %s", width, r.Target, line))); err != nil {
 			return err
 		}
 	}
