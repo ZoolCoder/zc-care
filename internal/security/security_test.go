@@ -205,6 +205,32 @@ func TestTableOfOwnConnectionsIsNotAnAnswer(t *testing.T) {
 	}
 }
 
+func TestServerOnlyNettopShowsFails(t *testing.T) {
+	out := secure()
+	out["netstat -an -p tcp"] = "tcp4  0  0  127.0.0.1.5432  *.*  LISTEN\n"
+	out[nettopCmd] = nettopTable
+	if r := results(t, out, "")["Remote Login off"]; r.OK || r.Unknown {
+		t.Errorf("a server only nettop shows: %+v, want a failure", r)
+	}
+}
+
+func TestFailedNetstatLeavesNettopsAnswer(t *testing.T) {
+	out := secure()
+	delete(out, "netstat -an -p tcp")
+	out[nettopCmd] = nettopTable
+	if r := results(t, out, "")["Remote Login off"]; r.OK || r.Unknown {
+		t.Errorf("netstat failed, nettop shows the server: %+v, want a failure", r)
+	}
+}
+
+func TestFailedNettopLeavesNetstatsAnswer(t *testing.T) {
+	out := secure()
+	out["netstat -an -p tcp"] = "tcp4  0  0  *.22  *.*  LISTEN\n"
+	if r := results(t, out, "")["Remote Login off"]; r.OK || r.Unknown {
+		t.Errorf("nettop failed, netstat shows the server: %+v, want a failure", r)
+	}
+}
+
 // outputCounter counts each command read.
 type outputCounter struct {
 	*sh.Fake
