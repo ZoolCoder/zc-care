@@ -57,7 +57,9 @@ struct SmartCareView: View {
             return "Run cleans up \(Store.bytes(care.junk + care.aiBeyondJunk))"
                 + (packages > 0 ? " and updates \(Store.counted(packages, "package"))." : ".")
         }
-        if care.store.snapshot?.errors.isEmpty == false { return "Part of your setup could not be read." }
+        guard let snapshot = care.store.snapshot else { return care.store.setupProblem ?? "Reading this Mac…" }
+        if !snapshot.errors.isEmpty { return "Part of your setup could not be read." }
+        if !care.store.findings.isEmpty { return "The Health tab has \(Store.counted(care.store.findings.count, "finding")) to look at." }
         return care.scannedAt != nil && care.allUpdates > 0
             ? "Your Mac is in good shape; \(Store.counted(care.allUpdates, "update")) waiting in Applications."
             : "Your Mac is in good shape."
@@ -309,13 +311,14 @@ private struct HealthCard: View {
         let findings = care.store.findings
         let ok = findings.isEmpty
         // Nothing read yet is not a clean bill of health.
-        let unknown = care.store.snapshot == nil
+        let unknown = care.store.healthUnknown
         VStack(spacing: 14) {
             Text("Health").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
             HeroArt(symbol: unknown ? "shield.fill" : ok ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
                     colors: unknown ? Tint.gray : ok ? Tint.green : Tint.pink, size: 110)
-            Text(care.store.refreshing ? "Checking health…" : ok ? "No problems found" : "\(findings.count) to look at")
+            Text(care.store.refreshing ? "Checking health…" : unknown ? "Health not checked"
+                 : ok ? "No problems found" : "\(findings.count) to look at")
                 .font(.title2.weight(.bold))
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(findings.prefix(4)) { c in

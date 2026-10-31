@@ -38,7 +38,7 @@ public struct Snapshot: Sendable, Equatable {
         statusError != nil || errors.contains { $0.hasPrefix("services: ") }
     }
 
-    var doctorUnknown: Bool { errors.contains { $0.hasPrefix("doctor: ") } }
+    public var doctorUnknown: Bool { errors.contains { $0.hasPrefix("doctor: ") } }
 
     /// Why `status` could not be read.
     public var statusError: String? {

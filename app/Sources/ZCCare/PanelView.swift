@@ -75,11 +75,12 @@ private struct Header: View {
 
     private var icon: String {
         if store.setupProblem != nil { return "exclamationmark.circle.fill" }
+        if store.snapshot == nil { return "ellipsis.circle.fill" }
         return store.attention == 0 ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
     }
 
     private var tint: Color {
-        if store.setupProblem != nil { return .secondary }
+        if store.setupProblem != nil || store.snapshot == nil { return .secondary }
         return store.attention == 0 ? Theme.good : Theme.warning
     }
 
@@ -162,7 +163,7 @@ extension Store {
         case .mac: monitor.vitals.concerns(insecure: 0).count
         case .overview: snapshot.targets.map(\.gaps).reduce(0, +)
         case .updates: snapshot.outdated.count + system.updates.count
-        case .health: findings.count
+        case .health: healthUnknown ? 1 : findings.count
         case .services: snapshot.services.filter { !$0.isRunning }.count
         }
     }
@@ -701,14 +702,16 @@ private struct HealthTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                SectionTitle(title: "Findings", count: store.findings.count)
+                SectionTitle(title: "Findings", count: store.healthUnknown ? nil : store.findings.count)
                 Spacer()
                 if !store.ignoredFindings.isEmpty {
                     Button("Stop ignoring " + Store.counted(store.ignoredFindings.count, "check")) { store.unignoreAll() }
                         .buttonStyle(.zcLink).font(.caption)
                 }
             }
-            if store.findings.isEmpty {
+            if store.healthUnknown {
+                EmptyNote(text: "The health checks could not be read.", symbol: "questionmark.circle")
+            } else if store.findings.isEmpty {
                 EmptyNote(text: "Every check passes.", symbol: "checkmark.shield")
             }
             if !store.findings.isEmpty {
