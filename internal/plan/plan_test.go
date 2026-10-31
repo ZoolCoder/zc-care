@@ -109,6 +109,54 @@ func TestSavedMatches(t *testing.T) {
 	if _, err := LoadSaved(strings.NewReader(`{"version":9}`)); err == nil {
 		t.Fatal("future version accepted")
 	}
+	if _, err := LoadSaved(strings.NewReader(savedText(t) + `{"actions":[]}`)); err == nil {
+		t.Fatal("a second document after the plan was accepted")
+	}
+	if _, err := LoadSaved(strings.NewReader(savedText(t) + "\n  ")); err != nil {
+		t.Fatalf("trailing space refused: %v", err)
+	}
+}
+
+func savedText(t *testing.T) string {
+	t.Helper()
+	var b bytes.Buffer
+	if err := sample().Save(&b, []string{"a", "b"}); err != nil {
+		t.Fatal(err)
+	}
+	return b.String()
+}
+
+func TestWriteHidesWhatSteersATerminal(t *testing.T) {
+	var b bytes.Buffer
+	p := Plan{Actions: []Action{{Op: OpUpdate, Target: "t", Resource: "r\u009b2J", Detail: "gnp\u202e.exe\x1b[0m\u200b", Do: noop}}}
+	if err := p.Write(&b); err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(b.String(), "\u009b\u202e\x1b\u200b") {
+		t.Fatalf("plan output %q", b.String())
+	}
+}
+
+func TestUnsafeCatchesWhatDrawsNothing(t *testing.T) {
+	for _, r := range "\u2028\u2029\u034f\u115f\u1160\u17b4\u180b\u3164\uffa0\u2800\ufe0f\U000e0100" {
+		if !Unsafe(r) {
+			t.Errorf("%U passes", r)
+		}
+	}
+	for _, r := range "aé日🙂\t\n" {
+		if Unsafe(r) {
+			t.Errorf("%U is refused", r)
+		}
+	}
+}
+
+func TestPlainKeepsOneLineAndCleanKeepsLines(t *testing.T) {
+	if got := Plain("a\x1b[2K\nb"); got != "a[2Kb" {
+		t.Fatalf("Plain %q", got)
+	}
+	if got := Clean("a\x1b[2K\nb"); got != "a[2K\nb" {
+		t.Fatalf("Clean %q", got)
+	}
 }
 
 func TestSavedRefusesAChangedDigest(t *testing.T) {

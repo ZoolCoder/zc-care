@@ -46,6 +46,9 @@ func runDrift(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := noOperands("drift", flags); err != nil {
+		return err
+	}
 	if *plist {
 		if *path == "-" {
 			return errors.New("the launchd agent runs later, with no standard input; give -config a file")

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/zoolcoder/zc-care/internal/plan"
 )
 
 func TestMCPPlanThenApplyByID(t *testing.T) {
@@ -126,6 +128,22 @@ func TestMCPResourcesServeConfigAndManifests(t *testing.T) {
 	}
 	if text, err := res[2].Read(); err != nil || text != "brew \"git\"\n" {
 		t.Fatalf("manifest %q: %v", text, err)
+	}
+}
+
+func TestMCPResourcesServeNoHiddenText(t *testing.T) {
+	root := t.TempDir()
+	cfg := filepath.Join(root, name+".yaml")
+	_ = os.WriteFile(cfg, []byte("version: 1\n# \u202ehidden\ntargets:\n  - {name: pkgs, provider: packages, file: Brewfile}\n"), 0o600)
+	_ = os.WriteFile(filepath.Join(root, "Brewfile"), []byte("brew \"git\" # why \U000e0041\x1b[2K\n"), 0o600)
+	for _, r := range mcpResources(cfg) {
+		text, err := r.Read()
+		if err != nil {
+			t.Fatalf("%s: %v", r.URI, err)
+		}
+		if strings.ContainsFunc(text, plan.Unsafe) {
+			t.Fatalf("%s served %q", r.URI, text)
+		}
 	}
 }
 
@@ -405,7 +423,10 @@ func TestMCPStripsControlCharacters(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), "\x1b") {
 		t.Fatalf("error %q", err)
 	}
-	if got := stripControl("a\tb\r\n\x00c"); got != "a\tb\nc" {
+	if got := plan.Clean("a\tb\r\n\x00c"); got != "a\tb\nc" {
 		t.Fatalf("plain text %q", got)
+	}
+	if got := plan.Clean("safe\u009b2J\u202egnp.exe\u200b\u2066 caf\u00e9"); got != "safe2Jgnp.exe caf\u00e9" {
+		t.Fatalf("hidden characters %q", got)
 	}
 }

@@ -327,7 +327,7 @@ func mcpResources(path string) []mcp.Resource {
 	file := func(p string) func() (string, error) {
 		return func() (string, error) {
 			b, err := os.ReadFile(p)
-			return string(b), err
+			return plan.Clean(string(b)), err
 		}
 	}
 	res := []mcp.Resource{
@@ -336,7 +336,7 @@ func mcpResources(path string) []mcp.Resource {
 			Read: func() (string, error) {
 				var b bytes.Buffer
 				err := runHistory([]string{"-json", "-n", "50"}, nil, &b, io.Discard)
-				return b.String(), err
+				return string(cleanOutput(b.Bytes())), err
 			}},
 	}
 	cfg, err := config.Load(path, nil)
@@ -362,7 +362,7 @@ func sanitized(run command) command {
 		var out, errOut bytes.Buffer
 		err := run(args, stdin, &out, &errOut)
 		_, _ = stdout.Write(cleanOutput(out.Bytes()))
-		_, _ = io.WriteString(stderr, stripControl(errOut.String()))
+		_, _ = io.WriteString(stderr, plan.Clean(errOut.String()))
 		if err != nil {
 			return cleanError{err}
 		}
@@ -373,18 +373,8 @@ func sanitized(run command) command {
 // cleanError keeps the wrapped error for errors.Is and cleans its text.
 type cleanError struct{ error }
 
-func (e cleanError) Error() string { return stripControl(e.error.Error()) }
+func (e cleanError) Error() string { return plan.Clean(e.error.Error()) }
 func (e cleanError) Unwrap() error { return e.error }
-
-// stripControl drops every control character but newline and tab.
-func stripControl(s string) string {
-	return strings.Map(func(r rune) rune {
-		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f {
-			return -1
-		}
-		return r
-	}, s)
-}
 
 // cleanOutput cleans every string of a JSON document, keys included, or the
 // whole text when it is not JSON.
@@ -393,14 +383,14 @@ func cleanOutput(b []byte) []byte {
 	dec.UseNumber()
 	var doc any
 	if dec.Decode(&doc) != nil || dec.More() {
-		return []byte(stripControl(string(b)))
+		return []byte(plan.Clean(string(b)))
 	}
 	var out bytes.Buffer
 	enc := json.NewEncoder(&out)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "  ")
 	if enc.Encode(cleanValue(doc)) != nil {
-		return []byte(stripControl(string(b)))
+		return []byte(plan.Clean(string(b)))
 	}
 	return bytes.TrimSpace(out.Bytes())
 }
@@ -408,7 +398,7 @@ func cleanOutput(b []byte) []byte {
 func cleanValue(v any) any {
 	switch x := v.(type) {
 	case string:
-		return stripControl(x)
+		return plan.Clean(x)
 	case []any:
 		for i := range x {
 			x[i] = cleanValue(x[i])
@@ -416,7 +406,7 @@ func cleanValue(v any) any {
 	case map[string]any:
 		cleaned := make(map[string]any, len(x))
 		for k, e := range x {
-			cleaned[stripControl(k)] = cleanValue(e)
+			cleaned[plan.Clean(k)] = cleanValue(e)
 		}
 		return cleaned
 	}

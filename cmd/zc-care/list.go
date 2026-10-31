@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/zoolcoder/zc-care/internal/engine"
+	"github.com/zoolcoder/zc-care/internal/plan"
 )
 
 // writeItems prints the inventory as one table, or as JSON.
@@ -19,11 +20,11 @@ func writeItems(w io.Writer, rows []engine.TargetItems, asJSON bool) error {
 	fmt.Fprintln(tw, "TARGET\tKIND\tNAME\tSTATE\tVERSION\tAPP\tABOUT")
 	for _, r := range rows {
 		if r.Error != "" {
-			fmt.Fprintf(tw, "%s\t\t\terror\t\t\t%s\n", r.Target, r.Error)
+			fmt.Fprintln(tw, plan.Plain(fmt.Sprintf("%s\t\t\terror\t\t\t%s", r.Target, r.Error)))
 		}
 		for _, i := range r.Items {
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				r.Target, i.Kind, i.Name, i.State, versions(i), dash(i.App), about(i))
+			fmt.Fprintln(tw, plan.Plain(fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t%s",
+				r.Target, i.Kind, i.Name, i.State, versions(i), dash(i.App), about(i))))
 		}
 	}
 	return tw.Flush()
@@ -114,7 +115,7 @@ func writeAdoc(w io.Writer, rows []engine.TargetItems) error {
 				if strings.HasPrefix(i.Homepage, "https://") {
 					label = i.Homepage + "[" + label + "]"
 				}
-				fmt.Fprintf(&b, "|%s |%s\n", cell(label), cell(about(i)))
+				fmt.Fprintln(&b, plan.Plain(fmt.Sprintf("|%s |%s", cell(label), cell(about(i)))))
 			}
 			b.WriteString("|===\n")
 		}

@@ -84,6 +84,20 @@ func TestApplyKeepsGoingPastAFailure(t *testing.T) {
 	}
 }
 
+func TestApplyProgressHidesWhatSteersATerminal(t *testing.T) {
+	ctx := context.Background()
+	e, _ := New(cfg(t.TempDir()), Default(), []string{"b"})
+	p := plan.Plan{Actions: []plan.Action{
+		{Op: plan.OpCreate, Target: "b", Resource: "ok\x1b[2K\nforged", Do: func(context.Context) error { return nil }},
+		{Op: plan.OpCreate, Target: "b", Resource: "bad", Do: func(context.Context) error { return errors.New("\x1b]52;c;x\a") }},
+	}}
+	var out bytes.Buffer
+	_, _ = e.Apply(ctx, p, &out)
+	if strings.Contains(out.String(), "\x1b") || strings.Contains(out.String(), "\nforged") {
+		t.Fatalf("progress %q", out.String())
+	}
+}
+
 // scripted plans "same" for the targets in stuck and nothing for the rest.
 type scripted struct{ stuck map[string]bool }
 

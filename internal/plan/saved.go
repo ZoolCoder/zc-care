@@ -62,8 +62,12 @@ func (p Plan) savedActions() []SavedAction {
 // LoadSaved reads a plan written by Save.
 func LoadSaved(r io.Reader) (Saved, error) {
 	var s Saved
-	if err := json.NewDecoder(r).Decode(&s); err != nil {
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(&s); err != nil {
 		return Saved{}, fmt.Errorf("read saved plan: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return Saved{}, errors.New("read saved plan: unexpected data after the plan")
 	}
 	if s.Version != savedVersion {
 		return Saved{}, fmt.Errorf("saved plan is version %d, this build writes version %d", s.Version, savedVersion)

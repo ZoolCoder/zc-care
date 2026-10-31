@@ -12,6 +12,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 type Op string
@@ -134,11 +135,11 @@ func (p Plan) Write(w io.Writer) error {
 	sorted := p.sorted()
 	opW, targetW, resW := 0, 0, 0
 	for _, a := range sorted {
-		opW, targetW, resW = max(opW, len(a.Op)), max(targetW, len(plain(a.Target))), max(resW, len(plain(a.Resource)))
+		opW, targetW, resW = max(opW, len(a.Op)), max(targetW, len(Plain(a.Target))), max(resW, len(Plain(a.Resource)))
 	}
 	var b strings.Builder
 	for _, a := range sorted {
-		fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", opW, string(a.Op), targetW, plain(a.Target), resW, plain(a.Resource), plain(a.Detail))
+		fmt.Fprintf(&b, "%-*s  %-*s  %-*s  %s\n", opW, string(a.Op), targetW, Plain(a.Target), resW, Plain(a.Resource), Plain(a.Detail))
 	}
 	if manual := p.Manual(); len(manual) > 0 {
 		fmt.Fprintf(&b, "\n%d of these cannot be automated and are yours to do.\n", len(manual))
@@ -147,15 +148,37 @@ func (p Plan) Write(w io.Writer) error {
 	return err
 }
 
-// plain drops the control characters a terminal would act on, such as an
-// escape sequence in a package name or a command's output.
-func plain(s string) string {
+// Plain is Clean for one line: it drops line breaks too, so a package
+// description cannot forge the row after it.
+func Plain(s string) string {
+	return strings.ReplaceAll(Clean(s), "\n", "")
+}
+
+// Clean drops what Unsafe reports, such as an escape sequence in a package
+// name or a command's output. Everything printed from outside goes through
+// it or Plain.
+func Clean(s string) string {
 	return strings.Map(func(r rune) rune {
-		if (r < 0x20 && r != '\t') || r == 0x7f {
+		if Unsafe(r) {
 			return -1
 		}
 		return r
 	}, s)
+}
+
+// Unsafe reports a character that steers a terminal or hides what a reader
+// sees: C0 and C1 controls, which start escape sequences, the format
+// characters that reorder text or make it invisible, the separators that
+// break a line, and the selectors and fillers that draw nothing.
+func Unsafe(r rune) bool {
+	if r == '\t' || r == '\n' {
+		return false
+	}
+	switch r {
+	case 0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x2800, 0x3164, 0xffa0:
+		return true
+	}
+	return unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp, unicode.Variation_Selector)
 }
 
 // JSONAction is one action in the machine-readable plan.

@@ -32,6 +32,9 @@ func runUndo(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := noOperands("undo", flags); err != nil {
+		return err
+	}
 	if *id != "" && flagGiven(flags, "n") {
 		return errors.New("use -n or -id, not both")
 	}
@@ -124,7 +127,7 @@ func revertOrder(entries []journalEntry) []plan.Undo {
 
 func writeUndoPlan(w io.Writer, chosen []journalEntry, p plan.Plan) error {
 	for _, e := range chosen {
-		fmt.Fprintf(w, "undoing %s: %d change(s) applied from %s on %s\n", e.ID, len(e.Undos), e.Via, e.At.Local().Format("2006-01-02 15:04"))
+		fmt.Fprintf(w, "undoing %s: %d change(s) applied from %s on %s\n", e.ID, len(e.Undos), plan.Plain(e.Via), e.At.Local().Format("2006-01-02 15:04"))
 	}
 	fmt.Fprintln(w)
 	if p.Empty() {
@@ -220,7 +223,7 @@ func writeJournal(w io.Writer, entries []journalEntry) error {
 		if e.Undone {
 			state = "undone"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", e.ID, e.At.Local().Format("2006-01-02 15:04"), e.Via, len(e.Undos), state)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", e.ID, e.At.Local().Format("2006-01-02 15:04"), plan.Plain(e.Via), len(e.Undos), state)
 	}
 	return tw.Flush()
 }
