@@ -85,6 +85,47 @@ private func age(_ url: URL, days: Double) throws {
     #expect(AIModels.ollama(root: root).isEmpty)
 }
 
+@Test func whatNamesTheUsersFilesIsPrivate() throws {
+    let folder = try tempDir()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    func mode(_ url: URL) throws -> Int? {
+        try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+    }
+    let sightings = folder.appendingPathComponent("sightings.json")
+    try Sightings().save(to: sightings)
+    #expect(try mode(sightings) == 0o600)
+
+    let log = folder.appendingPathComponent("activity.json")
+    try Data("not json".utf8).write(to: log)
+    try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: log.path)
+    _ = ActivityLog.load(from: log)
+    let aside = try #require(try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+        .first { $0.lastPathComponent.contains("broken-") })
+    #expect(try mode(aside) == 0o600)
+}
+
+@Test func activityLogIsPrivateAndReplacesLinks() throws {
+    let folder = try tempDir()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let file = folder.appendingPathComponent("deep/activity.json")
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+    // What an earlier version left, readable by everyone.
+    try Data("{}".utf8).write(to: file)
+    try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+    try ActivityLog().save(to: file)
+    #expect(try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int == 0o600)
+
+    let target = folder.appendingPathComponent("target")
+    try Data("mine".utf8).write(to: target)
+    try FileManager.default.removeItem(at: file)
+    try FileManager.default.createSymbolicLink(at: file, withDestinationURL: target)
+    try ActivityLog().save(to: file)
+    #expect(try String(contentsOf: target, encoding: .utf8) == "mine")
+    #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: file.path)) == nil)
+    #expect(try FileManager.default.contentsOfDirectory(atPath: file.deletingLastPathComponent().path) == ["activity.json"])
+}
+
 @Test func corruptActivityLogIsMovedAside() throws {
     let dir = try tempDir()
     defer { try? FileManager.default.removeItem(at: dir) }
