@@ -4,6 +4,7 @@
 package plan
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 )
 
 type Op string
@@ -208,7 +210,36 @@ func (p Plan) WriteJSON(w io.Writer) error {
 			Op: string(a.Op), Target: a.Target, Resource: a.Resource, Detail: a.Detail, Manual: a.Op == OpManual, Destructive: a.destroys(),
 		})
 	}
-	enc := json.NewEncoder(w)
+	return WriteIndented(w, out)
+}
+
+// WriteIndented writes v as indented JSON that is safe to print.
+func WriteIndented(w io.Writer, v any) error {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
 	enc.SetIndent("", "  ")
-	return enc.Encode(out)
+	if err := enc.Encode(v); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, escapeUnsafe(b.String()))
+	return err
+}
+
+// escapeUnsafe spells out in JSON text what Unsafe reports and encoding/json
+// lets through, such as C1 controls: whoever decodes it still gets the raw
+// value, while a terminal showing it stays safe.
+func escapeUnsafe(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		switch {
+		case !Unsafe(r):
+			b.WriteRune(r)
+		case r < 0x10000:
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			high, low := utf16.EncodeRune(r)
+			fmt.Fprintf(&b, `\u%04x\u%04x`, high, low)
+		}
+	}
+	return b.String()
 }

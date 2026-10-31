@@ -45,11 +45,7 @@ func (p Plan) Snapshot(targets []string) Saved {
 func (p Plan) Save(w io.Writer, targets []string) error { return p.Snapshot(targets).Write(w) }
 
 // Write writes the saved plan as indented JSON.
-func (s Saved) Write(w io.Writer) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(s)
-}
+func (s Saved) Write(w io.Writer) error { return WriteIndented(w, s) }
 
 func (p Plan) savedActions() []SavedAction {
 	out := make([]SavedAction, 0, len(p.Actions))
