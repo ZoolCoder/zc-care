@@ -98,22 +98,23 @@ var (
 
 // listeners reads the TCP table, one netstat row a server. Seen on macOS 27:
 // netstat run by a program Apple did not sign exits 0 with no rows, which
-// would read as nothing listening. nettop still shows every server. A Mac
-// always has some, so a table without one is never taken for an answer.
+// would read as nothing listening. nettop still shows every server, so both
+// are read and a server in either counts: one table's silence proves nothing.
+// A Mac always has servers, so a table without one is never taken for an answer.
 func (c Checker) listeners(ctx context.Context) (string, error) {
-	out, err := output(ctx, c.r, readTimeout, netstat...)
-	if err != nil || strings.Contains(out, "LISTEN") {
-		return out, err
+	table, tableErr := output(ctx, c.r, readTimeout, netstat...)
+	top, topErr := output(ctx, c.r, readTimeout, nettop...)
+	rows := netstatRows(top)
+	if tableErr == nil {
+		rows = table + rows
 	}
-	out, err = output(ctx, c.r, readTimeout, nettop...)
-	if err != nil {
+	if strings.Contains(rows, "LISTEN") {
+		return rows, nil
+	}
+	if err := errors.Join(tableErr, topErr); err != nil {
 		return "", err
 	}
-	rows := netstatRows(out)
-	if rows == "" {
-		return "", errors.New("netstat and nettop show no TCP servers")
-	}
-	return rows, nil
+	return "", errors.New("netstat and nettop show no TCP servers")
 }
 
 // netstatRows turns nettop's Listen rows, like
