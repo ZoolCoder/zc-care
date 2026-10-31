@@ -298,15 +298,18 @@ private struct ProtectionTile: View {
 
     var body: some View {
         let passing = security.filter(\.isOK)
-        let insecure = failing.count { !$0.isUnknown }
+        let toFix = failing.filter { !$0.isUnknown }
+        let unread = failing.count - toFix.count
         // Zero failures among zero checks is not protection.
-        let unknown = store.insecure == nil || security.isEmpty
+        let unknown = store.healthUnknown || security.isEmpty
+        // A check that went unread is neither a fix nor a pass.
+        let unsure = unknown || store.insecure == nil
         Button { store.tab = .health } label: {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: unknown ? "shield.fill" : insecure == 0 ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                Image(systemName: unsure ? "shield.fill" : toFix.isEmpty ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                     .font(.title2)
-                    .symbolRenderingMode(unknown ? .monochrome : .palette)
-                    .foregroundStyle(unknown ? Color.secondary : .white, insecure == 0 ? Theme.good : Theme.warning)
+                    .symbolRenderingMode(unsure ? .monochrome : .palette)
+                    .foregroundStyle(unsure ? Color.secondary : .white, toFix.isEmpty ? Theme.good : Theme.warning)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         Text("Protection by")
@@ -318,15 +321,15 @@ private struct ProtectionTile: View {
                         .font(.caption.weight(.medium))
                     // What needs fixing comes first: passing names under "3 to fix" misread.
                     if !unknown {
-                        Text((failing.isEmpty ? passing : failing).prefix(3).map(\.title).joined(separator: ", "))
+                        Text((toFix.isEmpty ? failing.isEmpty ? passing : failing : toFix).prefix(3).map(\.title).joined(separator: ", "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
                 Spacer()
-                Label(unknown ? "Not checked" : insecure == 0 ? "Protected" : "\(insecure) to fix",
-                      systemImage: unknown ? "questionmark" : insecure == 0 ? "checkmark" : "exclamationmark.triangle")
+                Label(unknown ? "Not checked" : unsure ? "\(unread) not read" : toFix.isEmpty ? "Protected" : "\(toFix.count) to fix",
+                      systemImage: unsure ? "questionmark" : toFix.isEmpty ? "checkmark" : "exclamationmark.triangle")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(unknown ? Color.secondary : insecure == 0 ? .white : Theme.warning)
+                    .foregroundStyle(unsure ? Color.secondary : toFix.isEmpty ? .white : Theme.warning)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

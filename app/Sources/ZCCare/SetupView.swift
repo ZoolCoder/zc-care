@@ -299,7 +299,8 @@ private struct SecureStep: View {
                     }
                 }
                 ForEach(failing) { check in
-                    NextCard(symbol: "exclamationmark.shield.fill", colors: Tint.red, title: check.title,
+                    NextCard(symbol: check.isUnknown ? "shield.fill" : "exclamationmark.shield.fill",
+                             colors: check.isUnknown ? Tint.gray : Tint.red, title: check.title,
                              detail: check.detail ?? check.status) {
                         Button(label(check)) { Task { await store.fix(check) } }
                             .disabled(store.busy != nil)
