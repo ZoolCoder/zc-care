@@ -142,6 +142,7 @@ private struct TargetRow: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { open = isOpen ? nil : target.target }
+            .accessibilityAction(named: isOpen ? "Collapse" : "Expand") { open = isOpen ? nil : target.target }
             if isOpen {
                 if items.isEmpty {
                     Text("Nothing listed.").font(.caption).foregroundStyle(.secondary).padding(.leading, 22)
@@ -203,7 +204,7 @@ private struct NotInConfig: View {
 
     private func row(_ item: Item, target: String) -> some View {
         HStack(spacing: 8) {
-            Toggle("", isOn: binding(for: key(target, item))).labelsHidden().toggleStyle(.checkbox)
+            Toggle(item.app ?? item.name, isOn: binding(for: key(target, item))).labelsHidden().toggleStyle(.checkbox)
             Text(item.app ?? item.name).font(.callout).lineLimit(1)
             Text(item.kind).font(.caption2).foregroundStyle(.secondary)
             Spacer()
