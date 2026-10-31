@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +20,11 @@ import (
 // Without it a grandchild that inherited the pipe keeps Wait blocked after
 // the program itself was killed.
 const killGrace = 5 * time.Second
+
+// outputLimit is how long a program may take to answer. Nothing asks through
+// Output for work that takes minutes, while mas waiting on Spotlight or brew
+// on a lock would otherwise hold the whole command for ever.
+const outputLimit = 2 * time.Minute
 
 // Runner starts programs.
 type Runner interface {
@@ -37,18 +43,37 @@ type Runner interface {
 type Exec struct {
 	Stdin          io.Reader
 	Stdout, Stderr io.Writer
+	// Limit replaces outputLimit.
+	Limit time.Duration
 }
 
 // System runs programs attached to this process's terminal.
 func System() Exec { return Exec{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr} }
 
-func (Exec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+func (e Exec) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	limit := e.Limit
+	if limit == 0 {
+		limit = outputLimit
+	}
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = killGrace
+	// Children first, while they still have this parent: Homebrew's mas is
+	// a shell script around the real program. A process group would reach
+	// further, but would stop a program that asks on the terminal.
+	cmd.Cancel = func() error {
+		_ = exec.Command("pkill", "-KILL", "-P", strconv.Itoa(cmd.Process.Pid)).Run()
+		return cmd.Process.Kill()
+	}
 	out, err := cmd.Output()
 	if err != nil && !onlyWaitDelay(err) {
+		if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return out, fmt.Errorf("%s: did not finish in %s", Line(name, args...), limit)
+		}
 		return out, fmt.Errorf("%s: %w: %s", Line(name, args...), err, strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
