@@ -101,6 +101,54 @@ func TestRevertRestoresASymlinkAsALink(t *testing.T) {
 	}
 }
 
+func TestRevertPreviewLeavesARecordBehindALink(t *testing.T) {
+	file := filepath.Join(t.TempDir(), ".rc")
+	if err := os.WriteFile(file, []byte("first apply"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	older := provider.StampFileUndo(provider.SavedFileUndo("dotfiles", file, []byte("original"), 0o600))
+	if err := os.WriteFile(file, []byte("second apply"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := plan.Undo{Provider: "dotfiles", Verb: "symlink", Data: map[string]string{"path": file, "target": "elsewhere"}}
+	if got := (Provider{}).Revert([]plan.Undo{link, older})[1].Detail; strings.Contains(got, "refused") {
+		t.Fatalf("detail %q", got)
+	}
+}
+
+func TestRevertPreviewJudgesAFileALinkPointsAt(t *testing.T) {
+	dir := t.TempDir()
+	target, link := filepath.Join(dir, "b"), filepath.Join(dir, ".a")
+	if err := os.WriteFile(target, []byte("applied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	u := provider.StampFileUndo(provider.SavedFileUndo("dotfiles", target, []byte("original"), 0o600))
+	if err := os.WriteFile(target, []byte("my edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	undos := []plan.Undo{{Provider: "dotfiles", Verb: "symlink", Data: map[string]string{"path": link, "target": target}}, u}
+	if got := (Provider{}).Revert(undos)[1].Detail; !strings.Contains(got, "refused") {
+		t.Fatalf("detail %q", got)
+	}
+}
+
+func TestRevertPreviewNamesAnEditedFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), ".rc")
+	if err := os.WriteFile(file, []byte("applied"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := provider.StampFileUndo(provider.SavedFileUndo("dotfiles", file, []byte("original"), 0o600))
+	if err := os.WriteFile(file, []byte("my edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := (Provider{}).Revert([]plan.Undo{u})[0].Detail; !strings.Contains(got, "refused: "+file+" changed since the apply") {
+		t.Fatalf("detail %q", got)
+	}
+}
+
 func TestRevertRefusesAFileEditedAfterTheApply(t *testing.T) {
 	file := filepath.Join(t.TempDir(), ".new")
 	u, err := before(file, false)

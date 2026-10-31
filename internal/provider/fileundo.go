@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 
 	"github.com/zoolcoder/zc-care/internal/plan"
 )
@@ -82,17 +84,30 @@ func StampFileUndo(u plan.Undo) plan.Undo {
 
 const digestKey = "digest"
 
-// fileSum is the sha256 of file's content; a missing file is "".
+// fileSum is the sha256 of file's content; a missing file is "". Undo previews
+// call it, so a pipe at the path must not hang them: it opens without blocking
+// and reads regular files only, in pieces.
 func fileSum(file string) (string, error) {
-	content, err := os.ReadFile(file)
+	f, err := os.OpenFile(file, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(content)
-	return hex.EncodeToString(sum[:]), nil
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", file)
+	}
+	sum := sha256.New()
+	if _, err := io.Copy(sum, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 // CheckUnchanged refuses when file is no longer what the apply left. A record
@@ -114,10 +129,37 @@ func CheckUnchanged(file string, data map[string]string) error {
 	return nil
 }
 
+// Refusal is what an undo preview adds to a record CheckUnchanged will stop, so
+// the plan does not promise a revert the run then refuses. Only a file's first
+// record can be judged now: older ones run against what that one puts back.
+func Refusal(file string, data map[string]string, seen map[string]bool) string {
+	key := oneSpelling(file)
+	if seen[key] {
+		return ""
+	}
+	seen[key] = true
+	if err := CheckUnchanged(file, data); err != nil {
+		return "; refused: " + err.Error()
+	}
+	return ""
+}
+
+// oneSpelling resolves links in file's folder: FileBefore only resolves a file
+// that exists, so records of one file can name it two ways. The name itself
+// stays, so a link and the file it points at remain two records.
+func oneSpelling(file string) string {
+	dir, err := filepath.EvalSymlinks(filepath.Dir(file))
+	if err != nil {
+		return file
+	}
+	return filepath.Join(dir, filepath.Base(file))
+}
+
 // RevertFiles turns the records FileBefore, NewFileUndo and SavedFileUndo made
 // into actions. Both verbs lose what is there now, so both are destructive.
 func RevertFiles(undos []plan.Undo) []plan.Action {
 	actions := make([]plan.Action, 0, len(undos))
+	seen := map[string]bool{}
 	for _, u := range undos {
 		a := plan.Action{Op: plan.OpUpdate, Target: u.Target, Resource: u.Resource, Destructive: true}
 		file := u.Data["path"]
@@ -138,6 +180,7 @@ func RevertFiles(undos []plan.Undo) []plan.Action {
 				return RestoreFile(file, u.Data["blob"], u.Data["mode"])
 			}
 		}
+		a.Detail += Refusal(file, u.Data, seen)
 		actions = append(actions, a)
 	}
 	return actions
