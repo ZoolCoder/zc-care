@@ -669,7 +669,7 @@ final class Care {
         finish(log, kind: .files, trashed: trashed)
     }
 
-    func keepOldest(_ group: DuplicateGroup) async {
+    func keepOne(_ group: DuplicateGroup) async {
         guard store.busy == nil, !removing else { return }
         removing = true
         defer { removing = false }
@@ -683,23 +683,18 @@ final class Care {
               await confirm(Review(title: store.removeQuestion("\(Store.counted(others.count, "copy", "copies")) of \(keeper.name)"),
                                    note: "\((keeper.url.path as NSString).abbreviatingWithTildeInPath) stays.",
                                    items: others.map(ReviewItem.init), button: store.removeButton)) else { return }
-        // Again: a copy may have changed while the sheet was up.
+        // Again: a copy may have been opened or changed while the sheet was up.
+        guard await !openInApp(others.map(\.url)), store.busy == nil else { return }
         let confirmed = Set(others.map(\.id))
         let unchanged = await stillSame(group).filter { confirmed.contains($0.id) }
         guard unchanged.count == others.count else {
             store.message = Store.Message(text: "The copies of \(keeper.name) changed while you decided; Rescan to compare them again.", failed: true)
             return
         }
-        guard store.busy == nil else { return }
         store.busy = "Removing copies of \(keeper.name)"
         defer { store.busy = nil }
         let (log, trashed) = await removeEach(others, title: "Copies of \(keeper.name)")
-        let gone = Set(log.done.map(\.path))
-        duplicates = duplicates.compactMap { group in
-            var group = group
-            group.files.removeAll { gone.contains($0.id) }
-            return group.files.count > 1 ? group : nil
-        }
+        forget(Set(log.done.map(\.path)))
         finish(log, kind: .files, trashed: trashed)
     }
 
@@ -720,7 +715,8 @@ final class Care {
     private func stillSame(_ group: DuplicateGroup) async -> [LargeFile] {
         store.busy = "Comparing copies of \(group.keeper.name)"
         defer { store.busy = nil }
-        return await Task.detached { Duplicates.stillSame(group) }.value
+        let home = NSHomeDirectory()
+        return await Task.detached { Duplicates.stillSame(group, home: home) }.value
     }
 
     private func drop(_ ids: Set<String>) {

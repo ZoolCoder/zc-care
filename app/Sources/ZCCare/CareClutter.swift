@@ -46,7 +46,8 @@ struct ClutterView: View {
                                     Text("\(group.files[0].name) · \(group.files.count) copies, \(Store.bytes(group.wasted)) wasted")
                                         .font(.callout.weight(.semibold))
                                     Spacer()
-                                    Button("Keep Oldest") { Task { await care.keepOldest(group) } }.controlSize(.small)
+                                    Button("Keep One") { Task { await care.keepOne(group) } }.controlSize(.small)
+                                        .help("Keeps the copy marked Stays and removes the others")
                                         .disabled(care.store.busy != nil)
                                 }
                                 .padding(.horizontal, 10)

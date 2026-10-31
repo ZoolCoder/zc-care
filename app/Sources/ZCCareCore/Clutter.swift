@@ -6,13 +6,16 @@ public struct DuplicateGroup: Codable, Sendable, Equatable, Identifiable {
     public var files: [LargeFile]
     /// Each copy's size; the copies past the first are what it wastes.
     public var size: Int64
+    /// The copy that has hard links elsewhere: removing it frees nothing.
+    public var linked: String?
 
     public var id: String { files.map(\.id).joined(separator: "\n") }
     public var wasted: Int64 { size * Int64(max(files.count - 1, 0)) }
 
-    /// The oldest copy, likely the original; the shorter path when dates tie.
+    /// The copy with hard links, else the oldest, likely the original; the
+    /// shorter path when dates tie.
     public var keeper: LargeFile {
-        files.min { a, b in
+        files.first { $0.id == linked } ?? files.min { a, b in
             let (x, y) = (a.modified ?? .distantFuture, b.modified ?? .distantFuture)
             return x != y ? x < y : a.url.path.count < b.url.path.count
         }!
@@ -40,8 +43,13 @@ public enum Duplicates {
                 for file in rivals {
                     if let hash = sha256(file.url) { byHash[hash, default: []].append(file) }
                 }
-                for same in byHash.values where same.count > 1 {
-                    groups.append(DuplicateGroup(files: same.sorted { $0.id < $1.id }, size: size))
+                for same in byHash.values {
+                    let linked = same.filter(hasOtherNames).map(\.id).min()
+                    // One linked copy stays; a second would free nothing either.
+                    let files = same.filter { !hasOtherNames($0) || $0.id == linked }
+                    if files.count > 1 {
+                        groups.append(DuplicateGroup(files: files.sorted { $0.id < $1.id }, size: size, linked: linked))
+                    }
                 }
             }
         }
@@ -49,10 +57,29 @@ public enum Duplicates {
     }
 
     /// The other copies that still hold the keeper's bytes: a scan may be
-    /// days old, and a copy edited since is no longer a duplicate.
-    public static func stillSame(_ group: DuplicateGroup) -> [LargeFile] {
-        guard let kept = sha256(group.keeper.url) else { return [] }
-        return group.others.filter { sha256($0.url) == kept }
+    /// days old, and a copy edited since is no longer a duplicate. Equal
+    /// hashes are not enough: a path that became a link, or that now leads
+    /// to the keeper's own file, would take the keeper with it, and a folder
+    /// that became a link leads somewhere the scan never looked.
+    public static func stillSame(_ group: DuplicateGroup, home: String) -> [LargeFile] {
+        guard !group.files.contains(where: { SpaceLens.passesLink($0.url.path, home: home) }),
+              let keeper = regularFile(group.keeper.url), let kept = sha256(group.keeper.url) else { return [] }
+        let same = group.others.compactMap { file -> (file: LargeFile, stamp: [UInt64])? in
+            guard let copy = regularFile(file.url), copy != keeper, sha256(file.url) == kept else { return nil }
+            return (file, copy)
+        }
+        // Hashing takes time: what it read must outlast it, unedited.
+        guard regularFile(group.keeper.url) == keeper else { return [] }
+        return same.filter { regularFile($0.file.url) == $0.stamp }.map(\.file)
+    }
+
+    /// The device, inode, size and modified time of the file a path names,
+    /// nil unless it is a regular file itself rather than a link to one.
+    static func regularFile(_ url: URL) -> [UInt64]? {
+        var info = stat()
+        guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
+        return [UInt64(truncatingIfNeeded: info.st_dev), info.st_ino, UInt64(truncatingIfNeeded: info.st_size),
+                UInt64(truncatingIfNeeded: info.st_mtimespec.tv_sec), UInt64(truncatingIfNeeded: info.st_mtimespec.tv_nsec)]
     }
 
     /// Hard links to one file are one file: removing a link frees nothing.
@@ -63,6 +90,11 @@ public enum Duplicates {
             guard lstat(file.url.path, &info) == 0 else { return true }
             return seen.insert([UInt64(truncatingIfNeeded: info.st_dev), info.st_ino]).inserted
         }
+    }
+
+    static func hasOtherNames(_ file: LargeFile) -> Bool {
+        var info = stat()
+        return lstat(file.url.path, &info) == 0 && info.st_nlink > 1
     }
 
     /// Groups files by their first megabyte, so a pair of large files that
