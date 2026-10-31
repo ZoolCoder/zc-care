@@ -223,6 +223,7 @@ struct ResultCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .spinning(working)
             Text(working ? "Looking…" : detail).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             if let link {
                 Button(link.title, action: link.run).buttonStyle(.zcLink).font(.callout.weight(.semibold))
             }
@@ -236,8 +237,8 @@ private struct CleanupCard: View {
 
     var body: some View {
         ResultCard(title: "Cleanup", symbol: "trash.fill", colors: Tint.cyan,
-                   figure: Store.bytes(care.junk), detail: "of caches, logs and build output",
-                   working: care.monitor.scanning && care.junk == 0,
+                   figure: Store.bytes(care.junk + care.aiBeyondJunk), detail: "of caches, logs and AI clutter",
+                   working: (care.monitor.scanning || care.scanningAI) && care.junk + care.aiBeyondJunk == 0,
                    link: ("Review", { care.module = .cleanup }))
     }
 }
