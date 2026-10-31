@@ -53,7 +53,6 @@ public enum AIClutter {
             Spot(tool: "Claude", kind: "Logs", path: home + "/Library/Logs/Claude", pick: { _ in true }),
             Spot(tool: "ChatGPT", kind: "Caches", path: home + "/Library/Caches/com.openai.chat"),
             Spot(tool: "Codex", kind: "Logs", path: home + "/.codex/log", pick: { _ in true }),
-            Spot(tool: "Gemini CLI", kind: "Temp Files", path: home + "/.gemini/tmp", pick: { _ in true }),
             Spot(tool: "Chrome DevTools MCP", kind: "Caches", path: home + "/.cache/chrome-devtools-mcp"),
         ]
         if let current = claudeVersion(home: home) {
