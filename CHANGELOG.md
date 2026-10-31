@@ -27,6 +27,15 @@ here with what to edit.
 - `plan -json`, `undo -json` and the other JSON output spell out every
   character that steers a terminal, so printing it is safe and decoding it
   still gives the value.
+- File Sharing, Remote Login and Screen Sharing could pass without looking. On
+  macOS 27, `netstat` run by a program Apple did not sign exits 0 and lists no
+  connections, which read as nothing listening. The checks now read `nettop`
+  when that happens, and report that they could not read the answer if it shows
+  no servers either.
+- The sharing and listener checks count `fe80::1` on `lo0` as loopback, in the
+  form each tool prints it: `fe80::1%lo0` and `fe80:1::1`. macOS gives the
+  loopback interface that address too, and a server on it is reachable from
+  this machine only.
 
 ### ZC Care
 
@@ -88,6 +97,14 @@ here with what to edit.
 - A target that stays unreadable no longer silences every notification. Each
   part now waits only on its own read, so findings and drift keep arriving, and
   the icon counts one failure once.
+- When the doctor cannot run, nothing claims this Mac is healthy. The security
+  card used to show a green *Protected* over `0 of 0 security checks pass`, with
+  the grade at *Excellent* and Setup saying every check passes. The card, the
+  Health tab, Setup and Smart Care now say the checks were not read, Setup
+  offers to try again, the grade drops a step, and it is listed among the
+  recommendations. A single check that could not be read is no longer counted
+  as one to fix. Updates that could not be checked no longer end in *Your Mac
+  is in great shape* either.
 
 ## v0.4.0 — 2026-10-30
 
