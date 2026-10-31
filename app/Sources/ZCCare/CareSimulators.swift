@@ -50,7 +50,7 @@ struct SimulatorRuntimesSection: View {
         guard store.busy == nil,
               Alerts.confirm("Delete \(runtime.title)?",
                              "Deletes the \(Store.bytes(runtime.size)) runtime for good with simctl; there is no Trash for it. Simulators that use it stop working until Xcode downloads it again.",
-                             button: "Delete") else { return }
+                             button: "Delete"), store.busy == nil else { return }
         store.busy = "Delete \(runtime.title)"
         defer { store.busy = nil }
         let failed = await store.failure("simctl exited with an error") {
