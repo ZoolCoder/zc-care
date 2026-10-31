@@ -305,7 +305,7 @@ private struct Inventory: View {
                 Spacer()
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search Items", text: $search).textFieldStyle(.plain)
+                    TextField("Search Items", text: $search).textFieldStyle(.plain).findShortcut()
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)

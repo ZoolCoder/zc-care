@@ -901,7 +901,9 @@ final class Care {
         if junk > 500_000_000 { r.append(Recommendation(symbol: "trash.fill", title: "Clean \(Store.bytes(junk)) of system junk", module: .cleanup)) }
         if ai > 200_000_000 { r.append(Recommendation(symbol: "brain.head.profile", title: "Clear \(Store.bytes(ai)) of AI clutter", module: .cleanup)) }
         let outdated = store.snapshot?.outdated.count ?? 0
-        if outdated > 0 { r.append(Recommendation(symbol: "arrow.down.circle.fill", title: "Update " + Store.counted(outdated, "package"), module: .apps)) }
+        if outdated > 0 { r.append(Recommendation(symbol: "arrow.down.circle.fill", title: "Update " + Store.counted(outdated, "package"), module: .apps) {
+            $0.showUpdates = true
+        }) }
         let feeds = shownFeedUpdates.filter(\.supported).count
         if feeds > 0 {
             r.append(Recommendation(symbol: "arrow.triangle.2.circlepath", title: "Open \(Store.counted(feeds, "app")) with an update", module: .apps) {

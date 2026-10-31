@@ -7,6 +7,8 @@ import ZCCareCore
 struct ApplicationsView: View {
     @Bindable var care: Care
     @State private var filter = Filter.all
+    @State private var sort = AppSort.size
+    @State private var reversed = false
     @State private var expanded: String?
     @State private var query = ""
     @State private var picked: Set<String> = []
@@ -17,76 +19,30 @@ struct ApplicationsView: View {
         let copies = care.copies
         return VStack(spacing: 0) {
             CareHeader(title: "Applications", subtitle: "\(Store.counted(care.apps.count, "app")), \(Store.bytes(total)) in all",
-                   busy: care.loadingApps, action: ("Rescan", { care.orphans = nil; care.receipts = nil; Task { await care.loadApps() } }))
-            HStack {
-                Picker("", selection: $filter) {
-                    ForEach(Filter.allCases, id: \.self) { Text(label($0)) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                if filter != .leftovers {
-                    TextField("Search", text: $query)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 100, maxWidth: 200)
-                }
-                Spacer()
-                let outdated = care.store.snapshot?.outdated.count ?? 0
-                if outdated > 0 {
-                    Button("Update \(outdated) Packages") { Task { await care.store.updateAll() } }
-                        .disabled(care.store.busy != nil)
-                }
-            }
-            .padding(.horizontal, 28)
-            .padding(.bottom, 12)
+                   busy: care.loadingApps, search: filter == .leftovers ? nil : $query,
+                   action: ("Rescan", { care.orphans = nil; care.receipts = nil; Task { await care.loadApps() } }))
+            filters
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 28)
+                .padding(.bottom, 12)
             if filter == .leftovers {
                 LeftoverList(care: care)
             } else if filter == .updates {
                 UpdateList(care: care, query: query)
             } else {
+            columnTitles
             ScrollView {
-                CareSection(filter.rawValue) {
+                CareSection {
                     if shown.isEmpty {
                         Text(query.isEmpty ? "No app here." : "No app matches \u{201C}\(query)\u{201D}.")
                             .foregroundStyle(.secondary).padding(10)
                     }
                     ForEach(shown) { app in
                         VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 10) {
-                        PickBox(id: app.id, picked: $picked).padding(.leading, 8)
-                        CareRow(icon: icon(app), title: app.name, detail: detail(app),
-                            value: app.size.map { Store.bytes($0) } ?? "…",
-                            flag: copies.contains(app.id) ? "Installed Twice" : app.declared == nil ? "Not in Brewfile" : nil) {
-                            Button { expanded = expanded == app.id ? nil : app.id } label: {
-                                Image(systemName: expanded == app.id ? "chevron.up" : "chevron.down")
-                                    .accessibilityLabel("Show what uninstalling removes")
+                            AppRow(care: care, app: app, detail: detail(app), twice: copies.contains(app.id), picked: $picked, expanded: $expanded) {
+                                icon(app)
                             }
-                            .controlSize(.small)
-                            .help("Show what uninstalling removes")
-                            if care.canAdopt(app), let token = care.casks[app.url.lastPathComponent] {
-                                Button("Adopt") { Task { await care.adopt(app) } }
-                                    .controlSize(.small)
-                                    .help("Install as cask \(token) over this copy, and add it to the Brewfile")
-                                    .gatedOnBusy(care.store)
-                            }
-                            Button("Uninstall") { Task { await care.uninstall([app]) } }
-                                .controlSize(.small)
-                                .help("Uninstall (\(removalVerb(care.store)))")
-                                .gatedOnBusy(care.store)
-                            Menu {
-                                Button("Reset \(app.name)…") { Task { await care.reset(app) } }
-                                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
-                            } label: {
-                                Image(systemName: "ellipsis.circle").accessibilityLabel("More")
-                            }
-                            .menuStyle(.borderlessButton)
-                            .menuIndicator(.hidden)
-                            .fixedSize()
-                            .help("Reset \(app.name) (\(care.store.deletesPermanently ? "deletes" : "trashes") its settings, caches and data, and keeps the app) or Show in Finder")
-                            .gatedOnBusy(care.store)
-                        }
-                        }
-                        if expanded == app.id { AppFiles(care: care, app: app) }
+                            if expanded == app.id { AppFiles(care: care, app: app) }
                         }
                     }
                 }
@@ -100,6 +56,74 @@ struct ApplicationsView: View {
         .onAppear(perform: takeRequest)
         .onChange(of: care.showUpdates) { takeRequest() }
         .onChange(of: care.showLeftovers) { takeRequest() }
+    }
+
+    /// Each as wide as its words: a segmented control gives all six the
+    /// widest one's width, which no longer fits a narrow window.
+    private var filters: some View {
+        HStack(spacing: 2) {
+            ForEach(Filter.allCases, id: \.self) { f in
+                Button { filter = f } label: {
+                    HStack(spacing: 4) {
+                        Text(f.rawValue)
+                        if let n = count(f) {
+                            Text("\(n)")
+                                .font(.caption2.monospacedDigit().weight(.bold))
+                                .foregroundStyle(filter == f ? Color.white : Color.white.opacity(0.5))
+                        }
+                    }
+                    .font(.callout)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 5)
+                    .foregroundStyle(filter == f ? Color.white : Color.white.opacity(0.65))
+                    .background(RoundedRectangle(cornerRadius: 7).fill(filter == f ? Theme.selected : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(filter == f ? .isSelected : [])
+            }
+        }
+        .padding(3)
+        .modifier(Card())
+        .fixedSize()
+    }
+
+    /// Stay in view while the list scrolls; a click sorts by that column,
+    /// and a second click turns the order round.
+    private var columnTitles: some View {
+        HStack(spacing: 12) {
+            columnTitle("Application", .name)
+            Spacer()
+            columnTitle("Size", .size).frame(width: AppColumn.size, alignment: .trailing)
+            columnTitle("Last Used", .lastUsed).frame(width: AppColumn.used, alignment: .trailing)
+            Spacer().frame(width: AppColumn.actions)
+        }
+        .padding(.leading, 79)
+        .padding(.trailing, 44)
+        .padding(.bottom, 6)
+    }
+
+    private func columnTitle(_ title: String, _ column: AppSort) -> some View {
+        Button {
+            reversed = sort == column && !reversed
+            sort = column
+        } label: {
+            HStack(spacing: 3) {
+                Text(title)
+                if sort == column {
+                    Image(systemName: reversed ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold))
+                }
+            }
+            .font(.caption.weight(sort == column ? .semibold : .regular))
+            .foregroundStyle(sort == column ? Color.white.opacity(0.85) : Color.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(sort == column ? .isSelected : [])
+        .accessibilityValue(sort == column && reversed ? "Reversed" : "")
+        .help("Sort by \(title.lowercased())")
     }
 
     /// What is ticked, and one button that uninstalls it app by app: each
@@ -152,22 +176,25 @@ struct ApplicationsView: View {
         case .updates, .leftovers: [InstalledApp]()
         }
         let term = query.trimmingCharacters(in: .whitespaces)
-        return list.filter { term.isEmpty || $0.name.localizedCaseInsensitiveContains(term) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(term) }
-            .sorted { ($0.size ?? 0) > ($1.size ?? 0) }
+        return sort.ordered(list.filter { term.isEmpty || $0.name.localizedCaseInsensitiveContains(term) || ($0.bundleID ?? "").localizedCaseInsensitiveContains(term) },
+                            reversed: reversed)
     }
 
-    /// A filter's name with how many it holds, once the scan has counted them.
-    private func label(_ f: Filter) -> String {
+    /// How many a filter holds, once the scan has counted them.
+    private func count(_ f: Filter) -> Int? {
         let n: Int? = switch f {
         case .all: care.apps.count
         case .undeclared: care.undeclared.count
         case .unused: care.unused.count
         case .intel: care.intelOnly.count
         case .leftovers: care.orphans?.count
-        case .updates: care.updatesCheckedAt == nil ? (care.outdatedApps.isEmpty ? nil : care.outdatedApps.count) : care.updateCount
+        case .updates: updatesCount
         }
-        guard let n, !care.apps.isEmpty else { return f.rawValue }
-        return "\(f.rawValue) \(n)"
+        return care.apps.isEmpty ? nil : n
+    }
+
+    private var updatesCount: Int? {
+        care.updatesCheckedAt == nil && care.allUpdates == 0 ? nil : care.allUpdates
     }
 
     @ViewBuilder private func icon(_ app: InstalledApp) -> some View {
@@ -183,13 +210,90 @@ struct ApplicationsView: View {
         let place = app.url.path.hasPrefix(home) ? "~/Applications · " : ""
         let source = switch (app.source, app.declared) {
         case (_, let item?): "Brewfile · \(item.resource)"
-        case (.cask(let token), nil): "Homebrew cask \(token)"
+        case (.cask, nil): "Homebrew cask"
         case (.appStore, nil): "App Store"
         default: "Installed by hand"
         }
-        // Spotlight keeps no use date for some apps in daily use.
-        let when = app.lastUsed.map { " · last used " + relativeDate($0) } ?? app.added.map { " · added " + relativeDate($0) } ?? ""
-        return place + source + when
+        return place + source
+    }
+}
+
+/// The widths the rows and their column titles share.
+private enum AppColumn {
+    static let size: CGFloat = 62
+    static let used: CGFloat = 88
+    static let actions: CGFloat = 172
+}
+
+/// One app: what it is, its size and last use in columns, and what can be
+/// done to it. Uninstall shows while the pointer is on the row, so a long
+/// list stays quiet; the ⋯ menu always offers it.
+private struct AppRow<Icon: View>: View {
+    @Bindable var care: Care
+    let app: InstalledApp
+    let detail: String
+    let twice: Bool
+    @Binding var picked: Set<String>
+    @Binding var expanded: String?
+    @ViewBuilder let icon: Icon
+    @State private var over = false
+
+    var body: some View {
+        let open = expanded == app.id
+        HStack(spacing: 10) {
+            PickBox(id: app.id, picked: $picked).padding(.leading, 8)
+            CareRow(icon: icon, title: app.name, detail: detail, value: "", flag: twice ? "Installed Twice" : nil) {
+                Text(app.size.map { Store.bytes($0) } ?? "…")
+                    .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                    .frame(width: AppColumn.size, alignment: .trailing)
+                // Spotlight keeps no use date for some apps in daily use, so
+                // none is not the same as never.
+                Text(app.lastUsed.map { relativeDate($0) } ?? "–")
+                    .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    .frame(width: AppColumn.used, alignment: .trailing)
+                    .help(app.lastUsed == nil ? "Spotlight keeps no use date for this app" + (app.added.map { ". Added " + relativeDate($0) } ?? "") : "")
+                HStack(spacing: 6) {
+                    Button("Uninstall") { Task { await care.uninstall([app]) } }
+                        .controlSize(.small)
+                        .help("Uninstall (\(removalVerb(care.store)))")
+                        .gatedOnBusy(care.store)
+                        .opacity(over || open ? 1 : 0)
+                        .allowsHitTesting(over || open)
+                        .disabled(!(over || open))
+                    if care.canAdopt(app), let token = care.casks[app.url.lastPathComponent] {
+                        Button("Adopt") { Task { await care.adopt(app) } }
+                            .controlSize(.small)
+                            .help("Install as cask \(token) over this copy, and add it to the Brewfile")
+                            .gatedOnBusy(care.store)
+                    }
+                    Button { expanded = open ? nil : app.id } label: {
+                        Image(systemName: open ? "chevron.up" : "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16, height: 18)
+                            .contentShape(Rectangle())
+                            .accessibilityLabel("Show what uninstalling removes")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show what uninstalling removes")
+                    Menu {
+                        Button("Uninstall \(app.name)…") { Task { await care.uninstall([app]) } }
+                        Button("Reset \(app.name)…") { Task { await care.reset(app) } }
+                        Divider()
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app.url]) }
+                    } label: {
+                        Image(systemName: "ellipsis.circle").accessibilityLabel("More")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Uninstall, reset (\(care.store.deletesPermanently ? "deletes" : "trashes") its settings, caches and data, and keeps the app) or show in Finder")
+                    .gatedOnBusy(care.store)
+                }
+                .frame(width: AppColumn.actions, alignment: .trailing)
+            }
+        }
+        .onHover { over = $0 }
     }
 }
 

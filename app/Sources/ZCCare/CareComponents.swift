@@ -223,17 +223,17 @@ struct SectionStack: Layout {
 }
 
 struct CareSection<Content: View>: View {
-    let title: String
+    let title: String?
     @ViewBuilder let content: Content
 
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(_ title: String? = nil, @ViewBuilder content: () -> Content) {
         self.title = title
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.title3.weight(.semibold))
+            if let title { Text(title).font(.title3.weight(.semibold)) }
             VStack(alignment: .leading, spacing: 0) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(6)
@@ -275,12 +275,13 @@ struct CareRow<Icon: View, Actions: View>: View {
                             .padding(.horizontal, 6).padding(.vertical, 2)
                             .background(Capsule().fill(flagColor.opacity(0.25)))
                             .foregroundStyle(flagColor)
+                            .fixedSize()
                     }
                 }
                 Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer()
-            Text(value).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+            if !value.isEmpty { Text(value).font(.callout.monospacedDigit()).foregroundStyle(.secondary) }
             actions
         }
         .padding(.horizontal, 10)
