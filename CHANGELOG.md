@@ -29,9 +29,9 @@ here with what to edit.
   still gives the value.
 - File Sharing, Remote Login and Screen Sharing could pass without looking. On
   macOS 27, `netstat` run by a program Apple did not sign exits 0 and lists no
-  connections, which read as nothing listening. The checks now read `nettop`
-  when that happens, and report that they could not read the answer if it shows
-  no servers either.
+  connections, which read as nothing listening. The checks now read `nettop` as
+  well, count a server either one shows, and report that they could not read the
+  answer if neither shows any.
 - The sharing and listener checks count `fe80::1` on `lo0` as loopback, in the
   form each tool prints it: `fe80::1%lo0` and `fe80:1::1`. macOS gives the
   loopback interface that address too, and a server on it is reachable from
@@ -103,7 +103,8 @@ here with what to edit.
   Health tab, Setup and Smart Care now say the checks were not read, Setup
   offers to try again, the grade drops a step, and it is listed among the
   recommendations. A single check that could not be read is no longer counted
-  as one to fix. Updates that could not be checked no longer end in *Your Mac
+  as one to fix or as a pass: the Mac tab says how many went unread and Setup
+  draws it in gray. Updates that could not be checked no longer end in *Your Mac
   is in great shape* either.
 
 ## v0.4.0 — 2026-10-30
