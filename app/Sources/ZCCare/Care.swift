@@ -455,7 +455,10 @@ final class Care {
     /// disk image a VM runs from or a video in an editor. Apps are offered
     /// to quit in a sheet; a command that is no app is named.
     private func openInApp(_ urls: [URL]) async -> Bool {
-        guard let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--"] + urls.map(\.path), env: [:]) else { return false }
+        guard let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--"] + urls.map(\.path), env: [:]) else {
+            store.message = Store.Message(text: "Could not tell which files are in use (lsof failed). Nothing was removed.", failed: true)
+            return true
+        }
         let holders = OpenFile.holders(r.output)
         guard !holders.isEmpty else { return false }
         let apps = NSWorkspace.shared.runningApplications.filter { app in
