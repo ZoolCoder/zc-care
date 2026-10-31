@@ -20,6 +20,13 @@ here with what to edit.
   sequences, bidi overrides and invisible characters, and a line break cannot
   forge a row. MCP resources are cleaned like tool output.
 - A saved plan with more data after it is refused.
+- `undo -plan` says which file the undo will refuse because it changed since
+  the apply, instead of leaving that to the run.
+- An undo preview no longer waits on a pipe at a recorded path, and no longer
+  loads a whole file to compare it: only regular files are read, in pieces.
+- `plan -json`, `undo -json` and the other JSON output spell out every
+  character that steers a terminal, so printing it is safe and decoding it
+  still gives the value.
 
 ### ZC Care
 
@@ -34,6 +41,38 @@ here with what to edit.
 - Duplicates skip hard links, which free nothing, and tell large files apart
   by their first megabyte before reading them whole. A file that cannot be
   read to the end is not called a duplicate.
+- *Keep Oldest* is now *Keep One*. When one copy has hard links elsewhere it is
+  the copy kept, since removing it would free nothing. Before removing, each
+  copy must still be a regular file of its own: a path that became a link, or
+  that now leads to the kept file, stays, and nothing goes if the kept file
+  left during the compare. A folder that became a link since the scan, and a
+  copy opened or edited during the compare or while you decided, stop it too.
+  A removed copy also leaves Large Files at once.
+- A removal stops when `lsof` cannot say which files are in use, instead of
+  taking that as none.
+- Cleanup's Trash row shows no size when it cannot read the Trash, instead of
+  Zero KB.
+- Cleanup no longer offers `~/.gemini/tmp`: Gemini CLI saves chats and
+  checkpoints there.
+- Applications has sortable Size and Last Used columns, search in the header
+  and quiet rows: *Uninstall* shows on hover. A subtitle states where an app
+  came from, and an app with no use date says why when you point at it.
+- Every Updates count agrees: the filter bar, the list's title, the sidebar,
+  Smart Care and Activity all include formulae and runtimes. With only those
+  waiting, the list says the Update button installs them. A tapped cask with
+  its own update feed counts once, and a cask Homebrew just updated does not
+  come back as a feed row.
+- Space Lens has *Stop*, and quitting stops a scan in progress.
+- ⌘F goes to the search field on Applications, My Tools and My Workstation.
+- With Spotlight indexing off, My Clutter says it could not check for large
+  files, duplicates and similar images instead of reporting none, and still
+  says so after a restart.
+- Smart Care's cleanup figure counts AI clutter too, Protection's tile leaves
+  out checks you chose to ignore, and *Manage* opens the Updates filter only
+  when there are updates. Sidebar rows keep their height, and the window stops
+  at 660 points, where Settings and Smart Care's *Run* still fit.
+- VoiceOver names every checkbox, switch and segmented control, and can expand
+  a My Workstation target.
 
 ## v0.4.0 — 2026-10-30
 
