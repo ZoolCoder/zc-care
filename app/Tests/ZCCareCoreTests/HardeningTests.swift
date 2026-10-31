@@ -140,6 +140,26 @@ private actor Peak {
     #expect(await peak.most > 1)
 }
 
+private func onMainThread() -> Bool { Thread.isMainThread }
+
+/// Off the caller's actor, a sync closure inside `each` fails its executor
+/// check and traps, which is how opening Applications used to end ZCCare.
+/// This `each` has no such closure, so a regression fails the count, not the run.
+@MainActor @Test func eachRunsOnTheCallersActorAndWorkDoesNot() async {
+    var calls = 0, offActor = 0, workOnActor = 0
+    await forEachConcurrently(Array(0..<30), limit: 4) { _ in
+        try? await Task.sleep(for: .milliseconds(1))
+        return onMainThread()
+    } each: { workOnMain in
+        calls += 1
+        if !Thread.isMainThread { offActor += 1 }
+        if workOnMain { workOnActor += 1 }
+    }
+    #expect(calls == 30)
+    #expect(offActor == 0)
+    #expect(workOnActor == 0)
+}
+
 @Test func onlyAMacRefusingAccessIsTakenForMissingFullDiskAccess() {
     #expect(Privacy.lacksFullDiskAccess(stderr: "Error: unable to open database \"/Library/.../TCC.db\": authorization denied"))
     #expect(Privacy.lacksFullDiskAccess(stderr: "Operation not permitted"))
