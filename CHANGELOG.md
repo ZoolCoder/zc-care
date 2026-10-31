@@ -73,6 +73,21 @@ here with what to edit.
   at 660 points, where Settings and Smart Care's *Run* still fit.
 - VoiceOver names every checkbox, switch and segmented control, and can expand
   a My Workstation target.
+- A config or manifest that cannot be read no longer reads as all clear. My
+  Workstation drops its 0% and *All Clear* cards and says the inventory could
+  not be read instead of *Reading your config…* for ever, while the applied log
+  still shows. A target that `list` cannot read now counts as an error, so the
+  targets that could be read stay and Smart Care, Applications, My Activity and
+  the panel stop saying *Up to date*.
+- Removing unneeded Homebrew formulae stops when a target cannot be read.
+  An unreadable Brewfile used to look like one that declares nothing, so a
+  formula it names could be offered for removal. For the same reason
+  Applications stops offering Adopt and stops listing apps as not in the
+  Brewfile, My Workstation hides *Not in Your Config*, and the uninstall dialog
+  warns that the next apply may bring the app back.
+- A target that stays unreadable no longer silences every notification. Each
+  part now waits only on its own read, so findings and drift keep arriving, and
+  the icon counts one failure once.
 
 ## v0.4.0 — 2026-10-30
 

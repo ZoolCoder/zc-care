@@ -52,8 +52,14 @@ struct SmartCareView: View {
     }
 
     private var summary: String {
-        canRun ? "Run cleans up \(Store.bytes(care.junk + care.aiBeyondJunk)) and updates \(Store.counted(care.store.snapshot?.outdated.count ?? 0, "package"))."
-            : care.scannedAt != nil && care.allUpdates > 0 ? "Your Mac is in good shape; \(Store.counted(care.allUpdates, "update")) waiting in Applications."
+        let packages = care.store.snapshot?.outdated.count ?? 0
+        if canRun {
+            return "Run cleans up \(Store.bytes(care.junk + care.aiBeyondJunk))"
+                + (packages > 0 ? " and updates \(Store.counted(packages, "package"))." : ".")
+        }
+        if care.store.snapshot?.errors.isEmpty == false { return "Part of your setup could not be read." }
+        return care.scannedAt != nil && care.allUpdates > 0
+            ? "Your Mac is in good shape; \(Store.counted(care.allUpdates, "update")) waiting in Applications."
             : "Your Mac is in good shape."
     }
 }
@@ -270,8 +276,10 @@ private struct UpdatesCard: View {
         let outdated = care.allUpdates
         let undeclared = care.undeclared.count
         ResultCard(title: "Applications", symbol: "square.grid.2x2.fill", colors: Tint.green,
-                   figure: outdated == 0 ? "Up to date" : Store.counted(outdated, "update"),
-                   detail: undeclared == 0 ? "Every app is in the Brewfile" : Store.counted(undeclared, "app") + " not in the Brewfile",
+                   figure: outdated > 0 ? Store.counted(outdated, "update")
+                       : care.store.snapshot?.updatesUnknown == true ? "Not checked" : "Up to date",
+                   detail: care.declaredUnknown ? "Your config could not be fully read"
+                       : undeclared == 0 ? "Every app is in the Brewfile" : Store.counted(undeclared, "app") + " not in the Brewfile",
                    working: (care.store.refreshing && care.store.snapshot == nil) || (care.loadingApps && care.apps.isEmpty),
                    link: ("Manage", {
                        care.showUpdates = outdated > 0
