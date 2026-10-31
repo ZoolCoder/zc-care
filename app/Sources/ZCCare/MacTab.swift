@@ -41,7 +41,7 @@ struct MacTab: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             hero
-            ProtectionTile(store: store, security: snapshot.security, insecure: insecure)
+            ProtectionTile(store: store, security: snapshot.security, failing: store.findings.filter(\.isSecurity))
             // Two columns that each stack their tiles, so a tile is only as
             // tall as what it holds.
             HStack(alignment: .top, spacing: 8) {
@@ -293,10 +293,12 @@ private struct LaptopArt: View {
 private struct ProtectionTile: View {
     let store: Store
     let security: [Check]
-    let insecure: Int
+    /// Without the checks the user ignored, unlike `security`.
+    let failing: [Check]
 
     var body: some View {
         let passing = security.filter(\.isOK)
+        let insecure = failing.count
         Button { store.tab = .health } label: {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: insecure == 0 ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
@@ -312,7 +314,8 @@ private struct ProtectionTile: View {
                     .font(.callout.weight(.semibold))
                     Text("\(passing.count) of \(security.count) security checks pass")
                         .font(.caption.weight(.medium))
-                    Text(passing.prefix(3).map(\.title).joined(separator: ", "))
+                    // What needs fixing comes first: passing names under "3 to fix" misread.
+                    Text((failing.isEmpty ? passing : failing).prefix(3).map(\.title).joined(separator: ", "))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()

@@ -41,7 +41,7 @@ struct CleanupView: View {
                             JunkRow(care: care, spot: spot)
                         }
                         CareRow(icon: SymbolTile(symbol: "trash.fill", colors: Tint.gray, size: 32),
-                            title: "Trash", detail: trashDetail, value: Store.bytes(care.trashBins.reduce(0) { $0 + $1.size })) {
+                            title: "Trash", detail: trashDetail, value: trashSize) {
                             Button("Empty") { Task { await care.store.emptyTrash() } }.controlSize(.small).gatedOnBusy(care.store)
                         }
                     }
@@ -71,6 +71,12 @@ struct CleanupView: View {
                 .padding(.bottom, 70)
             }
         }
+    }
+
+    /// Blank when no Trash can be read: without Full Disk Access none can,
+    /// which says nothing about what is in it.
+    private var trashSize: String {
+        care.trashBins.isEmpty ? "" : Store.bytes(care.trashBins.reduce(0) { $0 + $1.size })
     }
 
     /// The volumes' Trash sizes, when more than the startup disk has one.
@@ -332,9 +338,11 @@ struct CloudCleanupView: View {
                             }
                         }
                     }
-                    Text("Remove Download frees the space a file takes on this Mac. The file stays in the cloud and downloads again when you open it.")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !scans.isEmpty {
+                        Text("Remove Download frees the space a file takes on this Mac. The file stays in the cloud and downloads again when you open it.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 70)
