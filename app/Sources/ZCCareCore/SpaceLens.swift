@@ -40,13 +40,8 @@ public enum SpaceLens {
     public static func canTrash(_ path: String, home: String) -> Bool {
         let home = home.count > 1 && home.hasSuffix("/") ? String(home.dropLast()) : home
         guard !home.isEmpty, home != "/", (path as NSString).standardizingPath == path,
-              path.hasPrefix(home + "/") else { return false }
+              path.hasPrefix(home + "/"), !passesLink(path, home: home) else { return false }
         let parts = path.dropFirst(home.count + 1).split(separator: "/").map(String.init)
-        var walked = home
-        for part in parts {
-            walked += "/" + part
-            if isSymlink(walked) { return false }
-        }
         guard let top = parts.first, !top.hasPrefix("."),
               !["Dropbox", "Google Drive", "OneDrive", "iCloud", "Box", "Creative Cloud Files", "pCloud"]
                   .contains(where: { top.hasPrefix($0) }) else { return false }
@@ -55,6 +50,18 @@ public enum SpaceLens {
                      "Developer"].contains(top)
         }
         return top != "Library"
+    }
+
+    /// Whether a part of the path below home is a symlink.
+    public static func passesLink(_ path: String, home: String) -> Bool {
+        let home = home.hasSuffix("/") ? String(home.dropLast()) : home
+        guard path.hasPrefix(home + "/") else { return false }
+        var walked = home
+        for part in path.dropFirst(home.count + 1).split(separator: "/") {
+            walked += "/" + part
+            if isSymlink(walked) { return true }
+        }
+        return false
     }
 
     private static func isSymlink(_ path: String) -> Bool {
@@ -172,8 +179,7 @@ public struct SpaceScan: Codable, Sendable, Equatable {
     }
 
     public func save(to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(self).write(to: url, options: .atomic)
+        try PrivateFile.write(JSONEncoder().encode(self), to: url)
     }
 }
 

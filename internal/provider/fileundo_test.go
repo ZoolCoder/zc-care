@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/zoolcoder/zc-care/internal/plan"
 )
@@ -87,6 +89,67 @@ func TestRevertRefusesAFileEditedAfterTheApply(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(file); string(got) != "my edit" {
 		t.Fatalf("edit lost: %q", got)
+	}
+}
+
+func TestRevertPreviewNamesTheRefusalOnce(t *testing.T) {
+	u, file := restoreRecord(t, true)
+	if got := RevertFiles([]plan.Undo{u})[0].Detail; strings.Contains(got, "refused") {
+		t.Fatalf("unchanged file flagged: %q", got)
+	}
+	if err := os.WriteFile(file, []byte("my edit"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	actions := RevertFiles([]plan.Undo{u, u})
+	if got := actions[0].Detail; !strings.Contains(got, "refused: "+file+" changed since the apply") {
+		t.Fatalf("detail %q", got)
+	}
+	if got := actions[1].Detail; strings.Contains(got, "refused") {
+		t.Fatalf("older record judged against today's file: %q", got)
+	}
+}
+
+func TestRevertPreviewDoesNotWaitOnAPipe(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "pipe")
+	if err := syscall.Mkfifo(file, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := SavedFileUndo("p", file, []byte("old"), 0o600)
+	u.Data[digestKey] = "stamped"
+	detail := make(chan string, 1)
+	go func() { detail <- RevertFiles([]plan.Undo{u})[0].Detail }()
+	select {
+	case got := <-detail:
+		if !strings.Contains(got, "not a regular file") {
+			t.Fatalf("detail %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("preview waited on the pipe")
+	}
+}
+
+func TestRevertPreviewTreatsTwoSpellingsAsOneFile(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(dir, "cfg")); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(real, "x")
+	if err := os.WriteFile(file, []byte("created"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	older := StampFileUndo(NewFileUndo("p", filepath.Join(dir, "cfg", "x")))
+	if err := os.WriteFile(file, []byte("second apply"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	newest := StampFileUndo(SavedFileUndo("p", file, []byte("created"), 0o600))
+	for _, a := range RevertFiles([]plan.Undo{newest, older}) {
+		if strings.Contains(a.Detail, "refused") {
+			t.Fatalf("detail %q", a.Detail)
+		}
 	}
 }
 

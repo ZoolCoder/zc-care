@@ -14,6 +14,20 @@ import (
 	"github.com/zoolcoder/zc-care/internal/plan"
 )
 
+func TestWriteJSONHidesWhatSteersATerminal(t *testing.T) {
+	var out bytes.Buffer
+	if err := writeJSON(&out, map[string]string{"name": "x\u009b\u202e"}); err != nil {
+		t.Fatal(err)
+	}
+	if text := out.String(); strings.ContainsAny(text, "\u009b\u202e") {
+		t.Fatalf("raw in %q", text)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil || got["name"] != "x\u009b\u202e" {
+		t.Fatalf("decoded %q, %v", got["name"], err)
+	}
+}
+
 func TestFlagsBeforeTheSubcommandAreRejected(t *testing.T) {
 	cfg, dir := fixture(t)
 	for _, args := range [][]string{

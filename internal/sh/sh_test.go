@@ -3,9 +3,12 @@ package sh
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -101,6 +104,37 @@ func TestOutputReturnsPromptlyAfterCancel(t *testing.T) {
 	}
 	if took := time.Since(start); took > 15*time.Second {
 		t.Fatalf("Output took %v after cancel", took)
+	}
+}
+
+func TestOutputStopsAStuckProgramAndWhatItStarted(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the 5s kill grace")
+	}
+	if exec.Command("pgrep", "-P", "1").Run() != nil {
+		t.Skip("a sandbox hides processes from pkill")
+	}
+	pidfile := filepath.Join(t.TempDir(), "pid")
+	start := time.Now()
+	// The inner shell stands for the program a wrapper script runs.
+	script := "sh -c 'echo $$ > " + pidfile + "; sleep 30' & wait"
+	_, err := Exec{Limit: 300 * time.Millisecond}.Output(context.Background(), "sh", "-c", script)
+	if err == nil || !strings.Contains(err.Error(), "did not finish in 300ms") {
+		t.Fatalf("err %v", err)
+	}
+	if took := time.Since(start); took > 15*time.Second {
+		t.Fatalf("took %v", took)
+	}
+	b, err := os.ReadFile(pidfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if syscall.Kill(pid, 0) == nil {
+		t.Fatalf("the inner program %d outlived the stop", pid)
 	}
 }
 

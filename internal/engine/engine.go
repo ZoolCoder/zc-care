@@ -179,12 +179,12 @@ func run(ctx context.Context, p plan.Plan, w io.Writer) ran {
 		r.outcomes = append(r.outcomes, o)
 		if err != nil {
 			err = fmt.Errorf("%s %s %s: %w", a.Op, a.Target, a.Resource, err)
-			fmt.Fprintf(w, "failed  %v\n", err)
+			fmt.Fprintln(w, plan.Plain(fmt.Sprintf("failed  %v", err)))
 			failed = append(failed, err)
 			continue
 		}
 		r.done = append(r.done, a)
-		fmt.Fprintf(w, "done  %s %s %s\n", a.Op, a.Target, a.Resource)
+		fmt.Fprintln(w, plan.Plain(fmt.Sprintf("done  %s %s %s", a.Op, a.Target, a.Resource)))
 	}
 	if len(failed) > 0 {
 		r.errs = append(r.errs, fmt.Errorf("%d change(s) failed: %w", len(failed), errors.Join(failed...)))

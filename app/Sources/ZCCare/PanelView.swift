@@ -22,9 +22,9 @@ struct PanelView: View {
                         switch store.tab {
                         case .mac: MacTab(store: store, snapshot: snapshot)
                         case .overview: OverviewTab(store: store, snapshot: snapshot)
-                        case .updates: UpdatesTab(store: store, system: store.system, items: snapshot.outdated)
+                        case .updates: UpdatesTab(store: store, system: store.system, items: snapshot.outdated, unknown: snapshot.updatesUnknown)
                         case .health: HealthTab(store: store)
-                        case .services: ServicesTab(store: store, services: snapshot.services)
+                        case .services: ServicesTab(store: store, services: snapshot.services, unknown: snapshot.servicesUnknown)
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -75,11 +75,12 @@ private struct Header: View {
 
     private var icon: String {
         if store.setupProblem != nil { return "exclamationmark.circle.fill" }
+        if store.snapshot == nil { return "ellipsis.circle.fill" }
         return store.attention == 0 ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
     }
 
     private var tint: Color {
-        if store.setupProblem != nil { return .secondary }
+        if store.setupProblem != nil || store.snapshot == nil { return .secondary }
         return store.attention == 0 ? Theme.good : Theme.warning
     }
 
@@ -162,7 +163,7 @@ extension Store {
         case .mac: monitor.vitals.concerns(insecure: 0).count
         case .overview: snapshot.targets.map(\.gaps).reduce(0, +)
         case .updates: snapshot.outdated.count + system.updates.count
-        case .health: findings.count
+        case .health: healthUnknown ? 1 : findings.count
         case .services: snapshot.services.filter { !$0.isRunning }.count
         }
     }
@@ -233,11 +234,15 @@ private struct OverviewTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionTitle(title: "Targets")
-            ListCard {
-                ForEach(snapshot.targets) { t in
-                    TargetBlock(store: store, target: t)
+            if !snapshot.targets.isEmpty {
+                SectionTitle(title: "Targets")
+                ListCard {
+                    ForEach(snapshot.targets) { t in
+                        TargetBlock(store: store, target: t)
+                    }
                 }
+            } else if snapshot.errors.isEmpty {
+                EmptyNote(text: "This config declares no targets.", symbol: "square.dashed")
             }
         }
         if !store.jobs.isEmpty {
@@ -508,6 +513,7 @@ private struct UpdatesTab: View {
     let store: Store
     let system: SystemUpdates
     let items: [Item]
+    let unknown: Bool
     @State private var filter = ""
 
     var body: some View {
@@ -515,6 +521,8 @@ private struct UpdatesTab: View {
             MacUpdatesSection(system: system)
             if !items.isEmpty {
                 cliUpdates
+            } else if unknown {
+                EmptyNote(text: "Packages could not be read.", symbol: "questionmark.circle")
             } else {
                 EmptyNote(text: "Packages and runtimes are up to date.")
             }
@@ -694,14 +702,16 @@ private struct HealthTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                SectionTitle(title: "Findings", count: store.findings.count)
+                SectionTitle(title: "Findings", count: store.healthUnknown ? nil : store.findings.count)
                 Spacer()
                 if !store.ignoredFindings.isEmpty {
                     Button("Stop ignoring " + Store.counted(store.ignoredFindings.count, "check")) { store.unignoreAll() }
                         .buttonStyle(.zcLink).font(.caption)
                 }
             }
-            if store.findings.isEmpty {
+            if store.healthUnknown {
+                EmptyNote(text: "The health checks could not be read.", symbol: "questionmark.circle")
+            } else if store.findings.isEmpty {
                 EmptyNote(text: "Every check passes.", symbol: "checkmark.shield")
             }
             if !store.findings.isEmpty {
@@ -772,10 +782,12 @@ private struct FindingRow: View {
 private struct ServicesTab: View {
     let store: Store
     let services: [Item]
+    let unknown: Bool
 
     var body: some View {
         if services.isEmpty {
-            EmptyNote(text: "No services target in this config.", symbol: "gearshape.2")
+            EmptyNote(text: unknown ? "Services could not be read." : "No services target in this config.",
+                      symbol: unknown ? "questionmark.circle" : "gearshape.2")
         } else {
             VStack(alignment: .leading, spacing: 4) {
                 SectionTitle(title: "Services", count: services.count)

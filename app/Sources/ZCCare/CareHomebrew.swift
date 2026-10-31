@@ -154,8 +154,8 @@ struct HomebrewSection: View {
     private func declaredFormulae() async -> Set<String>? {
         let store = care.store
         guard store.cli != nil else { return [] }
-        if store.inventory == nil { await store.loadWorkstation() }
-        guard let inventory = store.inventory else { return nil }
+        if store.inventory == nil || store.inventoryError != nil { await store.loadWorkstation() }
+        guard store.inventoryError == nil, let inventory = store.inventory else { return nil }
         return Self.formulae(in: inventory)
     }
 

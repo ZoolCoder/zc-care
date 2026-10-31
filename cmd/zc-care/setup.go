@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/zoolcoder/zc-care/internal/config"
 	"github.com/zoolcoder/zc-care/internal/provider/packages"
@@ -45,6 +47,9 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := noOperands("init", flags); err != nil {
+		return err
+	}
 	if *list {
 		return writeProfiles(stdout, *asJSON)
 	}
@@ -68,7 +73,9 @@ func runInit(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if *fromMac {
 		var err error
 		runner := installerRunner(stdin, stderr)
-		if captured, err = packages.New(runner).Capture(context.Background(), config.Target{}); err != nil {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if captured, err = packages.New(runner).Capture(ctx, config.Target{}); err != nil {
 			fmt.Fprintln(stderr, "not keeping this Mac's apps:", err)
 		}
 	}

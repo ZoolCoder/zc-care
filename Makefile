@@ -10,7 +10,7 @@ GOLANGCI_LINT_VERSION := 2.15.0
 # The release build, as release.yml makes it.
 BUILD_FLAGS := -trimpath -ldflags "-s -w $(LDFLAGS)"
 
-.PHONY: all build run test hook-test test-unit race cover lint fmt install app app-icon app-test app-install evals docs-gen docs docs-serve clean vuln verify
+.PHONY: all build run test hook-test test-unit race cover lint fmt install app app-icon app-test app-install evals docs-gen docs docs-serve clean vuln verify fuzz
 
 all: lint test build
 
@@ -102,3 +102,14 @@ vuln:
 
 verify:
 	go mod verify
+
+# go test takes one fuzz target at a time. A crash in one still runs the rest.
+FUZZTIME ?= 60s
+
+fuzz:
+	@status=0; \
+	go test ./internal/config -run '^$$' -fuzz '^FuzzParse$$' -fuzztime $(FUZZTIME) || status=1; \
+	go test ./internal/plan -run '^$$' -fuzz '^FuzzWriteIndented$$' -fuzztime $(FUZZTIME) || status=1; \
+	go test ./internal/plan -run '^$$' -fuzz '^FuzzLoadSaved$$' -fuzztime $(FUZZTIME) || status=1; \
+	go test ./internal/provider/packages -run '^$$' -fuzz '^FuzzParseBrewfile$$' -fuzztime $(FUZZTIME) || status=1; \
+	exit $$status

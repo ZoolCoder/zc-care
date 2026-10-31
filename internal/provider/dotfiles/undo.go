@@ -45,6 +45,7 @@ func before(file string, script bool) (plan.Undo, error) {
 // destructive too.
 func (Provider) Revert(undos []plan.Undo) []plan.Action {
 	actions := make([]plan.Action, 0, len(undos))
+	seen := map[string]bool{}
 	for _, u := range undos {
 		a := plan.Action{Op: plan.OpUpdate, Target: u.Target, Resource: u.Resource, Destructive: true}
 		file := u.Data["path"]
@@ -57,9 +58,12 @@ func (Provider) Revert(undos []plan.Undo) []plan.Action {
 				}
 				return provider.RemoveFile(file)
 			}
+			a.Detail += provider.Refusal(file, u.Data, seen)
 		case "symlink":
 			a.Detail = "point " + file + " at " + u.Data["target"] + " again"
 			a.Do = func(context.Context) error { return restoreLink(file, u.Data["target"]) }
+			// Nothing stops a link, but older records then run against it.
+			_ = provider.Refusal(file, nil, seen)
 		default:
 			a.Detail = "restore the previous content of " + file
 			a.Do = func(context.Context) error {
@@ -68,6 +72,7 @@ func (Provider) Revert(undos []plan.Undo) []plan.Action {
 				}
 				return provider.RestoreFile(file, u.Data["blob"], u.Data["mode"])
 			}
+			a.Detail += provider.Refusal(file, u.Data, seen)
 		}
 		actions = append(actions, a)
 	}

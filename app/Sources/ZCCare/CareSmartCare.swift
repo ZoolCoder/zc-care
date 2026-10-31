@@ -52,7 +52,17 @@ struct SmartCareView: View {
     }
 
     private var summary: String {
-        canRun ? "Run cleans up \(Store.bytes(care.junk + care.aiBeyondJunk)) and updates \(Store.counted(care.store.snapshot?.outdated.count ?? 0, "package"))."
+        let packages = care.store.snapshot?.outdated.count ?? 0
+        if canRun {
+            return "Run cleans up \(Store.bytes(care.junk + care.aiBeyondJunk))"
+                + (packages > 0 ? " and updates \(Store.counted(packages, "package"))." : ".")
+        }
+        if let problem = care.store.setupProblem { return problem }
+        guard let snapshot = care.store.snapshot else { return "Reading this Mac…" }
+        if !snapshot.errors.isEmpty { return "Part of your setup could not be read." }
+        if !care.store.findings.isEmpty { return "The Health tab has \(Store.counted(care.store.findings.count, "finding")) to look at." }
+        return care.scannedAt != nil && care.allUpdates > 0
+            ? "Your Mac is in good shape; \(Store.counted(care.allUpdates, "update")) waiting in Applications."
             : "Your Mac is in good shape."
     }
 }
@@ -222,6 +232,7 @@ struct ResultCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .spinning(working)
             Text(working ? "Looking…" : detail).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
             if let link {
                 Button(link.title, action: link.run).buttonStyle(.zcLink).font(.callout.weight(.semibold))
             }
@@ -235,8 +246,8 @@ private struct CleanupCard: View {
 
     var body: some View {
         ResultCard(title: "Cleanup", symbol: "trash.fill", colors: Tint.cyan,
-                   figure: Store.bytes(care.junk), detail: "of caches, logs and build output",
-                   working: care.monitor.scanning && care.junk == 0,
+                   figure: Store.bytes(care.junk + care.aiBeyondJunk), detail: "of caches, logs and AI clutter",
+                   working: (care.monitor.scanning || care.scanningAI) && care.junk + care.aiBeyondJunk == 0,
                    link: ("Review", { care.module = .cleanup }))
     }
 }
@@ -246,8 +257,8 @@ private struct ClutterCard: View {
 
     var body: some View {
         ResultCard(title: "My Clutter", symbol: "doc.on.doc.fill", colors: Tint.blue,
-                   figure: care.clutter == 0 ? "All clear" : Store.bytes(care.clutter),
-                   detail: care.clutter == 0 ? "No large files, duplicates, old downloads or installers" : detail,
+                   figure: care.clutter > 0 ? Store.bytes(care.clutter) : care.spotlightOff ? "Not checked" : "All clear",
+                   detail: care.clutter > 0 ? detail : care.spotlightOff ? "Spotlight indexing is off" : "Nothing large, old or duplicated",
                    working: care.scanningFiles && care.clutter == 0,
                    link: ("Review Files", { care.module = .clutter }))
     }
@@ -265,13 +276,18 @@ private struct UpdatesCard: View {
     @Bindable var care: Care
 
     var body: some View {
-        let outdated = care.store.snapshot?.outdated.count ?? 0
+        let outdated = care.allUpdates
         let undeclared = care.undeclared.count
         ResultCard(title: "Applications", symbol: "square.grid.2x2.fill", colors: Tint.green,
-                   figure: outdated == 0 ? "Up to date" : Store.counted(outdated, "update"),
-                   detail: undeclared == 0 ? "Every app is in the Brewfile" : Store.counted(undeclared, "app") + " not in the Brewfile",
+                   figure: outdated > 0 ? Store.counted(outdated, "update")
+                       : care.store.snapshot?.updatesUnknown == true ? "Not checked" : "Up to date",
+                   detail: care.declaredUnknown ? "Your config could not be fully read"
+                       : undeclared == 0 ? "Every app is in the Brewfile" : Store.counted(undeclared, "app") + " not in the Brewfile",
                    working: (care.store.refreshing && care.store.snapshot == nil) || (care.loadingApps && care.apps.isEmpty),
-                   link: ("Manage", { care.module = .apps }))
+                   link: ("Manage", {
+                       care.showUpdates = outdated > 0
+                       care.module = .apps
+                   }))
     }
 }
 
@@ -296,13 +312,14 @@ private struct HealthCard: View {
         let findings = care.store.findings
         let ok = findings.isEmpty
         // Nothing read yet is not a clean bill of health.
-        let unknown = care.store.snapshot == nil
+        let unknown = care.store.healthUnknown
         VStack(spacing: 14) {
             Text("Health").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 0)
             HeroArt(symbol: unknown ? "shield.fill" : ok ? "checkmark.shield.fill" : "exclamationmark.shield.fill",
                     colors: unknown ? Tint.gray : ok ? Tint.green : Tint.pink, size: 110)
-            Text(care.store.refreshing ? "Checking health…" : ok ? "No problems found" : "\(findings.count) to look at")
+            Text(care.store.refreshing ? "Checking health…" : unknown ? "Health not checked"
+                 : ok ? "No problems found" : "\(findings.count) to look at")
                 .font(.title2.weight(.bold))
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(findings.prefix(4)) { c in

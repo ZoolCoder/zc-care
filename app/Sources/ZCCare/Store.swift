@@ -57,8 +57,9 @@ final class Store {
     var inventory: [Item]?
     var history: [HistoryEntry]?
     var loadingWorkstation = false
-    /// Why My Workstation could not read; Refresh tries again.
-    var workstationError: String?
+    /// Why My Workstation could not read each of them; Refresh tries again.
+    var inventoryError: String?
+    var historyError: String?
     /// What ZC Care cleaned and ran, for My Activity.
     var activity = ActivityLog.load(from: Store.activityFile)
     /// Launch agents that run on a calendar, such as the weekly upkeep.
@@ -316,6 +317,10 @@ final class Store {
 
     var attention: Int { snapshot?.attention(ignoring: ignored) ?? 0 }
     var findings: [Check] { snapshot?.findings(ignoring: ignored) ?? [] }
+    /// The doctor has not reported, so no findings does not mean none.
+    var healthUnknown: Bool { snapshot?.doctorUnknown ?? true }
+    /// The security checks that fail, nil while only unread ones remain.
+    var insecure: Int? { healthUnknown ? nil : findings.insecure }
     var ignoredFindings: [Check] { snapshot?.findings.filter { ignored.contains($0.name) } ?? [] }
     var configPath: String? { careCLI?.config }
     /// The CLI and the login environment, for the Care window.
@@ -419,7 +424,7 @@ final class Store {
     func configChanged() async {
         targetItems = [:]
         targetErrors = [:]
-        if inventory != nil { await loadWorkstation() }
+        if inventory != nil || inventoryError != nil { await loadWorkstation() }
         await refresh()
     }
 
@@ -642,11 +647,9 @@ final class Store {
 
     /// Keeps the last change's whole output, for the Show log link.
     private func writeLog(_ r: CommandResult) -> URL? {
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/ZCCare")
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let file = dir.appendingPathComponent("last-change.log")
+        let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/ZCCare/last-change.log")
         let text = r.output + (r.stderr.isEmpty ? "" : "\n--- stderr\n" + r.stderr)
-        return (try? text.write(to: file, atomically: true, encoding: .utf8)) == nil ? nil : file
+        return (try? PrivateFile.write(Data(text.utf8), to: file)) == nil ? nil : file
     }
 
     // MARK: Apps
@@ -787,14 +790,25 @@ final class Store {
         guard let careCLI else { return }
         loadingWorkstation = true
         defer { loadingWorkstation = false }
-        async let items = careCLI.items()
+        async let items = careCLI.itemList()
         async let log = careCLI.history()
         do {
-            inventory = try await items
-            history = try await log
-            workstationError = nil
+            let list = try await items
+            inventory = list.items
+            inventoryError = list.errors.first
+        } catch is CancellationError {
         } catch {
-            workstationError = error.localizedDescription
+            // Homebrew decides from this list, so the last one must not stand.
+            inventory = nil
+            inventoryError = error.localizedDescription
+        }
+        // The log needs no config, so a broken one does not hide it.
+        do {
+            history = try await log
+            historyError = nil
+        } catch is CancellationError {
+        } catch {
+            historyError = error.localizedDescription
         }
     }
 

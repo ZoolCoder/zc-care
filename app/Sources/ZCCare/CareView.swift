@@ -31,7 +31,8 @@ final class CareWindow: NSObject, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 900, height: 600)
+        // Shorter than this cuts off Settings in the sidebar and Smart Care's Run.
+        window.minSize = NSSize(width: 900, height: 660)
         let host = NSHostingController(rootView: CareView(care: care))
         // The window keeps the size its owner gives it, whatever a module holds.
         host.sizingOptions = []
@@ -259,7 +260,7 @@ private struct Sidebar: View {
         case .clutter: return care.clutter > 0 ? Store.bytes(care.clutter) : nil
         case .developer: return care.developer > 0 ? Store.bytes(care.developer) : nil
         case .apps:
-            let n = care.store.snapshot?.outdated.count ?? 0
+            let n = care.allUpdates
             return n > 0 ? "\(n)" : nil
         case .performance: return care.startup.isEmpty ? nil : "\(care.startup.count)"
         case .protection: return care.untrusted.isEmpty ? nil : "\(care.untrusted.count)"
@@ -289,6 +290,7 @@ private struct SidebarRow: View {
                     Image(systemName: symbol).frame(width: 20)
                 }
                 Text(title).lineLimit(1).layoutPriority(1)
+                    .frame(height: 22) // the selected row's tile, so rows hold still
                 Spacer(minLength: 4)
                 if let badge {
                     Text(badge).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
@@ -296,7 +298,7 @@ private struct SidebarRow: View {
             }
             .font(.callout.weight(selected ? .semibold : .regular))
             .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .padding(.vertical, 5)
             .background(RoundedRectangle(cornerRadius: 8)
                 .fill(selected ? Theme.selected : Color.white.opacity(over ? 0.07 : 0)))
             .contentShape(Rectangle())

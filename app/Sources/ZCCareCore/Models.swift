@@ -77,6 +77,8 @@ public struct Check: Decodable, Sendable, Equatable, Identifiable {
     }
 
     public var isOK: Bool { status == "ok" }
+    /// The check could not read its answer: neither a pass nor a failure.
+    public var isUnknown: Bool { status == "unknown" }
     /// Security covers this Mac's settings and the AI agents' configs.
     public var isSecurity: Bool { name.hasPrefix("security ") || name.hasPrefix("ai ") }
 
@@ -92,6 +94,15 @@ public struct Check: Decodable, Sendable, Equatable, Identifiable {
 public struct ItemGroup: Decodable, Sendable {
     public var target: String
     public var items: [Item]?
+    /// Why the target could not be read; `list` still exits 0.
+    public var error: String?
+}
+
+/// `list -json` as far as it could read: the items, and a line for each
+/// target that could not be read.
+public struct ItemList: Sendable, Equatable {
+    public var items: [Item]
+    public var errors: [String]
 }
 
 public struct Item: Codable, Sendable, Equatable, Identifiable {
@@ -172,4 +183,14 @@ public struct PlanAction: Decodable, Sendable, Equatable, Identifiable {
     }
 
     public var id: String { op + " " + target + " " + resource }
+}
+
+extension [Check] {
+    /// The security checks that fail. Nil when none fails but some went
+    /// unread, which is neither a fix to make nor a pass.
+    public var insecure: Int? {
+        let security = filter(\.isSecurity)
+        let failing = security.count { !$0.isOK && !$0.isUnknown }
+        return failing == 0 && security.contains(where: \.isUnknown) ? nil : failing
+    }
 }

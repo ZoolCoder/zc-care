@@ -11,6 +11,7 @@ import (
 
 	"github.com/zoolcoder/toolshell/activity"
 	"github.com/zoolcoder/zc-care/internal/engine"
+	"github.com/zoolcoder/zc-care/internal/plan"
 )
 
 // activityLog is the log ZC Care, the CLI and the MCP server share, so
@@ -92,6 +93,9 @@ func runHistory(args []string, _ io.Reader, stdout, stderr io.Writer) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := noOperands("history", flags); err != nil {
+		return err
+	}
 	if *limit < 1 {
 		return errors.New("-n must be at least 1")
 	}
@@ -116,7 +120,7 @@ func runHistory(args []string, _ io.Reader, stdout, stderr io.Writer) error {
 		if !e.OK {
 			result = "failed"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", e.At.Local().Format("2006-01-02 15:04"), e.Kind, dash(e.Target), result, e.Detail)
+		fmt.Fprintln(tw, plan.Plain(fmt.Sprintf("%s\t%s\t%s\t%s\t%s", e.At.Local().Format("2006-01-02 15:04"), e.Kind, dash(e.Target), result, e.Detail)))
 	}
 	return tw.Flush()
 }

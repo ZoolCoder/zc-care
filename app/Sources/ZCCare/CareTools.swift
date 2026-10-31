@@ -25,7 +25,7 @@ struct MyTools: View {
             CareHeader(title: "My Tools", subtitle: "Every tool in one place")
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search Tools", text: $search).textFieldStyle(.plain)
+                TextField("Search Tools", text: $search).textFieldStyle(.plain).findShortcut()
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

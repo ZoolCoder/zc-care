@@ -238,8 +238,8 @@ struct PickBox: View {
     @Binding var picked: Set<String>
 
     var body: some View {
-        Toggle("", isOn: Binding(get: { picked.contains(id) },
-                                 set: { on in if on { picked.insert(id) } else { picked.remove(id) } }))
+        Toggle("Select \((id as NSString).lastPathComponent)", isOn: Binding(get: { picked.contains(id) },
+                                                                             set: { on in if on { picked.insert(id) } else { picked.remove(id) } }))
             .toggleStyle(.checkbox)
             .labelsHidden()
     }

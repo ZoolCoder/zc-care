@@ -12,6 +12,9 @@ public enum PublicHost {
         let host = bare(host)
         guard !host.isEmpty, host != "localhost",
               ![".local", ".localhost", ".internal", ".lan", ".home.arpa"].contains(where: host.hasSuffix) else { return false }
+        // A browser reads 0177.0.0.1 as octal, getaddrinfo as decimal.
+        var octal = in_addr()
+        if inet_aton(host, &octal) != 0, !isPublic(withUnsafeBytes(of: &octal) { Array($0) }) { return false }
         if let addresses = addresses(host, numeric: true) { return addresses.allSatisfy(isPublic) }
         return true
     }
@@ -21,7 +24,14 @@ public enum PublicHost {
     public static func resolves(_ host: String) -> Bool {
         let host = bare(host)
         guard named(host) else { return false }
-        return (addresses(host, numeric: false) ?? []).allSatisfy(isPublic)
+        return (addresses(host, numeric: false) ?? []).allSatisfy { isPublic($0) || isFakeIP($0) }
+    }
+
+    /// 198.18/15: what a Surge, Clash or sing-box proxy answers for every
+    /// name. Refused as a written address, but a name that resolves there
+    /// still goes out through the proxy.
+    static func isFakeIP(_ b: [UInt8]) -> Bool {
+        b.count == 4 && b[0] == 198 && (18...19).contains(b[1])
     }
 
     /// Lowercased, without IPv6 brackets or the root's trailing dot.
@@ -66,6 +76,8 @@ public enum PublicHost {
         if b.count == 4 {
             switch (b[0], b[1]) {
             case (0, _), (10, _), (127, _), (169, 254), (192, 168), (172, 16...31), (100, 64...127): return false
+            case (198, 18...19): return false                     // benchmarking, used by proxies
+            case (192, 0) where b[2] == 0: return false           // protocol assignments
             case (224...255, _): return false
             default: return true
             }
@@ -77,6 +89,8 @@ public enum PublicHost {
             || head == [0x00, 0x64, 0xff, 0x9b] + Array(repeating: 0, count: 8) {
             return isPublic(Array(b[12..<16]))
         }
+        if b[0] == 0x20 && b[1] == 0x02 { return isPublic(Array(b[2..<6])) }  // 2002::/16 6to4
+        if b[0..<6].elementsEqual([0x00, 0x64, 0xff, 0x9b, 0x00, 0x01]) { return false }  // 64:ff9b:1::/48 local NAT64
         if b[0] & 0xfe == 0xfc { return false }                  // fc00::/7 unique local
         if b[0] == 0xfe && b[1] & 0xc0 == 0x80 { return false }  // fe80::/10 link local
         if b[0] == 0xfe && b[1] & 0xc0 == 0xc0 { return false }  // fec0::/10 site local

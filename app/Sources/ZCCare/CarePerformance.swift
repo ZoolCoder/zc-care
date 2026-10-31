@@ -17,7 +17,7 @@ struct PerformanceView: View {
         VStack(spacing: 0) {
             CareHeader(title: "Performance", subtitle: care.startup.count == 1 ? "1 item starts with your session" : "\(care.startup.count) items start with your session",
                    action: ("Rescan", { Task { await care.loadAgents() } }))
-            Picker("", selection: $part) {
+            Picker("Show", selection: $part) {
                 ForEach(Part.allCases, id: \.self) { Text(label($0)) }
             }
             .pickerStyle(.segmented)
@@ -55,8 +55,8 @@ struct PerformanceView: View {
                                         .controlSize(.small)
                                         .disabled(care.store.busy != nil)
                                 } else {
-                                    Toggle("", isOn: Binding(get: { agent.enabled },
-                                                             set: { on in Task { await care.setEnabled(agent, on) } }))
+                                    Toggle(agent.label, isOn: Binding(get: { agent.enabled },
+                                                                      set: { on in Task { await care.setEnabled(agent, on) } }))
                                         .toggleStyle(.switch)
                                         .labelsHidden()
                                         .controlSize(.small)
@@ -85,7 +85,7 @@ struct PerformanceView: View {
                             Text("Top Processes").font(.title3.weight(.semibold))
                             Spacer()
                             Toggle("Show 25", isOn: $showMore).toggleStyle(.checkbox).controlSize(.small)
-                            Picker("", selection: $order) {
+                            Picker("Sort by", selection: $order) {
                                 Text("CPU").tag(Monitor.Order.cpu)
                                 Text("Memory").tag(Monitor.Order.memory)
                             }

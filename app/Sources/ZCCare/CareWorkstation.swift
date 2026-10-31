@@ -18,27 +18,32 @@ struct MyWorkstation: View {
             CareHeader(title: "My Workstation", subtitle: "What your config declares, and what is in place right now",
                    busy: store.loadingWorkstation,
                    action: ("Refresh", { Task { await refresh(store) } }))
-            if let error = store.workstationError {
+            if let error = failure {
                 Text("Could not read your workstation. \(error)").font(.callout).foregroundStyle(.red)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 28).padding(.top, 8)
             }
             ScrollView {
                 VStack(spacing: 14) {
-                    HStack(alignment: .top, spacing: 14) {
-                        Coverage(targets: targets, drift: store.snapshot?.drift)
-                        Actions(store: store, missing: targets.map(\.gaps).reduce(0, +))
-                    }
-                    .frame(height: 190)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Targets").font(.headline)
-                        ForEach(targets) { t in
-                            TargetRow(store: store, target: t, items: items(of: t.target), open: $open)
+                    if known {
+                        HStack(alignment: .top, spacing: 14) {
+                            Coverage(targets: targets, drift: store.snapshot?.drift)
+                            Actions(store: store, missing: targets.map(\.gaps).reduce(0, +))
                         }
+                        .frame(height: 190)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Targets").font(.headline)
+                            ForEach(targets) { t in
+                                TargetRow(store: store, target: t, items: items(of: t.target), open: $open)
+                            }
+                        }
+                        .modifier(Glass())
                     }
-                    .modifier(Glass())
-                    NotInConfig(store: store, items: undeclared(), targets: targets)
-                    Inventory(items: store.inventory ?? [], search: $search)
-                    History(entries: store.history)
+                    // What an unreadable target declares would pass for extra.
+                    if store.inventoryError == nil {
+                        NotInConfig(store: store, items: undeclared(), targets: targets)
+                    }
+                    Inventory(items: store.inventory ?? [], search: $search, empty: emptyInventory)
+                    History(entries: store.history, failed: store.historyError != nil)
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 70)
@@ -47,10 +52,22 @@ struct MyWorkstation: View {
         .task(id: store.snapshot) { await store.loadWorkstation() }
     }
 
+    private var known: Bool { care.store.snapshot.map { !$0.targetsUnknown } ?? false }
+
+    private var failure: String? {
+        let store = care.store
+        return store.inventoryError ?? store.historyError ?? store.snapshot?.statusError
+    }
+
+    private var emptyInventory: String {
+        if care.store.inventoryError != nil { return "Could not be read." }
+        return care.store.inventory == nil ? "Reading your config…" : "Nothing declared yet."
+    }
+
     /// A failed load is not retried by a new snapshot, so Refresh retries it.
     private func refresh(_ store: Store) async {
         await store.refresh()
-        if store.workstationError != nil { await store.loadWorkstation() }
+        if store.inventoryError != nil || store.historyError != nil { await store.loadWorkstation() }
     }
 
     private func undeclared() -> [Item] {
@@ -142,6 +159,7 @@ private struct TargetRow: View {
             }
             .contentShape(Rectangle())
             .onTapGesture { open = isOpen ? nil : target.target }
+            .accessibilityAction(named: isOpen ? "Collapse" : "Expand") { open = isOpen ? nil : target.target }
             if isOpen {
                 if items.isEmpty {
                     Text("Nothing listed.").font(.caption).foregroundStyle(.secondary).padding(.leading, 22)
@@ -203,7 +221,7 @@ private struct NotInConfig: View {
 
     private func row(_ item: Item, target: String) -> some View {
         HStack(spacing: 8) {
-            Toggle("", isOn: binding(for: key(target, item))).labelsHidden().toggleStyle(.checkbox)
+            Toggle(item.app ?? item.name, isOn: binding(for: key(target, item))).labelsHidden().toggleStyle(.checkbox)
             Text(item.app ?? item.name).font(.callout).lineLimit(1)
             Text(item.kind).font(.caption2).foregroundStyle(.secondary)
             Spacer()
@@ -296,6 +314,7 @@ private struct WhySheet: View {
 private struct Inventory: View {
     let items: [Item]
     @Binding var search: String
+    let empty: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -305,7 +324,7 @@ private struct Inventory: View {
                 Spacer()
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search Items", text: $search).textFieldStyle(.plain)
+                    TextField("Search Items", text: $search).textFieldStyle(.plain).findShortcut()
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -314,7 +333,7 @@ private struct Inventory: View {
             }
             let shown = self.shown
             if shown.isEmpty {
-                Text(search.isEmpty ? "Reading your config…" : "No item matches.").foregroundStyle(.secondary)
+                Text(search.isEmpty ? empty : "No item matches.").foregroundStyle(.secondary)
             }
             // Ids repeat across targets, so rows go by position.
             ForEach(Array(shown.prefix(200).enumerated()), id: \.offset) { _, item in
@@ -376,12 +395,14 @@ private struct ItemLine: View {
 
 private struct History: View {
     let entries: [HistoryEntry]?
+    let failed: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Applied").font(.headline)
             if entries?.isEmpty ?? true {
-                Text(entries == nil ? "Reading the log…" : "Nothing applied yet.").foregroundStyle(.secondary)
+                Text(entries != nil ? "Nothing applied yet." : failed ? "Could not be read." : "Reading the log…")
+                    .foregroundStyle(.secondary)
             }
             ForEach(Array((entries ?? []).enumerated()), id: \.offset) { _, e in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
