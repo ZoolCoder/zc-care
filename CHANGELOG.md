@@ -4,6 +4,37 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
+## Unreleased
+
+### zc-care
+
+- A read that never answers no longer holds the whole command: each program
+  asked for its output gets two minutes, is stopped along with what it
+  started, and its target reports `did not finish in 2m0s`. `mas` stuck on
+  Spotlight used to hang `status`, `list` and `doctor` for ever. Ctrl-C now
+  also stops `doctor`'s checks.
+- A word a command does not take is refused. Flag parsing stops at the first
+  one, so `undo 3 -plan` used to drop `-plan` and revert for real.
+- Nothing printed from outside steers the terminal: `list`, `status`,
+  `history`, `undo`, `diff`, apply's progress and error lines drop escape
+  sequences, bidi overrides and invisible characters, and a line break cannot
+  forge a row. MCP resources are cleaned like tool output.
+- A saved plan with more data after it is refused.
+
+### ZC Care
+
+- Release notes links, like feeds and downloads, go to public hosts only. More
+  private ranges count as private: 192.0.0/24, 6to4 and NAT64 forms, and a
+  written 198.18/15, while a name a proxy answers in that range still works.
+  Octal addresses such as `0177.0.0.1` are refused too.
+- The activity log, the saved scans and the last change's log are readable by
+  you alone, and are replaced rather than followed if one became a link.
+- Two removals can no longer overlap: each asks again whether something is
+  running once you answer its question.
+- Duplicates skip hard links, which free nothing, and tell large files apart
+  by their first megabyte before reading them whole. A file that cannot be
+  read to the end is not called a duplicate.
+
 ## v0.4.0 — 2026-10-30
 
 The app grows into a full Mac care tool: a menu panel with live readings,
