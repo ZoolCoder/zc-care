@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +17,7 @@ import (
 	"github.com/zoolcoder/toolshell/doctor"
 	"github.com/zoolcoder/zc-care/internal/config"
 	"github.com/zoolcoder/zc-care/internal/engine"
+	"github.com/zoolcoder/zc-care/internal/plan"
 	"github.com/zoolcoder/zc-care/internal/provider/tools"
 	"github.com/zoolcoder/zc-care/internal/security"
 	"github.com/zoolcoder/zc-care/internal/sh"
@@ -157,8 +157,4 @@ func addSecurity(r *doctor.Report, prefix string, res security.Result) {
 	r.Add(prefix+res.Name, status, res.Detail)
 }
 
-func writeJSON(w io.Writer, v any) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(v)
-}
+func writeJSON(w io.Writer, v any) error { return plan.WriteIndented(w, v) }

@@ -218,6 +218,29 @@ func TestSavedWithNoDigestsComparesTheRest(t *testing.T) {
 	}
 }
 
+func TestWriteJSONHidesWhatSteersATerminal(t *testing.T) {
+	const target, resource, detail = "t\u009b", "r\u202e", "d\U000e0001\x7f"
+	var p Plan
+	p.Add(Action{Op: OpUpdate, Target: target, Resource: resource, Detail: detail, Do: noop})
+	var b bytes.Buffer
+	if err := p.WriteJSON(&b); err != nil {
+		t.Fatal(err)
+	}
+	if bad := strings.IndexFunc(b.String(), Unsafe); bad >= 0 {
+		t.Fatalf("unsafe character at %d: %q", bad, b.String())
+	}
+	var got struct {
+		Actions []JSONAction `json:"actions"`
+	}
+	if err := json.Unmarshal(b.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	a := got.Actions[0]
+	if a.Target != target || a.Resource != resource || a.Detail != detail {
+		t.Fatalf("decoded %+v", a)
+	}
+}
+
 func TestWriteStripsControlCharacters(t *testing.T) {
 	var p Plan
 	p.Add(Action{Op: OpUpdate, Target: "t\x1b[2J", Resource: "r\x7f", Detail: "a\tb\x1b]0;owned\x07c\r", Do: noop})
