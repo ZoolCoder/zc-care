@@ -4,7 +4,13 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
-## Unreleased
+## v0.4.1 — 2026-10-31
+
+An audit and hardening release. On macOS 27, File Sharing, Remote Login and
+Screen Sharing passed in v0.4.0 without looking, so upgrade. Reads that never
+answer can no longer hang a command, and nothing printed from outside steers
+the terminal. A check, config or target that cannot be read no longer reads as
+all clear, and removals stop rather than guess. Applications is redesigned.
 
 ### zc-care
 
