@@ -317,6 +317,10 @@ final class Store {
 
     var attention: Int { snapshot?.attention(ignoring: ignored) ?? 0 }
     var findings: [Check] { snapshot?.findings(ignoring: ignored) ?? [] }
+    /// The doctor has not reported, so no findings does not mean none.
+    var healthUnknown: Bool { snapshot?.doctorUnknown ?? true }
+    /// The security checks that fail, nil while only unread ones remain.
+    var insecure: Int? { healthUnknown ? nil : findings.insecure }
     var ignoredFindings: [Check] { snapshot?.findings.filter { ignored.contains($0.name) } ?? [] }
     var configPath: String? { careCLI?.config }
     /// The CLI and the login environment, for the Care window.

@@ -915,6 +915,9 @@ final class Care {
                 $0.showUpdates = true
             })
         }
+        if store.snapshot != nil, store.healthUnknown {
+            r.append(Recommendation(symbol: "stethoscope", title: "Health checks could not be read", module: .smartCare))
+        }
         let findings = store.findings.count
         if findings > 0 { r.append(Recommendation(symbol: "stethoscope", title: findings == 1 ? "Look at 1 health finding" : "Look at \(findings) health findings", module: .smartCare)) }
         if !untrusted.isEmpty {

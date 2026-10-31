@@ -40,13 +40,13 @@ private struct MacHealth: View {
 
     var body: some View {
         // The panel's grade, so both say the same.
-        let grade = care.monitor.vitals.grade(insecure: care.store.findings.filter(\.isSecurity).count)
+        let grade = care.monitor.vitals.grade(insecure: care.store.insecure)
         VStack(alignment: .leading, spacing: 10) {
             Text("Mac Health").font(.headline)
             HStack(spacing: 14) {
                 HeroArt(symbol: "macbook", colors: Tint.blue, size: 70)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(grade.rawValue).font(.title.weight(.bold)).foregroundStyle(grade.color)
+                    Text(care.store.snapshot == nil && care.store.setupProblem == nil ? "…" : grade.rawValue).font(.title.weight(.bold)).foregroundStyle(grade.color)
                     Text(Host.current().localizedName ?? "This Mac").font(.callout)
                     Text(ProcessInfo.processInfo.operatingSystemVersionString).font(.caption).foregroundStyle(.secondary)
                 }
@@ -190,7 +190,9 @@ private struct Recommendations: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(all.isEmpty ? "No Recommendations" : "\(all.count) Recommendations").font(.headline)
             if all.isEmpty {
-                Text(care.store.snapshot?.errors.isEmpty == false ? "Part of your setup could not be read." : "Your Mac is in good shape.")
+                Text(care.store.setupProblem ?? (care.store.snapshot == nil ? "Reading this Mac…"
+                     : care.store.snapshot?.errors.isEmpty == false ? "Part of your setup could not be read."
+                     : "Your Mac is in good shape."))
                     .foregroundStyle(.secondary)
             }
             ForEach(all) { r in

@@ -52,7 +52,7 @@ struct SetupView: View {
             ("Set up this Mac", store.needsConfig
                 ? "Pick who it is for. ZC Care writes a config for that; you choose the apps next, and nothing changes without your yes."
                 : "Pick who it is for. Your config keeps its targets; those for other profiles stop applying here.")
-        case .secure: ("Make it safe", "The checks this Mac fails. Fix All asks for your password once.")
+        case .secure: ("Make it safe", "What keeps this Mac safe. Fix All asks for your password once.")
         case .identity: ("Your developer identity", "Who your commits are from, a key that signs them, and GitHub.")
         case .done: ("This Mac is set up", made.map(summary) ?? "Choose its apps, or run Smart Care.")
         }
@@ -276,8 +276,15 @@ private struct SecureStep: View {
 
     var body: some View {
         Group {
-            if !loaded {
+            // A read already running makes refresh return at once.
+            if !loaded || (store.snapshot == nil && store.refreshing) {
                 ProgressView("Checking this Mac…").padding(.top, 40)
+            } else if store.healthUnknown {
+                NextCard(symbol: "shield.fill", colors: Tint.gray, title: "Security checks could not be read",
+                         detail: "Nothing confirms this Mac's settings yet.") {
+                    Button("Try Again") { Task { await store.refresh() } }
+                        .disabled(store.refreshing)
+                }
             } else if failing.isEmpty {
                 NextCard(symbol: "checkmark.shield.fill", colors: Tint.green, title: "Every check passes",
                          detail: "Disk encryption, firewall, updates, sharing and backups are as they should be.") {
@@ -300,9 +307,14 @@ private struct SecureStep: View {
                 }
             }
         }
-        .task {
-            await store.refresh()
-            loaded = true
+        // Not .task: leaving this step would cancel the read halfway, and the
+        // stopped doctor would read as one that failed.
+        .onAppear {
+            guard !loaded else { return }
+            Task {
+                await store.refresh()
+                loaded = true
+            }
         }
         .sheet(isPresented: $previewing) {
             let steps = Fix.rootSteps(for: failing)

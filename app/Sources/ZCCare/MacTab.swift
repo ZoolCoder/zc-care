@@ -19,7 +19,6 @@ struct MacTab: View {
 
     private var monitor: Monitor { store.monitor }
     private var vitals: Vitals { monitor.vitals }
-    private var insecure: Int { store.findings.filter(\.isSecurity).count }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -82,7 +81,8 @@ struct MacTab: View {
                 }
             }
             .id("detail")
-            Recommendation(advice: vitals.advice(insecure: insecure, updates: snapshot.outdated.count), act: act)
+            Recommendation(advice: vitals.advice(insecure: store.insecure, updates: snapshot.outdated.count,
+                                                 updatesUnknown: snapshot.updatesUnknown), act: act)
         }
     }
 
@@ -92,7 +92,7 @@ struct MacTab: View {
                 if vitals.memory == nil {
                     Text("Mac Health: …").font(.title2.weight(.bold))
                 } else {
-                    let grade = vitals.grade(insecure: insecure)
+                    let grade = vitals.grade(insecure: store.insecure)
                     Text("Mac Health: \(Text(grade.rawValue).foregroundStyle(grade.color))").font(.title2.weight(.bold))
                 }
                 Text(monitor.model).font(.caption).foregroundStyle(.secondary)
@@ -298,13 +298,15 @@ private struct ProtectionTile: View {
 
     var body: some View {
         let passing = security.filter(\.isOK)
-        let insecure = failing.count
+        let insecure = failing.count { !$0.isUnknown }
+        // Zero failures among zero checks is not protection.
+        let unknown = store.insecure == nil || security.isEmpty
         Button { store.tab = .health } label: {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: insecure == 0 ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                Image(systemName: unknown ? "shield.fill" : insecure == 0 ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                     .font(.title2)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, insecure == 0 ? Theme.good : Theme.warning)
+                    .symbolRenderingMode(unknown ? .monochrome : .palette)
+                    .foregroundStyle(unknown ? Color.secondary : .white, insecure == 0 ? Theme.good : Theme.warning)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         Text("Protection by")
@@ -312,17 +314,19 @@ private struct ProtectionTile: View {
                         Text("ZC Doctor")
                     }
                     .font(.callout.weight(.semibold))
-                    Text("\(passing.count) of \(security.count) security checks pass")
+                    Text(unknown ? "Security checks could not be read" : "\(passing.count) of \(security.count) security checks pass")
                         .font(.caption.weight(.medium))
                     // What needs fixing comes first: passing names under "3 to fix" misread.
-                    Text((failing.isEmpty ? passing : failing).prefix(3).map(\.title).joined(separator: ", "))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if !unknown {
+                        Text((failing.isEmpty ? passing : failing).prefix(3).map(\.title).joined(separator: ", "))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 Spacer()
-                Label(insecure == 0 ? "Protected" : "\(insecure) to fix",
-                      systemImage: insecure == 0 ? "checkmark" : "exclamationmark.triangle")
+                Label(unknown ? "Not checked" : insecure == 0 ? "Protected" : "\(insecure) to fix",
+                      systemImage: unknown ? "questionmark" : insecure == 0 ? "checkmark" : "exclamationmark.triangle")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(insecure == 0 ? .white : Theme.warning)
+                    .foregroundStyle(unknown ? Color.secondary : insecure == 0 ? .white : Theme.warning)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

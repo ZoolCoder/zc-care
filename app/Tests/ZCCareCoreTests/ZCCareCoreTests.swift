@@ -360,6 +360,44 @@ struct EchoEnvRunner: Runner {
     #expect(v.advice(insecure: 5, updates: 40).action == .freeUp)
 }
 
+@Test func anUnreadCheckIsNeitherAFixNorAPass() {
+    let unread = Check(name: "security Remote Login off", status: "unknown", detail: "could not read: timed out")
+    let open = Check(name: "security firewall", status: "warn", detail: "turn it on")
+    let other = Check(name: "program brew", status: "fail")
+    #expect([unread].insecure == nil)
+    #expect([unread, open].insecure == 1)
+    #expect([other].insecure == 0)
+    #expect(([] as [Check]).insecure == 0)
+}
+
+@Test func unreadSecurityIsNotAHealthyMac() {
+    var v = Vitals()
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 97_000_000_000)
+    v.memory = Memory(pressure: 15, used: 0, total: 0)
+    #expect(v.grade(insecure: 0) == .excellent)
+    #expect(v.grade(insecure: nil) == .good)
+    #expect(v.advice(insecure: nil, updates: 0).action == .security)
+    #expect(v.advice(insecure: nil, updates: 40).action == .security)
+
+    v.disk?.available = 15_000_000_000
+    #expect(v.advice(insecure: nil, updates: 0).action == .freeUp)
+}
+
+@Test func uncheckedUpdatesAreNotGreatShape() {
+    var v = Vitals()
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 97_000_000_000)
+    v.memory = Memory(pressure: 15, used: 0, total: 0)
+    #expect(v.advice(insecure: 0, updates: 0).action == .none)
+    #expect(v.advice(insecure: 0, updates: 0, updatesUnknown: true).action == .updates)
+    #expect(v.advice(insecure: 0, updates: 3, updatesUnknown: true).title == "3 updates available")
+}
+
+@Test func onlyADoctorFailureLeavesHealthUnknown() {
+    #expect(Snapshot(targets: [], outdated: [], findings: [], errors: ["doctor: failed"]).doctorUnknown)
+    #expect(!Snapshot(targets: [], outdated: [], findings: [], errors: ["status: failed"]).doctorUnknown)
+    #expect(!Snapshot(targets: [], outdated: [], findings: [], errors: []).doctorUnknown)
+}
+
 @Test func junkEmptiesAllButWhatItKeeps() throws {
     let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: dir.appendingPathComponent("a/b"), withIntermediateDirectories: true)
