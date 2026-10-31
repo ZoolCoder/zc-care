@@ -54,7 +54,7 @@ struct RecentItemsSection: View {
         let names = chosen.map(\.name).joined(separator: ", ")
         guard Alerts.confirm("Clear \(chosen.count == 1 ? names : "every recent items list")?",
                              "macOS forgets what was opened lately in \(names). Documents and apps stay where they are.",
-                             button: "Clear") else { return }
+                             button: "Clear"), care.store.busy == nil else { return }
         care.store.busy = "Clearing recent items"
         defer { care.store.busy = nil }
         let permanently = care.store.deletesPermanently
@@ -128,7 +128,7 @@ struct WiFiSection: View {
         guard care.store.busy == nil,
               Alerts.confirm("Forget \(network.ssid)?",
                              "This Mac stops joining it on its own and forgets its password, here and on your other devices with iCloud Keychain.\n\nmacOS asks for your password.",
-                             button: "Forget") else { return }
+                             button: "Forget"), care.store.busy == nil else { return }
         care.store.busy = "Forgetting \(network.ssid)"
         defer { care.store.busy = nil }
         // The list may be old: networksetup exits 0 on a network it no longer knows.
