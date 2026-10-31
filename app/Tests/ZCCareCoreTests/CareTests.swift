@@ -241,6 +241,57 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(withRepo.map(\.files.count) == [2])
 }
 
+@Test func hardLinksAreNotDuplicates() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let original = home.appendingPathComponent("Downloads/a.zip")
+    try write(original, bytes: 300_000)
+    let link = home.appendingPathComponent("Documents/a.zip")
+    try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try FileManager.default.linkItem(at: original, to: link)
+    #expect(Duplicates.groups(paths: [original.path, link.path], home: home.path, minimum: 100_000).isEmpty)
+
+    // A real copy still counts, however many names the first one has.
+    let copy = home.appendingPathComponent("Movies/a.zip")
+    try write(copy, bytes: 300_000)
+    let groups = Duplicates.groups(paths: [original.path, link.path, copy.path], home: home.path, minimum: 100_000)
+    #expect(groups.map(\.files.count) == [2])
+    #expect(groups[0].wasted == 300_000)
+}
+
+@Test func largeFilesCompareWholeNotJustTheirStart() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let size = 3 << 19
+    let same = Data(repeating: 1, count: size)
+    var late = same
+    late[size - 1] = 2
+    var early = same
+    early[0] = 2
+    let names = ["a.bin", "b.bin", "late.bin", "early.bin"]
+    for (name, data) in zip(names, [same, same, late, early]) {
+        try data.write(to: home.appendingPathComponent(name))
+    }
+    let groups = Duplicates.groups(paths: names.map { home.path + "/" + $0 }, home: home.path, minimum: 1)
+    #expect(groups.count == 1)
+    #expect(Set(groups[0].files.map(\.name)) == ["a.bin", "b.bin"])
+}
+
+@Test func hashOfUnreadableFileIsNil() {
+    #expect(Duplicates.sha256(URL(fileURLWithPath: "/nonexistent/file")) == nil)
+    #expect(Duplicates.sha256(URL(fileURLWithPath: "/tmp")) == nil)
+}
+
+@Test func hashOfAReadThatFailsHalfwayIsNil() {
+    struct ReadFailed: Error {}
+    var chunks = [Data("half".utf8)]
+    let hash = Duplicates.sha256(limit: .max) { _ in
+        guard let chunk = chunks.popLast() else { throw ReadFailed() }
+        return chunk
+    }
+    #expect(hash == nil)
+}
+
 @Test func oldDownloadsGoByAge() throws {
     let folder = try tempDir()
     defer { try? FileManager.default.removeItem(at: folder) }
