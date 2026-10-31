@@ -18,7 +18,8 @@ public struct Advice: Sendable, Equatable {
 
 extension Vitals {
     /// What needs care, worst first; each one costs the grade a step.
-    /// insecure is the security checks that fail, nil when none could be read.
+    /// insecure is the security checks that fail, nil when none fails but
+    /// some could not be read.
     public func concerns(insecure: Int?) -> [Advice] {
         var all: [Advice] = []
         if let disk, disk.isLow {
@@ -39,8 +40,8 @@ extension Vitals {
                                   action: .security, button: "Review"))
             }
         } else {
-            all.append(Advice(title: "Security checks could not be read",
-                              body: "Nothing confirms this Mac's settings until they run again.",
+            all.append(Advice(title: "Not every security check could be read",
+                              body: "The Health tab shows what stays unconfirmed.",
                               action: .security, button: "Review"))
         }
         if let sensors, sensors.cpuTemp >= 90 {

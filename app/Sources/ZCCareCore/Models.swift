@@ -190,7 +190,7 @@ extension [Check] {
     /// unread, which is neither a fix to make nor a pass.
     public var insecure: Int? {
         let security = filter(\.isSecurity)
-        let failing = security.count { !$0.isUnknown }
-        return failing == 0 && !security.isEmpty ? nil : failing
+        let failing = security.count { !$0.isOK && !$0.isUnknown }
+        return failing == 0 && security.contains(where: \.isUnknown) ? nil : failing
     }
 }

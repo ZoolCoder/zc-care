@@ -57,7 +57,8 @@ struct SmartCareView: View {
             return "Run cleans up \(Store.bytes(care.junk + care.aiBeyondJunk))"
                 + (packages > 0 ? " and updates \(Store.counted(packages, "package"))." : ".")
         }
-        guard let snapshot = care.store.snapshot else { return care.store.setupProblem ?? "Reading this Mac…" }
+        if let problem = care.store.setupProblem { return problem }
+        guard let snapshot = care.store.snapshot else { return "Reading this Mac…" }
         if !snapshot.errors.isEmpty { return "Part of your setup could not be read." }
         if !care.store.findings.isEmpty { return "The Health tab has \(Store.counted(care.store.findings.count, "finding")) to look at." }
         return care.scannedAt != nil && care.allUpdates > 0

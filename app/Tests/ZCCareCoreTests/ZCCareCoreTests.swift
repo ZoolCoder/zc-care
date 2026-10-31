@@ -368,6 +368,9 @@ struct EchoEnvRunner: Runner {
     #expect([unread, open].insecure == 1)
     #expect([other].insecure == 0)
     #expect(([] as [Check]).insecure == 0)
+    let passed = Check(name: "security firewall", status: "ok")
+    #expect([passed].insecure == 0)
+    #expect([passed, unread].insecure == nil)
 }
 
 @Test func unreadSecurityIsNotAHealthyMac() {
