@@ -601,7 +601,7 @@ final class Care {
         }
         guard store.busy == nil, Alerts.confirm(store.removeQuestion(file.name),
                                                 "\(Store.bytes(file.size)) in \(file.url.deletingLastPathComponent().path).",
-                                                button: store.removeButton) else { return }
+                                                button: store.removeButton), store.busy == nil else { return }
         if let home, !SpaceLens.canTrash(file.url.path, home: home) {
             store.message = Store.Message(text: "\(file.name) moved or became a link since the scan; Rescan first. Nothing was removed.", failed: true)
             return
@@ -672,6 +672,7 @@ final class Care {
             store.message = Store.Message(text: "The copies of \(keeper.name) changed while you decided; Rescan to compare them again.", failed: true)
             return
         }
+        guard store.busy == nil else { return }
         store.busy = "Removing copies of \(keeper.name)"
         defer { store.busy = nil }
         let (log, trashed) = await removeEach(others, title: "Copies of \(keeper.name)")
@@ -748,7 +749,7 @@ final class Care {
     /// Runs a Docker prune after asking; `what` says what it removes.
     func pruneDocker(_ title: String, arguments: [String], what: String) async {
         guard store.busy == nil, let program = dockerProgram,
-              Alerts.confirm("\(title)?", what, button: "Prune") else { return }
+              Alerts.confirm("\(title)?", what, button: "Prune"), store.busy == nil else { return }
         store.busy = title
         defer { store.busy = nil }
         let before = docker?.reduce(0) { $0 + $1.size } ?? 0
@@ -776,7 +777,7 @@ final class Care {
         guard await closed(open, toDo: "remove \(spot.title)"), store.busy == nil else { return }
         guard Alerts.confirm(store.removeQuestion(spot.title),
                              "\(Store.bytes(spot.size)) in \((spot.url.path as NSString).abbreviatingWithTildeInPath). \(spot.detail)",
-                             button: store.removeButton) else { return }
+                             button: store.removeButton), store.busy == nil else { return }
         store.busy = "Removing \(spot.title)"
         defer { store.busy = nil }
         let (failure, trashed) = await recycle([spot.url])
@@ -831,7 +832,7 @@ final class Care {
               Alerts.confirm(store.removeQuestion(model.name),
                              "\(Store.bytes(model.size)) of \(model.source.rawValue) model files. "
                                  + "Pulling the model again downloads it.",
-                             button: store.removeButton) else { return }
+                             button: store.removeButton), store.busy == nil else { return }
         store.busy = "Removing \(model.name)"
         defer { store.busy = nil }
         // The list may be days old: a model pulled since can share a blob
@@ -992,7 +993,7 @@ final class Care {
                              list + "\n\nChats, settings, sessions and whatever is running stay. "
                                  + (store.deletesPermanently ? "The rest is deleted for good, not moved to the Trash."
                                                              : "The rest moves to the Trash; My Activity can put it back."),
-                             button: "Clear") else { return }
+                             button: "Clear"), store.busy == nil else { return }
         store.busy = "Clearing AI clutter"
         defer { store.busy = nil }
         let home = NSHomeDirectory()
@@ -1503,7 +1504,7 @@ final class Care {
             guard Alerts.confirm("Turn off \(agent.label)?",
                                  "Your zc-care config declares it, so this shows as drift and the next apply "
                                      + "turns it back on. To stop it for good, remove it from the config.",
-                                 button: "Turn Off") else { return }
+                                 button: "Turn Off"), store.busy == nil else { return }
         }
         store.busy = "\(on ? "Enabling" : "Disabling") \(agent.label)"
         defer { store.busy = nil }
@@ -1528,7 +1529,7 @@ final class Care {
         let drift = managed(agent) ? " Your zc-care config declares it, so this shows as drift and the next apply recreates it; remove it from the config too." : ""
         guard Alerts.confirm("Remove \(agent.label)?",
                              "It runs \((agent.program as NSString).abbreviatingWithTildeInPath), which is gone. "
-                                 + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash.") + drift, button: "Remove") else { return }
+                                 + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash.") + drift, button: "Remove"), store.busy == nil else { return }
         store.busy = "Removing \(agent.label)"
         defer { store.busy = nil }
         await bootOut([agent.path])
@@ -1581,7 +1582,7 @@ final class Care {
     func run(_ task: MaintenanceTask) async {
         guard store.busy == nil,
               Alerts.confirm("\(task.title)?", task.detail + (task.admin ? "\n\nmacOS asks for your password." : ""),
-                             button: "Run") else { return }
+                             button: "Run"), store.busy == nil else { return }
         store.busy = task.title
         defer { store.busy = nil }
         let failure = await store.cancellable { await self.steps(of: task) }
@@ -1739,7 +1740,7 @@ final class Care {
               Alerts.confirm("Reset \(p.service) for \(p.client)?",
                              "macOS forgets that you \(p.allowed ? "allowed" : "denied") it; the app asks again the next time it needs \(p.service)."
                                 + (p.resetName == "AppleEvents" ? " This covers every app it controls." : ""),
-                             button: "Reset") else { return }
+                             button: "Reset"), store.busy == nil else { return }
         store.busy = "Resetting \(p.service)"
         defer { store.busy = nil }
         do {
@@ -1832,7 +1833,7 @@ final class Care {
         }
         guard Alerts.confirm("Remove the download of \(file.name)?",
                              "It stays in \(drive.name) and downloads again when you open it. Frees \(Store.bytes(file.size)).",
-                             button: "Remove Download") else { return }
+                             button: "Remove Download"), store.busy == nil else { return }
         store.busy = "Removing the download of \(file.name)"
         // Eviction waits on the provider's file coordination: not on the main thread.
         let url = file.url
