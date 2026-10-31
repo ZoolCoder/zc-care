@@ -4,6 +4,18 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
+## v0.4.2 — 2026-10-31
+
+A crash fix, so upgrade: ZC Care quit soon after it opened.
+
+### ZC Care
+
+- ZC Care no longer quits soon after it opens. Reading app sizes handed its
+  results back on the wrong thread, and macOS ended the app. That reached the
+  scan that starts when the window opens, Applications, Protection and app
+  updates, in every version since v0.3.0. Protection's Gatekeeper results were
+  written from the wrong thread the same way, without a crash to show for it.
+
 ## v0.4.1 — 2026-10-31
 
 An audit and hardening release. On macOS 27, File Sharing, Remote Login and

@@ -6,6 +6,8 @@ public func forEachConcurrently<Item: Sendable, Output: Sendable>(
     work: @escaping @Sendable (Item) async -> Output, each: (Output) -> Void
 ) async {
     await withTaskGroup(of: Output.self) { group in
+        // A closure runs on an isolated parameter's actor only if it captures it.
+        _ = isolation
         var rest = items[...]
         func startNext() {
             guard let item = rest.popFirst() else { return }

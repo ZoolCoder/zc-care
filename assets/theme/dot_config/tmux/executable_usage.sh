@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # usage.sh: Claude's 5-hour and weekly limits for the tmux status bar, HUD style ("LIM 5H 10% ⟩ WK 97%"), read from
-# the usage cache the Claude Code status line keeps fresh. Prints nothing without it.
+# the shared usage cache. Prints nothing without it.
 # Usage: usage.sh <label colour> <separator colour> <ok colour> <warn colour> <full colour>
 cache="/private/tmp/claude-$(id -u)/usage-cache.json"
 [[ -r $cache ]] || exit 0
