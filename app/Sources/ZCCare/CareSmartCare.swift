@@ -246,8 +246,8 @@ private struct ClutterCard: View {
 
     var body: some View {
         ResultCard(title: "My Clutter", symbol: "doc.on.doc.fill", colors: Tint.blue,
-                   figure: care.clutter == 0 ? "All clear" : Store.bytes(care.clutter),
-                   detail: care.clutter == 0 ? "No large files, duplicates, old downloads or installers" : detail,
+                   figure: care.clutter > 0 ? Store.bytes(care.clutter) : care.spotlightOff ? "Not checked" : "All clear",
+                   detail: care.clutter > 0 ? detail : care.spotlightOff ? "Spotlight indexing is off" : "Nothing large, old or duplicated",
                    working: care.scanningFiles && care.clutter == 0,
                    link: ("Review Files", { care.module = .clutter }))
     }

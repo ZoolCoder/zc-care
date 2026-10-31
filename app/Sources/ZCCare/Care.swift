@@ -64,6 +64,8 @@ final class Care {
     var completed: RunLog?
     var scannedAt: Date?
     var largeFiles: [LargeFile] = []
+    var spotlightOff = false
+    var imagesNeedSpotlight = false
     var duplicates: [DuplicateGroup] = []
     /// Nil until looked for: comparing every photo takes a while.
     var similar: [SimilarGroup]?
@@ -314,6 +316,7 @@ final class Care {
     private func restore() {
         guard let last = CareScan.load(from: Self.saved) else { return }
         scannedAt = last.scannedAt
+        spotlightOff = last.spotlightOff ?? false
         if monitor.junk.isEmpty { monitor.junk = last.junk }
         // What went since the scan, by hand or another app, leaves the lists.
         let here = { (url: URL) in FileManager.default.fileExists(atPath: url.path) }
@@ -343,6 +346,7 @@ final class Care {
         scan.diskImages = diskImages
         scan.dependencies = dependencies
         scan.models = models
+        scan.spotlightOff = spotlightOff
         try? scan.save(to: Self.saved)
     }
 
@@ -401,6 +405,7 @@ final class Care {
             scanningFiles = false
             return
         }
+        spotlightOff = await indexingOff(paths)
         let downloads = URL(fileURLWithPath: home + "/Downloads")
         let installers = [downloads, URL(fileURLWithPath: home + "/Desktop")]
         let same = Task.detached(priority: .utility) { Duplicates.groups(paths: paths, home: home, minimum: Self.duplicateFile, limit: .max) }
@@ -435,6 +440,14 @@ final class Care {
             store.message = Store.Message(text: "\(what) not scanned: \(error.localizedDescription)", failed: true)
             return nil
         }
+    }
+
+    /// Whether no paths came from an index that is off rather than a Mac
+    /// without such files.
+    private func indexingOff(_ paths: [String]) async -> Bool {
+        guard paths.isEmpty else { return false }
+        let r = try? await ProcessRunner(timeout: 10).run("/usr/bin/mdutil", ["-s", LargeFiles.dataVolume], env: [:])
+        return LargeFiles.indexingOff(r?.output ?? "")
     }
 
     /// Whether something has any of the files open, which then stay put; a
@@ -630,6 +643,7 @@ final class Care {
         let home = NSHomeDirectory()
         let args = SimilarImages.folders(home: home).flatMap { ["-onlyin", $0] } + [SimilarImages.query]
         guard let paths = await spotlight(args, for: "Similar images") else { return }
+        imagesNeedSpotlight = await indexingOff(paths)
         similar = await Task.detached(priority: .utility) { SimilarImages.groups(paths: paths, home: home) }.value
         applyIgnoreList()
     }

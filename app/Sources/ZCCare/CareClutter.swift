@@ -9,17 +9,24 @@ struct ClutterView: View {
     @State private var kind: FileKind?
     @State private var unopenedOnly = false
 
+    private static let needsSpotlight = "Not checked: Spotlight finds these, and its indexing is off."
+
+    private var subtitle: String {
+        if care.scanningFiles && care.clutter == 0 { return "Looking through your home folder…" }
+        if care.spotlightOff { return "Spotlight indexing is off, so only Downloads and the Desktop were checked" }
+        return care.clutter > 0 ? "\(Store.bytes(care.clutter)) in large files, duplicates, old downloads and installers"
+                                : "No large files, duplicates, old downloads or installers"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            CareHeader(title: "My Clutter", subtitle: care.clutter > 0 ? "\(Store.bytes(care.clutter)) in large files, duplicates, old downloads and installers"
-                                                        : care.scanningFiles ? "Looking through your home folder…"
-                                                        : "No large files, duplicates, old downloads or installers",
+            CareHeader(title: "My Clutter", subtitle: subtitle,
                    busy: care.scanningFiles || care.findingDuplicates, action: ("Rescan", { Task { await care.scanFiles() } }))
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     CareSection("Large Files") {
                         if care.largeFiles.isEmpty {
-                            empty("No file over \(Store.bytes(Care.largeFile)) outside Library.")
+                            empty(care.spotlightOff ? Self.needsSpotlight : "No file over \(Store.bytes(Care.largeFile)) outside Library.")
                         } else {
                             largeFilter
                             if shownLarge.isEmpty {
@@ -30,7 +37,7 @@ struct ClutterView: View {
                     }
                     CareSection("Duplicates") {
                         if care.duplicates.isEmpty {
-                            empty("No two files over \(Store.bytes(Care.duplicateFile)) hold the same bytes.",
+                            empty(care.spotlightOff ? Self.needsSpotlight : "No two files over \(Store.bytes(Care.duplicateFile)) hold the same bytes.",
                                   looking: care.findingDuplicates ? "Comparing files of the same size…" : nil)
                         }
                         ForEach(care.duplicates) { group in
@@ -53,7 +60,7 @@ struct ClutterView: View {
                     CareSection("Similar Images") {
                         if let groups = care.similar {
                             if groups.isEmpty {
-                                Text("No two photos look alike.").foregroundStyle(.secondary).padding(10)
+                                Text(care.imagesNeedSpotlight ? Self.needsSpotlight : "No two photos look alike.").foregroundStyle(.secondary).padding(10)
                             }
                             ForEach(groups) { group in
                                 VStack(alignment: .leading, spacing: 0) {

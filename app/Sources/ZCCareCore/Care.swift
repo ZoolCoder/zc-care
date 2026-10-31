@@ -75,6 +75,16 @@ public enum LargeFiles {
     /// the home folder takes minutes, Spotlight a moment.
     public static func query(minimum: Int64) -> String { "kMDItemFSSize >= \(minimum)" }
 
+    /// The volume to ask mdutil about: the read-only system volume at / always
+    /// reports indexing as off, whatever the home folder's volume does.
+    public static let dataVolume = "/System/Volumes/Data"
+
+    /// From `mdutil -s`. mdfind answers an index that is off with no paths
+    /// and no error, which would read as a Mac without large files.
+    public static func indexingOff(_ mdutil: String) -> Bool {
+        mdutil.contains("disabled") || mdutil.contains("No index")
+    }
+
     /// The files Spotlight found, biggest first. Library, hidden folders and
     /// app bundles are left out: what lives there belongs to apps, and
     /// Cleanup covers their caches.
@@ -365,6 +375,7 @@ public struct CareScan: Codable, Sendable, Equatable {
     public var diskImages: [LargeFile]?
     public var dependencies: [LargeFile]?
     public var models: [AIModel]?
+    public var spotlightOff: Bool?
 
     public init(scannedAt: Date, junk: [String: Int64], largeFiles: [LargeFile], apps: [InstalledApp], agents: [LaunchAgent]) {
         self.scannedAt = scannedAt
