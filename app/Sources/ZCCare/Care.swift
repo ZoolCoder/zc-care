@@ -64,6 +64,8 @@ final class Care {
     var completed: RunLog?
     var scannedAt: Date?
     var largeFiles: [LargeFile] = []
+    var spotlightOff = false
+    var imagesNeedSpotlight = false
     var duplicates: [DuplicateGroup] = []
     /// Nil until looked for: comparing every photo takes a while.
     var similar: [SimilarGroup]?
@@ -146,6 +148,7 @@ final class Care {
     var scanningCloud = false
     var space: SpaceScan?
     var scanningSpace = false
+    @ObservationIgnored private var spaceRun: Task<CommandResult, any Error>?
     var apps: [InstalledApp] = []
     /// Ids of Setapp and other-volume apps, read once per scan.
     var externalIDs: Set<String> = []
@@ -219,14 +222,18 @@ final class Care {
         return files.values.reduce(0, +) + duplicates.reduce(0) { $0 + $1.wasted }
     }
     var adoptable: [InstalledApp] { apps.filter(canAdopt) }
+    /// A target could not be read, so no app is known to be undeclared.
+    var declaredUnknown = false
     /// Homebrew adopts a copy in /Applications only; one in ~/Applications
     /// would get a second, new copy beside it.
     func canAdopt(_ app: InstalledApp) -> Bool {
-        app.inApplications && app.declared == nil && app.source == .other && casks[app.url.lastPathComponent] != nil
+        !declaredUnknown && app.inApplications && app.declared == nil && app.source == .other
+            && casks[app.url.lastPathComponent] != nil
     }
     var untrusted: [InstalledApp] { apps.filter { assessments[$0.id].map { !$0.trusted } ?? false } }
     /// A second copy in ~/Applications is flagged as such, not as missing from the Brewfile.
     var undeclared: [InstalledApp] {
+        if declaredUnknown { return [] }
         let copies = copies
         return apps.filter { $0.declared == nil && !(copies.contains($0.id) && !$0.inApplications) }
     }
@@ -314,6 +321,8 @@ final class Care {
     private func restore() {
         guard let last = CareScan.load(from: Self.saved) else { return }
         scannedAt = last.scannedAt
+        spotlightOff = last.spotlightOff ?? false
+        declaredUnknown = last.declaredUnknown ?? false
         if monitor.junk.isEmpty { monitor.junk = last.junk }
         // What went since the scan, by hand or another app, leaves the lists.
         let here = { (url: URL) in FileManager.default.fileExists(atPath: url.path) }
@@ -343,6 +352,8 @@ final class Care {
         scan.diskImages = diskImages
         scan.dependencies = dependencies
         scan.models = models
+        scan.spotlightOff = spotlightOff
+        scan.declaredUnknown = declaredUnknown
         try? scan.save(to: Self.saved)
     }
 
@@ -401,6 +412,7 @@ final class Care {
             scanningFiles = false
             return
         }
+        spotlightOff = await indexingOff(paths)
         let downloads = URL(fileURLWithPath: home + "/Downloads")
         let installers = [downloads, URL(fileURLWithPath: home + "/Desktop")]
         let same = Task.detached(priority: .utility) { Duplicates.groups(paths: paths, home: home, minimum: Self.duplicateFile, limit: .max) }
@@ -437,11 +449,22 @@ final class Care {
         }
     }
 
+    /// Whether no paths came from an index that is off rather than a Mac
+    /// without such files.
+    private func indexingOff(_ paths: [String]) async -> Bool {
+        guard paths.isEmpty else { return false }
+        let r = try? await ProcessRunner(timeout: 10).run("/usr/bin/mdutil", ["-s", LargeFiles.dataVolume], env: [:])
+        return LargeFiles.indexingOff(r?.output ?? "")
+    }
+
     /// Whether something has any of the files open, which then stay put; a
     /// disk image a VM runs from or a video in an editor. Apps are offered
     /// to quit in a sheet; a command that is no app is named.
     private func openInApp(_ urls: [URL]) async -> Bool {
-        guard let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--"] + urls.map(\.path), env: [:]) else { return false }
+        guard let r = try? await ProcessRunner(timeout: 10).run("/usr/sbin/lsof", ["+c", "0", "-Fc", "--"] + urls.map(\.path), env: [:]) else {
+            store.message = Store.Message(text: "Could not tell which files are in use (lsof failed). Nothing was removed.", failed: true)
+            return true
+        }
         let holders = OpenFile.holders(r.output)
         guard !holders.isEmpty else { return false }
         let apps = NSWorkspace.shared.runningApplications.filter { app in
@@ -601,7 +624,7 @@ final class Care {
         }
         guard store.busy == nil, Alerts.confirm(store.removeQuestion(file.name),
                                                 "\(Store.bytes(file.size)) in \(file.url.deletingLastPathComponent().path).",
-                                                button: store.removeButton) else { return }
+                                                button: store.removeButton), store.busy == nil else { return }
         if let home, !SpaceLens.canTrash(file.url.path, home: home) {
             store.message = Store.Message(text: "\(file.name) moved or became a link since the scan; Rescan first. Nothing was removed.", failed: true)
             return
@@ -630,6 +653,7 @@ final class Care {
         let home = NSHomeDirectory()
         let args = SimilarImages.folders(home: home).flatMap { ["-onlyin", $0] } + [SimilarImages.query]
         guard let paths = await spotlight(args, for: "Similar images") else { return }
+        imagesNeedSpotlight = await indexingOff(paths)
         similar = await Task.detached(priority: .utility) { SimilarImages.groups(paths: paths, home: home) }.value
         applyIgnoreList()
     }
@@ -651,7 +675,7 @@ final class Care {
         finish(log, kind: .files, trashed: trashed)
     }
 
-    func keepOldest(_ group: DuplicateGroup) async {
+    func keepOne(_ group: DuplicateGroup) async {
         guard store.busy == nil, !removing else { return }
         removing = true
         defer { removing = false }
@@ -665,7 +689,8 @@ final class Care {
               await confirm(Review(title: store.removeQuestion("\(Store.counted(others.count, "copy", "copies")) of \(keeper.name)"),
                                    note: "\((keeper.url.path as NSString).abbreviatingWithTildeInPath) stays.",
                                    items: others.map(ReviewItem.init), button: store.removeButton)) else { return }
-        // Again: a copy may have changed while the sheet was up.
+        // Again: a copy may have been opened or changed while the sheet was up.
+        guard await !openInApp(others.map(\.url)), store.busy == nil else { return }
         let confirmed = Set(others.map(\.id))
         let unchanged = await stillSame(group).filter { confirmed.contains($0.id) }
         guard unchanged.count == others.count else {
@@ -675,12 +700,7 @@ final class Care {
         store.busy = "Removing copies of \(keeper.name)"
         defer { store.busy = nil }
         let (log, trashed) = await removeEach(others, title: "Copies of \(keeper.name)")
-        let gone = Set(log.done.map(\.path))
-        duplicates = duplicates.compactMap { group in
-            var group = group
-            group.files.removeAll { gone.contains($0.id) }
-            return group.files.count > 1 ? group : nil
-        }
+        forget(Set(log.done.map(\.path)))
         finish(log, kind: .files, trashed: trashed)
     }
 
@@ -701,7 +721,8 @@ final class Care {
     private func stillSame(_ group: DuplicateGroup) async -> [LargeFile] {
         store.busy = "Comparing copies of \(group.keeper.name)"
         defer { store.busy = nil }
-        return await Task.detached { Duplicates.stillSame(group) }.value
+        let home = NSHomeDirectory()
+        return await Task.detached { Duplicates.stillSame(group, home: home) }.value
     }
 
     private func drop(_ ids: Set<String>) {
@@ -748,7 +769,7 @@ final class Care {
     /// Runs a Docker prune after asking; `what` says what it removes.
     func pruneDocker(_ title: String, arguments: [String], what: String) async {
         guard store.busy == nil, let program = dockerProgram,
-              Alerts.confirm("\(title)?", what, button: "Prune") else { return }
+              Alerts.confirm("\(title)?", what, button: "Prune"), store.busy == nil else { return }
         store.busy = title
         defer { store.busy = nil }
         let before = docker?.reduce(0) { $0 + $1.size } ?? 0
@@ -776,7 +797,7 @@ final class Care {
         guard await closed(open, toDo: "remove \(spot.title)"), store.busy == nil else { return }
         guard Alerts.confirm(store.removeQuestion(spot.title),
                              "\(Store.bytes(spot.size)) in \((spot.url.path as NSString).abbreviatingWithTildeInPath). \(spot.detail)",
-                             button: store.removeButton) else { return }
+                             button: store.removeButton), store.busy == nil else { return }
         store.busy = "Removing \(spot.title)"
         defer { store.busy = nil }
         let (failure, trashed) = await recycle([spot.url])
@@ -831,7 +852,7 @@ final class Care {
               Alerts.confirm(store.removeQuestion(model.name),
                              "\(Store.bytes(model.size)) of \(model.source.rawValue) model files. "
                                  + "Pulling the model again downloads it.",
-                             button: store.removeButton) else { return }
+                             button: store.removeButton), store.busy == nil else { return }
         store.busy = "Removing \(model.name)"
         defer { store.busy = nil }
         // The list may be days old: a model pulled since can share a blob
@@ -885,12 +906,17 @@ final class Care {
         if junk > 500_000_000 { r.append(Recommendation(symbol: "trash.fill", title: "Clean \(Store.bytes(junk)) of system junk", module: .cleanup)) }
         if ai > 200_000_000 { r.append(Recommendation(symbol: "brain.head.profile", title: "Clear \(Store.bytes(ai)) of AI clutter", module: .cleanup)) }
         let outdated = store.snapshot?.outdated.count ?? 0
-        if outdated > 0 { r.append(Recommendation(symbol: "arrow.down.circle.fill", title: "Update " + Store.counted(outdated, "package"), module: .apps)) }
+        if outdated > 0 { r.append(Recommendation(symbol: "arrow.down.circle.fill", title: "Update " + Store.counted(outdated, "package"), module: .apps) {
+            $0.showUpdates = true
+        }) }
         let feeds = shownFeedUpdates.filter(\.supported).count
         if feeds > 0 {
             r.append(Recommendation(symbol: "arrow.triangle.2.circlepath", title: "Open \(Store.counted(feeds, "app")) with an update", module: .apps) {
                 $0.showUpdates = true
             })
+        }
+        if store.snapshot != nil, store.healthUnknown {
+            r.append(Recommendation(symbol: "stethoscope", title: "Health checks could not be read", module: .smartCare))
         }
         let findings = store.findings.count
         if findings > 0 { r.append(Recommendation(symbol: "stethoscope", title: findings == 1 ? "Look at 1 health finding" : "Look at \(findings) health findings", module: .smartCare)) }
@@ -992,7 +1018,7 @@ final class Care {
                              list + "\n\nChats, settings, sessions and whatever is running stay. "
                                  + (store.deletesPermanently ? "The rest is deleted for good, not moved to the Trash."
                                                              : "The rest moves to the Trash; My Activity can put it back."),
-                             button: "Clear") else { return }
+                             button: "Clear"), store.busy == nil else { return }
         store.busy = "Clearing AI clutter"
         defer { store.busy = nil }
         let home = NSHomeDirectory()
@@ -1026,7 +1052,9 @@ final class Care {
            let r = try? await ProcessRunner(timeout: 120).run(brew, ["info", "--json=v2", "--installed", "--cask"], env: store.loginEnv) {
             caskApps = AppCatalog.caskApps(brewInfo: r.stdout)
         }
-        let items = (try? await store.cli?.items()) ?? []
+        let read = try? await store.cli?.itemList()
+        declaredUnknown = read?.errors.isEmpty != true
+        let items = read?.items ?? []
         self.items = items
         if casks.isEmpty { casks = await Task.detached { Self.readCaskIndex() }.value }
         let folder = URL(fileURLWithPath: "/Applications")
@@ -1098,6 +1126,9 @@ final class Care {
         case .remove(_, let resource): how = "zc-care removes \(resource) and drops it from the Brewfile."
         case .cask(let token): how = "Homebrew uninstalls the cask \(token)."
         case .trash: how = store.deletesPermanently ? "The app is deleted for good." : "The app moves to the Trash."
+        }
+        if declaredUnknown {
+            how += "\n\nYour config could not be fully read. If it declares this app, the next apply brings it back."
         }
         if !leftovers.isEmpty {
             how += (store.deletesPermanently ? "\n\nIts files are deleted for good:\n" : "\n\nIts files move to the Trash:\n")
@@ -1499,11 +1530,13 @@ final class Care {
     /// outlives the plist, and the agent stops or starts now too.
     func setEnabled(_ agent: LaunchAgent, _ on: Bool) async {
         guard store.busy == nil else { return }
-        if !on, managed(agent) {
+        if !on, managed(agent) || servicesUnknown {
             guard Alerts.confirm("Turn off \(agent.label)?",
-                                 "Your zc-care config declares it, so this shows as drift and the next apply "
-                                     + "turns it back on. To stop it for good, remove it from the config.",
-                                 button: "Turn Off") else { return }
+                                 managed(agent)
+                                     ? "Your zc-care config declares it, so this shows as drift and the next apply "
+                                         + "turns it back on. To stop it for good, remove it from the config."
+                                     : "Your config could not be fully read. If it declares this agent, the next apply turns it back on.",
+                                 button: "Turn Off"), store.busy == nil else { return }
         }
         store.busy = "\(on ? "Enabling" : "Disabling") \(agent.label)"
         defer { store.busy = nil }
@@ -1517,6 +1550,8 @@ final class Care {
         await loadAgents()
     }
 
+    private var servicesUnknown: Bool { store.snapshot?.servicesUnknown == true }
+
     func managed(_ agent: LaunchAgent) -> Bool {
         Launchd.managed(agent.label, services: store.snapshot?.services ?? [])
     }
@@ -1525,10 +1560,11 @@ final class Care {
     /// Trash. Only the user's own: /Library's need an administrator.
     func remove(_ agent: LaunchAgent) async {
         guard store.busy == nil, agent.path.hasPrefix(NSHomeDirectory() + "/"), allowed([URL(fileURLWithPath: agent.path)]) else { return }
-        let drift = managed(agent) ? " Your zc-care config declares it, so this shows as drift and the next apply recreates it; remove it from the config too." : ""
+        let drift = managed(agent) ? " Your zc-care config declares it, so this shows as drift and the next apply recreates it; remove it from the config too."
+            : servicesUnknown ? " Your config could not be fully read. If it declares this agent, the next apply recreates it." : ""
         guard Alerts.confirm("Remove \(agent.label)?",
                              "It runs \((agent.program as NSString).abbreviatingWithTildeInPath), which is gone. "
-                                 + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash.") + drift, button: "Remove") else { return }
+                                 + (store.deletesPermanently ? "Its plist is deleted for good." : "Its plist moves to the Trash.") + drift, button: "Remove"), store.busy == nil else { return }
         store.busy = "Removing \(agent.label)"
         defer { store.busy = nil }
         await bootOut([agent.path])
@@ -1581,7 +1617,7 @@ final class Care {
     func run(_ task: MaintenanceTask) async {
         guard store.busy == nil,
               Alerts.confirm("\(task.title)?", task.detail + (task.admin ? "\n\nmacOS asks for your password." : ""),
-                             button: "Run") else { return }
+                             button: "Run"), store.busy == nil else { return }
         store.busy = task.title
         defer { store.busy = nil }
         let failure = await store.cancellable { await self.steps(of: task) }
@@ -1739,7 +1775,7 @@ final class Care {
               Alerts.confirm("Reset \(p.service) for \(p.client)?",
                              "macOS forgets that you \(p.allowed ? "allowed" : "denied") it; the app asks again the next time it needs \(p.service)."
                                 + (p.resetName == "AppleEvents" ? " This covers every app it controls." : ""),
-                             button: "Reset") else { return }
+                             button: "Reset"), store.busy == nil else { return }
         store.busy = "Resetting \(p.service)"
         defer { store.busy = nil }
         do {
@@ -1774,9 +1810,14 @@ final class Care {
         scanningSpace = true
         defer { scanningSpace = false }
         let home = NSHomeDirectory()
+        let run = Task { try await ProcessRunner(timeout: 900).run("/usr/bin/du", SpaceLens.arguments(root: home), env: [:]) }
+        spaceRun = run
+        defer { spaceRun = nil }
         let r: CommandResult
         do {
-            r = try await ProcessRunner(timeout: 900).run("/usr/bin/du", SpaceLens.arguments(root: home), env: [:])
+            r = try await run.value
+        } catch is CancellationError {
+            return
         } catch {
             let why = (error as? CLIError)?.timedOut == true ? "took too long to measure \(home)" : "could not measure \(home): \(error.localizedDescription)"
             store.message = Store.Message(text: "Space Lens \(why).", failed: true)
@@ -1790,6 +1831,11 @@ final class Care {
         let scan = space?.followed(by: root) ?? SpaceScan(scannedAt: .now, root: root)
         space = scan
         try? scan.save(to: Self.savedSpace)
+    }
+
+    /// The last result stays on screen; only this run stops.
+    func stopSpaceScan() {
+        spaceRun?.cancel()
     }
 
     // MARK: Cloud Cleanup
@@ -1832,7 +1878,7 @@ final class Care {
         }
         guard Alerts.confirm("Remove the download of \(file.name)?",
                              "It stays in \(drive.name) and downloads again when you open it. Frees \(Store.bytes(file.size)).",
-                             button: "Remove Download") else { return }
+                             button: "Remove Download"), store.busy == nil else { return }
         store.busy = "Removing the download of \(file.name)"
         // Eviction waits on the provider's file coordination: not on the main thread.
         let url = file.url

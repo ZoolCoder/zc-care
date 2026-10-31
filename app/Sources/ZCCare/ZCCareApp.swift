@@ -199,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         store.stop()
+        care.care.stopSpaceScan()
     }
 }
 

@@ -33,6 +33,23 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(found.map(\.name) == ["big.mov", "mid.zip"])
 }
 
+@Test func appSortKeepsAppsWithoutAUseDateLast() {
+    func app(_ name: String, size: Int64?, used: TimeInterval?) -> InstalledApp {
+        var a = InstalledApp(name: name, url: URL(fileURLWithPath: "/Applications/\(name).app"), bundleID: nil, source: .other)
+        a.size = size
+        a.lastUsed = used.map { Date(timeIntervalSince1970: $0) }
+        return a
+    }
+    let apps = [app("beta", size: 5, used: 100), app("Alpha", size: nil, used: nil), app("gamma 10", size: 9, used: 300), app("gamma 2", size: 1, used: nil)]
+    func names(_ list: [InstalledApp]) -> [String] { list.map(\.name) }
+    #expect(names(AppSort.name.ordered(apps)) == ["Alpha", "beta", "gamma 2", "gamma 10"])
+    #expect(names(AppSort.name.ordered(apps, reversed: true)) == ["gamma 10", "gamma 2", "beta", "Alpha"])
+    #expect(names(AppSort.size.ordered(apps)) == ["gamma 10", "beta", "gamma 2", "Alpha"])
+    #expect(names(AppSort.size.ordered(apps, reversed: true)) == ["gamma 2", "beta", "gamma 10", "Alpha"])
+    #expect(names(AppSort.lastUsed.ordered(apps)) == ["gamma 10", "beta", "Alpha", "gamma 2"])
+    #expect(names(AppSort.lastUsed.ordered(apps, reversed: true)) == ["beta", "gamma 10", "Alpha", "gamma 2"])
+}
+
 @Test func caskAppsMapsBundlesToTokens() {
     let json = """
     {"casks":[{"token":"visual-studio-code","artifacts":[{"uninstall":[{"quit":"com.microsoft.VSCode"}]},
@@ -108,7 +125,75 @@ private func write(_ url: URL, bytes: Int) throws {
     let files = names.enumerated().map { i, name in
         LargeFile(url: dir.appendingPathComponent(name), size: 4, modified: Date(timeIntervalSince1970: Double(i)))
     }
-    #expect(Duplicates.stillSame(DuplicateGroup(files: files, size: 4)).map(\.url.lastPathComponent) == ["b"])
+    #expect(Duplicates.stillSame(DuplicateGroup(files: files, size: 4), home: dir.path).map(\.url.lastPathComponent) == ["b"])
+}
+
+@Test func indexingOffReadsMdutil() {
+    #expect(LargeFiles.indexingOff("/System/Volumes/Data:\n\tIndexing disabled. \n"))
+    #expect(LargeFiles.indexingOff("/System/Volumes/Data:\n\tIndexing and searching disabled. \n"))
+    #expect(LargeFiles.indexingOff("/System/Volumes/Data:\n\tSpotlight server is disabled. \n"))
+    #expect(LargeFiles.indexingOff("/System/Volumes/Data:\n\tNo index. \n"))
+    #expect(!LargeFiles.indexingOff("/System/Volumes/Data:\n\tIndexing enabled. \n"))
+    #expect(!LargeFiles.indexingOff(""))
+}
+
+@Test func aFeedAppMatchesItsOutdatedCask() {
+    let plain = Item(name: "foo", kind: "cask", state: "outdated")
+    let tapped = Item(name: "user/tap/foo", kind: "cask", state: "outdated")
+    var named = Item(name: "other", kind: "cask", state: "outdated")
+    named.app = "Foo"
+    #expect(AppUpdates.sameApp(plain, token: "foo", name: "Foo"))
+    #expect(AppUpdates.sameApp(tapped, token: "foo", name: "Foo"))
+    #expect(AppUpdates.sameApp(named, token: nil, name: "Foo"))
+    #expect(!AppUpdates.sameApp(plain, token: nil, name: "Foo"))
+    #expect(!AppUpdates.sameApp(plain, token: "bar", name: "Bar"))
+    #expect(!AppUpdates.sameApp(named, token: "foo-other", name: "Foo"))
+}
+
+@Test func stillSameRefusesPathsThatLeadToTheKeeper() throws {
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let (old, new) = (dir.appendingPathComponent("old"), dir.appendingPathComponent("new"))
+    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: dir) }
+    func replace(_ url: URL, _ make: () throws -> Void) throws {
+        try? fm.removeItem(at: url)
+        try make()
+    }
+    let group = DuplicateGroup(files: [LargeFile(url: old, size: 4, modified: Date(timeIntervalSince1970: 1)),
+                                       LargeFile(url: new, size: 4, modified: Date(timeIntervalSince1970: 2))], size: 4)
+    try Data("same".utf8).write(to: old)
+    try Data("same".utf8).write(to: new)
+    #expect(Duplicates.stillSame(group, home: dir.path).count == 1)
+
+    try replace(new) { try fm.createSymbolicLink(at: new, withDestinationURL: old) }
+    #expect(Duplicates.stillSame(group, home: dir.path).isEmpty)
+    try replace(new) { try Data("same".utf8).write(to: new) }
+    try replace(old) { try fm.createSymbolicLink(at: old, withDestinationURL: new) }
+    #expect(Duplicates.stillSame(group, home: dir.path).isEmpty)
+    try replace(old) { try fm.linkItem(at: new, to: old) }
+    #expect(Duplicates.stillSame(group, home: dir.path).isEmpty)
+    try fm.removeItem(at: old)
+    #expect(Duplicates.stillSame(group, home: dir.path).isEmpty)
+
+    // A folder moved to another drive and linked back: same name, same bytes.
+    let drive = dir.appendingPathComponent("drive"), backups = dir.appendingPathComponent("Backups")
+    try fm.createDirectory(at: drive, withIntermediateDirectories: true)
+    try Data("same".utf8).write(to: drive.appendingPathComponent("x"))
+    try fm.createSymbolicLink(at: backups, withDestinationURL: drive)
+    let linked = DuplicateGroup(files: [LargeFile(url: new, size: 4, modified: Date(timeIntervalSince1970: 1)),
+                                        LargeFile(url: backups.appendingPathComponent("x"), size: 4, modified: Date(timeIntervalSince1970: 2))], size: 4)
+    #expect(Duplicates.stillSame(linked, home: dir.path).isEmpty)
+    #expect(Duplicates.stillSame(linked, home: dir.path + "/").isEmpty)
+    #expect(Duplicates.stillSame(linked, home: "/elsewhere").count == 1)
+
+    let real = dir.appendingPathComponent("real"), mirror = dir.appendingPathComponent("mirror")
+    try fm.createDirectory(at: real, withIntermediateDirectories: true)
+    try Data("same".utf8).write(to: real.appendingPathComponent("x"))
+    try fm.createSymbolicLink(at: mirror, withDestinationURL: real)
+    let moved = DuplicateGroup(files: [LargeFile(url: real.appendingPathComponent("x"), size: 4, modified: Date(timeIntervalSince1970: 1)),
+                                       LargeFile(url: mirror.appendingPathComponent("x"), size: 4, modified: Date(timeIntervalSince1970: 2))], size: 4)
+    #expect(Duplicates.stillSame(moved, home: dir.path).isEmpty)
 }
 
 @Test func workingInNamesCommandsWhoseFolderIsInside() {
@@ -208,9 +293,10 @@ private func write(_ url: URL, bytes: Int) throws {
                            source: .cask("ghostty"), declared: Item(name: "ghostty", kind: "cask", state: "ok"))
     app.size = 120
     let agent = LaunchAgent(label: "local.x", path: "/p.plist", program: "/bin/sh", runAtLoad: true, keepAlive: false)
-    let scan = CareScan(scannedAt: Date(timeIntervalSince1970: 1_700_000_000), junk: ["caches": 42],
+    var scan = CareScan(scannedAt: Date(timeIntervalSince1970: 1_700_000_000), junk: ["caches": 42],
                         largeFiles: [LargeFile(url: URL(fileURLWithPath: "/tmp/big.mov"), size: 9, modified: nil)],
                         apps: [app], agents: [agent])
+    scan.spotlightOff = true
     let url = dir.appendingPathComponent("sub/care.json")
 
     try scan.save(to: url)
@@ -239,6 +325,67 @@ private func write(_ url: URL, bytes: Int) throws {
     try write(home.appendingPathComponent("Developer/site/public/a.zip"), bytes: 300_000)
     let withRepo = Duplicates.groups(paths: paths + [home.path + "/Developer/site/public/a.zip"], home: home.path, minimum: 100_000)
     #expect(withRepo.map(\.files.count) == [2])
+}
+
+@Test func hardLinksAreNotDuplicates() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let original = home.appendingPathComponent("Downloads/a.zip")
+    try write(original, bytes: 300_000)
+    let link = home.appendingPathComponent("Documents/a.zip")
+    try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try FileManager.default.linkItem(at: original, to: link)
+    #expect(Duplicates.groups(paths: [original.path, link.path], home: home.path, minimum: 100_000).isEmpty)
+
+    // A real copy still counts, however many names the first one has.
+    let copy = home.appendingPathComponent("Movies/a.zip")
+    try write(copy, bytes: 300_000)
+    let groups = Duplicates.groups(paths: [original.path, link.path, copy.path], home: home.path, minimum: 100_000)
+    #expect(groups.map(\.files.count) == [2])
+    #expect(groups[0].wasted == 300_000)
+
+    // Even when older, the copy with no other name is the one that frees space.
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1000)], ofItemAtPath: copy.path)
+    let older = Duplicates.groups(paths: [original.path, link.path, copy.path], home: home.path, minimum: 100_000)
+    #expect(older.map(\.others.first?.url.path) == [copy.path])
+
+    // Two files that each have other names: neither is offered alone.
+    let otherLink = home.appendingPathComponent("Documents/b.zip")
+    try FileManager.default.linkItem(at: copy, to: otherLink)
+    #expect(Duplicates.groups(paths: [original.path, link.path, copy.path, otherLink.path], home: home.path, minimum: 100_000).isEmpty)
+}
+
+@Test func largeFilesCompareWholeNotJustTheirStart() throws {
+    let home = try tempDir()
+    defer { try? FileManager.default.removeItem(at: home) }
+    let size = 3 << 19
+    let same = Data(repeating: 1, count: size)
+    var late = same
+    late[size - 1] = 2
+    var early = same
+    early[0] = 2
+    let names = ["a.bin", "b.bin", "late.bin", "early.bin"]
+    for (name, data) in zip(names, [same, same, late, early]) {
+        try data.write(to: home.appendingPathComponent(name))
+    }
+    let groups = Duplicates.groups(paths: names.map { home.path + "/" + $0 }, home: home.path, minimum: 1)
+    #expect(groups.count == 1)
+    #expect(Set(groups[0].files.map(\.name)) == ["a.bin", "b.bin"])
+}
+
+@Test func hashOfUnreadableFileIsNil() {
+    #expect(Duplicates.sha256(URL(fileURLWithPath: "/nonexistent/file")) == nil)
+    #expect(Duplicates.sha256(URL(fileURLWithPath: "/tmp")) == nil)
+}
+
+@Test func hashOfAReadThatFailsHalfwayIsNil() {
+    struct ReadFailed: Error {}
+    var chunks = [Data("half".utf8)]
+    let hash = Duplicates.sha256(limit: .max) { _ in
+        guard let chunk = chunks.popLast() else { throw ReadFailed() }
+        return chunk
+    }
+    #expect(hash == nil)
 }
 
 @Test func oldDownloadsGoByAge() throws {
@@ -1488,4 +1635,12 @@ private struct ProfilerRunner: Runner {
     #expect(parts.map(\.part) == ["Data", "Caches", "App", "Other", "Settings"])
     #expect(parts.map(\.size) == [1050, 550, 300, 12, 12])
     #expect(Leftovers.breakdown([], app: app).isEmpty)
+}
+
+@Test func geminiChatsAreNotClutter() throws {
+    // Gemini CLI keeps saved chats and checkpoints under ~/.gemini/tmp, whatever the name says.
+    let home = try tempDir()
+    try write(home.appendingPathComponent(".gemini/tmp/abc123/chats/session.json"), bytes: 4096)
+    try write(home.appendingPathComponent(".gemini/tmp/abc123/checkpoint-work.json"), bytes: 4096)
+    #expect(AIClutter.find(home: home.path, claudeTemp: home.path + "/none").isEmpty)
 }

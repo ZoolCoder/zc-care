@@ -45,11 +45,7 @@ func (p Plan) Snapshot(targets []string) Saved {
 func (p Plan) Save(w io.Writer, targets []string) error { return p.Snapshot(targets).Write(w) }
 
 // Write writes the saved plan as indented JSON.
-func (s Saved) Write(w io.Writer) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(s)
-}
+func (s Saved) Write(w io.Writer) error { return WriteIndented(w, s) }
 
 func (p Plan) savedActions() []SavedAction {
 	out := make([]SavedAction, 0, len(p.Actions))
@@ -62,8 +58,12 @@ func (p Plan) savedActions() []SavedAction {
 // LoadSaved reads a plan written by Save.
 func LoadSaved(r io.Reader) (Saved, error) {
 	var s Saved
-	if err := json.NewDecoder(r).Decode(&s); err != nil {
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(&s); err != nil {
 		return Saved{}, fmt.Errorf("read saved plan: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return Saved{}, errors.New("read saved plan: unexpected data after the plan")
 	}
 	if s.Version != savedVersion {
 		return Saved{}, fmt.Errorf("saved plan is version %d, this build writes version %d", s.Version, savedVersion)

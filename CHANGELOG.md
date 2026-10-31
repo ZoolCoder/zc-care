@@ -4,6 +4,115 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
+## v0.4.1 — 2026-10-31
+
+An audit and hardening release. On macOS 27, File Sharing, Remote Login and
+Screen Sharing passed in v0.4.0 without looking, so upgrade. Reads that never
+answer can no longer hang a command, and nothing printed from outside steers
+the terminal. A check, config or target that cannot be read no longer reads as
+all clear, and removals stop rather than guess. Applications is redesigned.
+
+### zc-care
+
+- A read that never answers no longer holds the whole command: each program
+  asked for its output gets two minutes, is stopped along with what it
+  started, and its target reports `did not finish in 2m0s`. `mas` stuck on
+  Spotlight used to hang `status`, `list` and `doctor` for ever. Ctrl-C now
+  also stops `doctor`'s checks.
+- A word a command does not take is refused. Flag parsing stops at the first
+  one, so `undo 3 -plan` used to drop `-plan` and revert for real.
+- Nothing printed from outside steers the terminal: `list`, `status`,
+  `history`, `undo`, `diff`, apply's progress and error lines drop escape
+  sequences, bidi overrides and invisible characters, and a line break cannot
+  forge a row. MCP resources are cleaned like tool output.
+- A saved plan with more data after it is refused.
+- `undo -plan` says which file the undo will refuse because it changed since
+  the apply, instead of leaving that to the run.
+- An undo preview no longer waits on a pipe at a recorded path, and no longer
+  loads a whole file to compare it: only regular files are read, in pieces.
+- `plan -json`, `undo -json` and the other JSON output spell out every
+  character that steers a terminal, so printing it is safe and decoding it
+  still gives the value.
+- File Sharing, Remote Login and Screen Sharing could pass without looking. On
+  macOS 27, `netstat` run by a program Apple did not sign exits 0 and lists no
+  connections, which read as nothing listening. The checks now read `nettop` as
+  well, count a server either one shows, and report that they could not read the
+  answer if neither shows any.
+- The sharing and listener checks count `fe80::1` on `lo0` as loopback, in the
+  form each tool prints it: `fe80::1%lo0` and `fe80:1::1`. macOS gives the
+  loopback interface that address too, and a server on it is reachable from
+  this machine only.
+
+### ZC Care
+
+- Release notes links, like feeds and downloads, go to public hosts only. More
+  private ranges count as private: 192.0.0/24, 6to4 and NAT64 forms, and a
+  written 198.18/15, while a name a proxy answers in that range still works.
+  Octal addresses such as `0177.0.0.1` are refused too.
+- The activity log, the saved scans and the last change's log are readable by
+  you alone, and are replaced rather than followed if one became a link.
+- Two removals can no longer overlap: each asks again whether something is
+  running once you answer its question.
+- Duplicates skip hard links, which free nothing, and tell large files apart
+  by their first megabyte before reading them whole. A file that cannot be
+  read to the end is not called a duplicate.
+- *Keep Oldest* is now *Keep One*. When one copy has hard links elsewhere it is
+  the copy kept, since removing it would free nothing. Before removing, each
+  copy must still be a regular file of its own: a path that became a link, or
+  that now leads to the kept file, stays, and nothing goes if the kept file
+  left during the compare. A folder that became a link since the scan, and a
+  copy opened or edited during the compare or while you decided, stop it too.
+  A removed copy also leaves Large Files at once.
+- A removal stops when `lsof` cannot say which files are in use, instead of
+  taking that as none.
+- Cleanup's Trash row shows no size when it cannot read the Trash, instead of
+  Zero KB.
+- Cleanup no longer offers `~/.gemini/tmp`: Gemini CLI saves chats and
+  checkpoints there.
+- Applications has sortable Size and Last Used columns, search in the header
+  and quiet rows: *Uninstall* shows on hover. A subtitle states where an app
+  came from, and an app with no use date says why when you point at it.
+- Every Updates count agrees: the filter bar, the list's title, the sidebar,
+  Smart Care and Activity all include formulae and runtimes. With only those
+  waiting, the list says the Update button installs them. A tapped cask with
+  its own update feed counts once, and a cask Homebrew just updated does not
+  come back as a feed row.
+- Space Lens has *Stop*, and quitting stops a scan in progress.
+- ⌘F goes to the search field on Applications, My Tools and My Workstation.
+- With Spotlight indexing off, My Clutter says it could not check for large
+  files, duplicates and similar images instead of reporting none, and still
+  says so after a restart.
+- Smart Care's cleanup figure counts AI clutter too, Protection's tile leaves
+  out checks you chose to ignore, and *Manage* opens the Updates filter only
+  when there are updates. Sidebar rows keep their height, and the window stops
+  at 660 points, where Settings and Smart Care's *Run* still fit.
+- VoiceOver names every checkbox, switch and segmented control, and can expand
+  a My Workstation target.
+- A config or manifest that cannot be read no longer reads as all clear. My
+  Workstation drops its 0% and *All Clear* cards and says the inventory could
+  not be read instead of *Reading your config…* for ever, while the applied log
+  still shows. A target that `list` cannot read now counts as an error, so the
+  targets that could be read stay and Smart Care, Applications, My Activity and
+  the panel stop saying *Up to date*.
+- Removing unneeded Homebrew formulae stops when a target cannot be read.
+  An unreadable Brewfile used to look like one that declares nothing, so a
+  formula it names could be offered for removal. For the same reason
+  Applications stops offering Adopt and stops listing apps as not in the
+  Brewfile, My Workstation hides *Not in Your Config*, and the uninstall dialog
+  warns that the next apply may bring the app back.
+- A target that stays unreadable no longer silences every notification. Each
+  part now waits only on its own read, so findings and drift keep arriving, and
+  the icon counts one failure once.
+- When the doctor cannot run, nothing claims this Mac is healthy. The security
+  card used to show a green *Protected* over `0 of 0 security checks pass`, with
+  the grade at *Excellent* and Setup saying every check passes. The card, the
+  Health tab, Setup and Smart Care now say the checks were not read, Setup
+  offers to try again, the grade drops a step, and it is listed among the
+  recommendations. A single check that could not be read is no longer counted
+  as one to fix or as a pass: the Mac tab says how many went unread and Setup
+  draws it in gray. Updates that could not be checked no longer end in *Your Mac
+  is in great shape* either.
+
 ## v0.4.0 — 2026-10-30
 
 The app grows into a full Mac care tool: a menu panel with live readings,

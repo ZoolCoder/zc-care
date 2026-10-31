@@ -68,6 +68,14 @@ public struct UpdateCheck: Sendable, Equatable {
 }
 
 public enum AppUpdates {
+    /// Whether an outdated cask is this feed app: by token, which a tapped
+    /// cask ends its name with, or by the name brew gives the app, for a copy
+    /// the app list could not tie to any cask.
+    public static func sameApp(_ cask: Item, token: String?, name: String) -> Bool {
+        guard let token else { return cask.app == name }
+        return cask.name.split(separator: "/").last.map(String.init) == token
+    }
+
     /// The feed an app declares, when it is https on a public host: Sparkle
     /// 2 refuses a plain http feed, and so does this.
     public static func feedApp(at url: URL, info: [String: Any]) -> FeedApp? {
@@ -411,7 +419,7 @@ private final class AppcastReader: NSObject, XMLParserDelegate {
         case "sparkle:maximumSystemVersion": if !value.isEmpty { current?.maximumSystem = value }
         case "sparkle:channel": if !value.isEmpty { skip = true }
         case "sparkle:releaseNotesLink":
-            if let url = URL(string: value), url.scheme == "https" { current?.notesLink = url }
+            if let url = URL(string: value), AppUpdates.isPublic(url) { current?.notesLink = url }
         case "pubDate": current?.date = Self.dates.lazy.compactMap { $0.date(from: value) }.first
         default: break
         }

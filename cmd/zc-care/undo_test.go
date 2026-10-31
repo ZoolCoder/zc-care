@@ -180,3 +180,28 @@ func TestRevertOrderIsNewestFirstAndReversedWithinAnEntry(t *testing.T) {
 		t.Fatalf("order %v", got)
 	}
 }
+
+func TestAWordAfterACommandNeverDropsItsFlags(t *testing.T) {
+	// Were the check to go, these would reach this Mac's own config.
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("ZC_CARE_CONFIG", filepath.Join(t.TempDir(), "none.yaml"))
+	data, file := journaledRevertible(t)
+	_, err := run(t, "yes\n", "undo", "3", "-plan", "-data", data)
+	if err == nil || !strings.Contains(err.Error(), `takes no "3"`) {
+		t.Fatalf("undo with a stray word: %v", err)
+	}
+	if b, err := os.ReadFile(file); err != nil || string(b) != "new\n" {
+		t.Fatalf("undo ran: %q %v", b, err)
+	}
+	for _, cmd := range []string{"plan", "status", "list", "capture", "validate", "upgrade", "doctor", "history", "drift", "export", "init"} {
+		if _, err := run(t, "", cmd, "stray", "-yes"); err == nil {
+			t.Errorf("%s accepted a stray word", cmd)
+		}
+		if _, err := run(t, "", cmd, "stray"); err == nil || !strings.Contains(err.Error(), `takes no "stray"`) {
+			t.Errorf("%s: %v", cmd, err)
+		}
+	}
+	if _, err := run(t, "", "apply", "one.json", "two.json"); err == nil || !strings.Contains(err.Error(), "two.json") {
+		t.Fatalf("apply with two plans: %v", err)
+	}
+}

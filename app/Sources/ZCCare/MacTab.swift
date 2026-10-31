@@ -19,7 +19,6 @@ struct MacTab: View {
 
     private var monitor: Monitor { store.monitor }
     private var vitals: Vitals { monitor.vitals }
-    private var insecure: Int { store.findings.filter(\.isSecurity).count }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -41,7 +40,7 @@ struct MacTab: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             hero
-            ProtectionTile(store: store, security: snapshot.security, insecure: insecure)
+            ProtectionTile(store: store, security: snapshot.security, failing: store.findings.filter(\.isSecurity))
             // Two columns that each stack their tiles, so a tile is only as
             // tall as what it holds.
             HStack(alignment: .top, spacing: 8) {
@@ -82,7 +81,8 @@ struct MacTab: View {
                 }
             }
             .id("detail")
-            Recommendation(advice: vitals.advice(insecure: insecure, updates: snapshot.outdated.count), act: act)
+            Recommendation(advice: vitals.advice(insecure: store.insecure, updates: snapshot.outdated.count,
+                                                 updatesUnknown: snapshot.updatesUnknown), act: act)
         }
     }
 
@@ -92,7 +92,7 @@ struct MacTab: View {
                 if vitals.memory == nil {
                     Text("Mac Health: …").font(.title2.weight(.bold))
                 } else {
-                    let grade = vitals.grade(insecure: insecure)
+                    let grade = vitals.grade(insecure: store.insecure)
                     Text("Mac Health: \(Text(grade.rawValue).foregroundStyle(grade.color))").font(.title2.weight(.bold))
                 }
                 Text(monitor.model).font(.caption).foregroundStyle(.secondary)
@@ -293,16 +293,23 @@ private struct LaptopArt: View {
 private struct ProtectionTile: View {
     let store: Store
     let security: [Check]
-    let insecure: Int
+    /// Without the checks the user ignored, unlike `security`.
+    let failing: [Check]
 
     var body: some View {
         let passing = security.filter(\.isOK)
+        let toFix = failing.filter { !$0.isUnknown }
+        let unread = failing.count - toFix.count
+        // Zero failures among zero checks is not protection.
+        let unknown = store.healthUnknown || security.isEmpty
+        // A check that went unread is neither a fix nor a pass.
+        let unsure = unknown || store.insecure == nil
         Button { store.tab = .health } label: {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: insecure == 0 ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                Image(systemName: unsure ? "shield.fill" : toFix.isEmpty ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                     .font(.title2)
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.white, insecure == 0 ? Theme.good : Theme.warning)
+                    .symbolRenderingMode(unsure ? .monochrome : .palette)
+                    .foregroundStyle(unsure ? Color.secondary : .white, toFix.isEmpty ? Theme.good : Theme.warning)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 5) {
                         Text("Protection by")
@@ -310,16 +317,19 @@ private struct ProtectionTile: View {
                         Text("ZC Doctor")
                     }
                     .font(.callout.weight(.semibold))
-                    Text("\(passing.count) of \(security.count) security checks pass")
+                    Text(unknown ? "Security checks could not be read" : "\(passing.count) of \(security.count) security checks pass")
                         .font(.caption.weight(.medium))
-                    Text(passing.prefix(3).map(\.title).joined(separator: ", "))
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    // What needs fixing comes first: passing names under "3 to fix" misread.
+                    if !unknown {
+                        Text((toFix.isEmpty ? failing.isEmpty ? passing : failing : toFix).prefix(3).map(\.title).joined(separator: ", "))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
                 Spacer()
-                Label(insecure == 0 ? "Protected" : "\(insecure) to fix",
-                      systemImage: insecure == 0 ? "checkmark" : "exclamationmark.triangle")
+                Label(unknown ? "Not checked" : unsure ? "\(unread) not read" : toFix.isEmpty ? "Protected" : "\(toFix.count) to fix",
+                      systemImage: unsure ? "questionmark" : toFix.isEmpty ? "checkmark" : "exclamationmark.triangle")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(insecure == 0 ? .white : Theme.warning)
+                    .foregroundStyle(unsure ? Color.secondary : toFix.isEmpty ? .white : Theme.warning)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

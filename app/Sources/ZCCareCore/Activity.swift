@@ -255,7 +255,9 @@ public struct ActivityLog: Codable, Sendable, Equatable {
         let stamp = Int(Date.now.timeIntervalSince1970)
         var log = ActivityLog()
         do {
-            try FileManager.default.moveItem(at: url, to: url.appendingPathExtension("broken-\(stamp)"))
+            let aside = url.appendingPathExtension("broken-\(stamp)")
+            try FileManager.default.moveItem(at: url, to: aside)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: aside.path)
         } catch {
             log.readOnly = true
         }
@@ -264,7 +266,6 @@ public struct ActivityLog: Codable, Sendable, Equatable {
 
     public func save(to url: URL) throws {
         guard !readOnly else { throw CocoaError(.fileWriteNoPermission) }
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(self).write(to: url, options: .atomic)
+        try PrivateFile.write(JSONEncoder().encode(self), to: url)
     }
 }

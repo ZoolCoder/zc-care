@@ -456,7 +456,7 @@ extension Store {
                                  ? "This permanently deletes it; nothing goes to the Trash."
                                  : "This moves it to the Trash; My Activity can put it back until the Trash is emptied.")
                                  + " All of it comes back on its own when needed.",
-                             button: "Clean Up") else { return }
+                             button: "Clean Up"), busy == nil else { return }
         busy = "Cleaning up"
         defer { busy = nil }
         let (log, trashed) = await clean(spots, title: "System Junk")
@@ -523,7 +523,7 @@ extension Store {
         let undoable = activity.entries.filter { Self.mayPutBack($0, fullDisk: fullDisk) }
         let lost = undoable.isEmpty ? "" : "\n\n\(Self.counted(undoable.count, "cleanup")) in My Activity can no longer be put back."
         guard busy == nil, Alerts.confirm("Empty the Trash?", "What is in the Trash is deleted for good." + lost,
-                                          button: "Empty Trash") else { return }
+                                          button: "Empty Trash"), busy == nil else { return }
         busy = "Emptying the Trash"
         defer { busy = nil }
         let before = monitor.vitals.disk?.available ?? 0

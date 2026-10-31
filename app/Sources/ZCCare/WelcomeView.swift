@@ -40,7 +40,7 @@ struct WelcomeView: View {
                 }
                 Step(symbol: "power", colors: Tint.orange, title: "Open at login",
                      detail: "Keep the menu bar icon and the weekly scan running.") {
-                    Toggle("", isOn: $store.opensAtLogin).toggleStyle(.switch).labelsHidden()
+                    Toggle("Open at login", isOn: $store.opensAtLogin).toggleStyle(.switch).labelsHidden()
                 }
                 Step(symbol: "bell.badge.fill", colors: Tint.violet, title: "Notifications",
                      detail: store.notifies && store.notificationsBlocked
@@ -49,12 +49,12 @@ struct WelcomeView: View {
                     if store.notifies, store.notificationsBlocked {
                         Button("Open Settings") { Notifier.openSettings() }.controlSize(.small)
                     } else {
-                        Toggle("", isOn: $store.notifies).toggleStyle(.switch).labelsHidden()
+                        Toggle("Notifications", isOn: $store.notifies).toggleStyle(.switch).labelsHidden()
                     }
                 }
                 Step(symbol: "menubar.rectangle", colors: Tint.cyan, title: "The menu bar panel",
                      detail: "Click the icon, or press ⌃⌥Z, for vitals and quick fixes.") {
-                    Toggle("", isOn: $store.hotkey).toggleStyle(.switch).labelsHidden()
+                    Toggle("The menu bar panel", isOn: $store.hotkey).toggleStyle(.switch).labelsHidden()
                 }
             }
             .padding(.horizontal, 32)

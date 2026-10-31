@@ -26,6 +26,9 @@ func runUpgrade(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
+	if err := noOperands("upgrade", flags); err != nil {
+		return err
+	}
 
 	// Standard input is read once and handed to both steps.
 	listIn, applyIn := stdin, stdin

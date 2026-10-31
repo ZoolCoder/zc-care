@@ -75,6 +75,16 @@ public enum LargeFiles {
     /// the home folder takes minutes, Spotlight a moment.
     public static func query(minimum: Int64) -> String { "kMDItemFSSize >= \(minimum)" }
 
+    /// The volume to ask mdutil about: the read-only system volume at / always
+    /// reports indexing as off, whatever the home folder's volume does.
+    public static let dataVolume = "/System/Volumes/Data"
+
+    /// From `mdutil -s`. mdfind answers an index that is off with no paths
+    /// and no error, which would read as a Mac without large files.
+    public static func indexingOff(_ mdutil: String) -> Bool {
+        mdutil.contains("disabled") || mdutil.contains("No index")
+    }
+
     /// The files Spotlight found, biggest first. Library, hidden folders and
     /// app bundles are left out: what lives there belongs to apps, and
     /// Cleanup covers their caches.
@@ -162,6 +172,29 @@ public struct InstalledApp: Codable, Sendable, Equatable, Identifiable {
     public func unused(now: Date = .now) -> Bool {
         guard let since = lastUsed ?? added else { return true }
         return now.timeIntervalSince(since) > 90 * 86400
+    }
+}
+
+/// The orders the Applications list can take.
+public enum AppSort: Sendable {
+    case name, size, lastUsed
+
+    /// A to Z, largest first, or most recently used first; reversed turns
+    /// that round. Apps with no size yet, or no use date, stay last either
+    /// way: Spotlight keeps no date for some apps in daily use, so they are
+    /// not the oldest.
+    public func ordered(_ apps: [InstalledApp], reversed: Bool = false) -> [InstalledApp] {
+        let byName = apps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        switch self {
+        case .name:
+            return reversed ? byName.reversed() : byName
+        case .size:
+            let sized = byName.filter { $0.size != nil }.sorted { ($0.size ?? 0) > ($1.size ?? 0) }
+            return (reversed ? sized.reversed() : sized) + byName.filter { $0.size == nil }
+        case .lastUsed:
+            let dated = byName.filter { $0.lastUsed != nil }.sorted { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }
+            return (reversed ? dated.reversed() : dated) + byName.filter { $0.lastUsed == nil }
+        }
     }
 }
 
@@ -365,6 +398,8 @@ public struct CareScan: Codable, Sendable, Equatable {
     public var diskImages: [LargeFile]?
     public var dependencies: [LargeFile]?
     public var models: [AIModel]?
+    public var spotlightOff: Bool?
+    public var declaredUnknown: Bool?
 
     public init(scannedAt: Date, junk: [String: Int64], largeFiles: [LargeFile], apps: [InstalledApp], agents: [LaunchAgent]) {
         self.scannedAt = scannedAt
@@ -380,8 +415,7 @@ public struct CareScan: Codable, Sendable, Equatable {
     }
 
     public func save(to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(self).write(to: url, options: .atomic)
+        try PrivateFile.write(JSONEncoder().encode(self), to: url)
     }
 }
 

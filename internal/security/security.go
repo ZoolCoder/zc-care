@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zoolcoder/zc-care/internal/sh"
@@ -44,8 +45,9 @@ const (
 
 type check struct {
 	name, fix string
-	cmd       []string
-	pass      func(out string) bool
+	// cmd reads the answer; nil reads the TCP table instead.
+	cmd  []string
+	pass func(out string) bool
 }
 
 func contains(s string) func(string) bool {
@@ -70,20 +72,71 @@ func listens(port string) func(string) bool {
 	}
 }
 
-// loopback is an address only this machine can reach.
+// lo0LinkLocal is fe80::1 on lo0 as lsof prints it, with the interface index
+// inside the address.
+var lo0LinkLocal = net.ParseIP("fe80:1::1")
+
+// loopback is an address only this machine can reach. macOS gives the
+// loopback interface the link-local fe80::1 too.
 func loopback(host string) bool {
-	host, _, _ = strings.Cut(host, "%")
-	if ip := net.ParseIP(host); ip != nil {
-		return ip.IsLoopback()
+	host, zone, _ := strings.Cut(host, "%")
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return host == "localhost"
 	}
-	return host == "localhost"
+	return ip.IsLoopback() || ip.Equal(lo0LinkLocal) || zone == "lo0" && ip.IsLinkLocalUnicast()
 }
 
 func not(f func(string) bool) func(string) bool {
 	return func(out string) bool { return !f(out) }
 }
 
-var netstat = []string{"netstat", "-an", "-p", "tcp"}
+var (
+	netstat = []string{"netstat", "-an", "-p", "tcp"}
+	nettop  = []string{"nettop", "-L1", "-m", "tcp", "-n"}
+)
+
+// listeners reads the TCP table, one netstat row a server. Seen on macOS 27:
+// netstat run by a program Apple did not sign exits 0 with no rows, which
+// would read as nothing listening. nettop still shows every server, so both
+// are read and a server in either counts: one table's silence proves nothing.
+// A Mac always has servers, so a table without one is never taken for an answer.
+func (c Checker) listeners(ctx context.Context) (string, error) {
+	table, tableErr := output(ctx, c.r, readTimeout, netstat...)
+	top, topErr := output(ctx, c.r, readTimeout, nettop...)
+	rows := netstatRows(top)
+	if tableErr == nil {
+		rows = table + rows
+	}
+	if strings.Contains(rows, "LISTEN") {
+		return rows, nil
+	}
+	if err := errors.Join(tableErr, topErr); err != nil {
+		return "", err
+	}
+	return "", errors.New("netstat and nettop show no TCP servers")
+}
+
+// netstatRows turns nettop's Listen rows, like
+// "13:51:25.848314,tcp4 *:5000<->*:*,,Listen,", into netstat's. nettop ends a
+// tcp4 address with a colon and a tcp6 one with a dot.
+func netstatRows(nettop string) string {
+	var rows strings.Builder
+	for _, line := range strings.Split(nettop, "\n") {
+		f := strings.Split(line, ",")
+		if len(f) < 4 || f[3] != "Listen" {
+			continue
+		}
+		proto, ends, _ := strings.Cut(f[1], " ")
+		local, _, _ := strings.Cut(ends, "<->")
+		i := strings.LastIndexAny(local, ":.")
+		if i < 0 {
+			continue
+		}
+		fmt.Fprintf(&rows, "%s 0 0 %s.%s *.* LISTEN\n", proto, local[:i], local[i+1:])
+	}
+	return rows.String()
+}
 
 var checks = []check{
 	{"FileVault disk encryption", "turn FileVault on in System Settings, Privacy & Security",
@@ -96,11 +149,11 @@ var checks = []check{
 		[]string{"csrutil", "status"}, contains("status: enabled")},
 	{"automatic update checks", "sudo softwareupdate --schedule on",
 		[]string{"softwareupdate", "--schedule"}, contains("turned on")},
-	{"File Sharing off", fixLine("File Sharing off"), netstat, not(listens("445"))},
+	{"File Sharing off", fixLine("File Sharing off"), nil, not(listens("445"))},
 	{"Remote Login off", "System Settings, General, Sharing: turn Remote Login off, or limit it to your user",
-		netstat, not(listens("22"))},
+		nil, not(listens("22"))},
 	{"Screen Sharing off", "System Settings, General, Sharing: turn Screen Sharing and Remote Management off",
-		netstat, not(listens("5900"))},
+		nil, not(listens("5900"))},
 	// Each reads a key that is absent on a safe Mac, so the shell forgives
 	// the error and an empty answer passes.
 	{"automatic login off", fixLine("automatic login off"),
@@ -134,8 +187,13 @@ func New(r sh.Runner) Checker { return Checker{r: r, pam: "/etc/pam.d/sudo_local
 // answer is Unknown, not a failure.
 func (c Checker) Run(ctx context.Context) []Result {
 	var results []Result
+	table := sync.OnceValues(func() (string, error) { return c.listeners(ctx) })
 	for _, ch := range checks {
-		out, err := output(ctx, c.r, readTimeout, ch.cmd...)
+		read := table
+		if ch.cmd != nil {
+			read = func() (string, error) { return output(ctx, c.r, readTimeout, ch.cmd...) }
+		}
+		out, err := read()
 		if err != nil {
 			results = append(results, unknown(ch.name, err))
 			continue

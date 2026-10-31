@@ -53,6 +53,39 @@ func ok(_ json: String) -> CommandResult { CommandResult(status: 0, stdout: Data
     #expect(s.targets.count == 1)
     #expect(s.errors.count == 2)
     #expect(s.errors.allSatisfy { $0.hasSuffix("error: no such command") })
+    #expect(s.updatesUnknown)
+    #expect(!Snapshot(errors: ["doctor: broken"]).updatesUnknown)
+    #expect(!s.targetsUnknown)
+}
+
+@Test func anUnreadableTargetIsNotAnEmptyOne() async throws {
+    let list = #"[{"target":"home","items":[{"name":"tmux","kind":"brew","state":"outdated"}]},"#
+        + #"{"target":"packages","items":null,"error":"read manifest: no such file"}]"#
+    let fake = FakeRunner(outputs: ["status": ok("[]"), "doctor": ok(#"{"checks":[]}"#), "list": ok(list)])
+    let cli = CareCLI(binary: "/zc", config: "/c.yaml", env: [:], runner: fake)
+
+    let read = try await cli.itemList()
+    #expect(read.items.map(\.name) == ["tmux"])
+    #expect(read.items.first?.target == "home")
+    #expect(read.errors == ["packages: read manifest: no such file"])
+
+    // Homebrew and the app picker decide from this: a formula the unreadable
+    // Brewfile declares must not read as undeclared.
+    await #expect(throws: CLIError.self) { try await cli.items() }
+
+    let s = await cli.snapshot()
+    #expect(s.outdated.map(\.name) == ["tmux"])
+    #expect(s.errors == ["list: packages: read manifest: no such file"])
+    #expect(s.updatesUnknown)
+}
+
+@Test func noTargetsIsUnknownOnlyWhenStatusFailed() {
+    #expect(Snapshot(errors: ["status: bad yaml"]).targetsUnknown)
+    #expect(Snapshot(errors: ["status: bad yaml"]).statusError == "bad yaml")
+    #expect(!Snapshot().targetsUnknown)
+    #expect(!Snapshot(errors: ["list: home: slow"]).targetsUnknown)
+    let target = TargetStatus(target: "home", provider: "dotfiles", summary: "", inPlace: 0, declared: 1)
+    #expect(!Snapshot(targets: [target], errors: ["status: partial"]).targetsUnknown)
 }
 
 @Test func planDecodesAndSpotsDeletes() throws {
@@ -194,11 +227,73 @@ struct EchoEnvRunner: Runner {
 @Test func alertsSkipPartialSnapshots() {
     let firewall = Check(name: "security firewall", status: "warn")
     let good = Snapshot(targets: [TargetStatus(target: "home", inPlace: 36, declared: 36)], findings: [firewall])
-    let partial = Snapshot(errors: ["doctor failed"])
+    let partial = Snapshot(errors: ["doctor: failed"])
     #expect(partial.alerts(since: good, ignoring: []).isEmpty)
     // The read after a partial one would see everything as new.
     #expect(good.alerts(since: partial, ignoring: []).isEmpty)
     #expect(good.alerts(since: Snapshot(), ignoring: []).count == 1)
+}
+
+@Test func oneUnreadableTargetLeavesTheOtherAlertsOn() {
+    let packages = TargetStatus(target: "packages", provider: "packages", inPlace: 0, declared: 0, error: "mas timed out")
+    let stuck = Snapshot(targets: [packages], errors: ["list: packages: mas timed out"])
+    var now = stuck
+    now.findings = [Check(name: "security firewall", status: "warn")]
+    now.outdated = [Item(name: "tmux", kind: "brew", state: "outdated")]
+
+    // The finding is new. The update may only be the target coming back.
+    #expect(now.alerts(since: stuck, ignoring: []).map(\.title) == ["Firewall"])
+}
+
+@Test func anUnreadRowIsNotDrift() {
+    func packages(_ inPlace: Int, error: String? = nil) -> Snapshot {
+        Snapshot(targets: [TargetStatus(target: "packages", provider: "packages", inPlace: inPlace,
+                                        declared: error == nil ? 10 : 0, error: error)])
+    }
+    let stuck = packages(0, error: "mas timed out")
+    #expect(stuck.targets[0].gaps == 1)
+    // Going unreadable, and coming back at the five it was missing all along.
+    #expect(stuck.alerts(since: packages(10), ignoring: []).isEmpty)
+    #expect(packages(5).alerts(since: stuck, ignoring: []).isEmpty)
+    // Real drift between two good reads still speaks.
+    #expect(packages(4).alerts(since: packages(5), ignoring: []).map(\.title) == ["packages drifted"])
+}
+
+@Test func oneFailureCountsOnce() {
+    let row = TargetStatus(target: "packages", provider: "packages", inPlace: 0, declared: 0, error: "mas timed out")
+    #expect(Snapshot(targets: [row], errors: ["list: packages: mas timed out"]).attention(ignoring: []) == 1)
+
+    // A services target whose status row reads fine still fails every list.
+    let services = TargetStatus(target: "svc", provider: "services", inPlace: 1, declared: 1)
+    let lines = ["list: svc: launchctl failed", "services: svc: launchctl failed"]
+    #expect(Snapshot(targets: [services], errors: lines).attention(ignoring: []) == 1)
+
+    #expect(Snapshot(errors: ["status: bad", "list: bad", "doctor: bad"]).attention(ignoring: []) == 3)
+
+    // A target may be called doctor; the doctor's own failure still counts.
+    let named = TargetStatus(target: "doctor", provider: "packages", inPlace: 0, declared: 0, error: "bad")
+    #expect(Snapshot(targets: [named], errors: ["doctor: exited 2"]).attention(ignoring: []) == 2)
+}
+
+@Test func onlyATargetWithUpdatesLeavesThemUnknown() {
+    let dots = TargetStatus(target: "home", provider: "dotfiles", inPlace: 1, declared: 1)
+    let brew = TargetStatus(target: "packages", provider: "packages", inPlace: 1, declared: 1)
+    #expect(!Snapshot(targets: [dots, brew], errors: ["list: home: bad"]).updatesUnknown)
+    #expect(Snapshot(targets: [dots, brew], errors: ["list: packages: bad"]).updatesUnknown)
+    #expect(Snapshot(targets: [dots], errors: ["list: config unreadable"]).updatesUnknown)
+}
+
+@Test func oneUnreadableServicesTargetKeepsTheOther() async throws {
+    let status = #"[{"target":"svc","provider":"services","summary":"","in_place":1,"declared":1},"#
+        + #"{"target":"agents","provider":"services","summary":"","in_place":1,"declared":1}]"#
+    let list = #"[{"target":"svc","items":[{"name":"redis","kind":"service","state":"running"}]},"#
+        + #"{"target":"agents","items":null,"error":"launchctl failed"}]"#
+    let fake = FakeRunner(outputs: ["status": ok(status), "doctor": ok(#"{"checks":[]}"#), "list": ok(list)])
+    let s = await CareCLI(binary: "/zc", config: "/c.yaml", env: [:], runner: fake).snapshot()
+    #expect(s.statusError == nil)
+    #expect(s.services.map(\.name) == ["redis"])
+    #expect(s.servicesUnknown)
+    #expect(!Snapshot().servicesUnknown)
 }
 
 @Test func launchdScheduleAndState() throws {
@@ -263,6 +358,47 @@ struct EchoEnvRunner: Runner {
     v.disk?.available = 15_000_000_000
     #expect(v.grade(insecure: 5) == .fair)
     #expect(v.advice(insecure: 5, updates: 40).action == .freeUp)
+}
+
+@Test func anUnreadCheckIsNeitherAFixNorAPass() {
+    let unread = Check(name: "security Remote Login off", status: "unknown", detail: "could not read: timed out")
+    let open = Check(name: "security firewall", status: "warn", detail: "turn it on")
+    let other = Check(name: "program brew", status: "fail")
+    #expect([unread].insecure == nil)
+    #expect([unread, open].insecure == 1)
+    #expect([other].insecure == 0)
+    #expect(([] as [Check]).insecure == 0)
+    let passed = Check(name: "security firewall", status: "ok")
+    #expect([passed].insecure == 0)
+    #expect([passed, unread].insecure == nil)
+}
+
+@Test func unreadSecurityIsNotAHealthyMac() {
+    var v = Vitals()
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 97_000_000_000)
+    v.memory = Memory(pressure: 15, used: 0, total: 0)
+    #expect(v.grade(insecure: 0) == .excellent)
+    #expect(v.grade(insecure: nil) == .good)
+    #expect(v.advice(insecure: nil, updates: 0).action == .security)
+    #expect(v.advice(insecure: nil, updates: 40).action == .security)
+
+    v.disk?.available = 15_000_000_000
+    #expect(v.advice(insecure: nil, updates: 0).action == .freeUp)
+}
+
+@Test func uncheckedUpdatesAreNotGreatShape() {
+    var v = Vitals()
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 97_000_000_000)
+    v.memory = Memory(pressure: 15, used: 0, total: 0)
+    #expect(v.advice(insecure: 0, updates: 0).action == .none)
+    #expect(v.advice(insecure: 0, updates: 0, updatesUnknown: true).action == .updates)
+    #expect(v.advice(insecure: 0, updates: 3, updatesUnknown: true).title == "3 updates available")
+}
+
+@Test func onlyADoctorFailureLeavesHealthUnknown() {
+    #expect(Snapshot(targets: [], outdated: [], findings: [], errors: ["doctor: failed"]).doctorUnknown)
+    #expect(!Snapshot(targets: [], outdated: [], findings: [], errors: ["status: failed"]).doctorUnknown)
+    #expect(!Snapshot(targets: [], outdated: [], findings: [], errors: []).doctorUnknown)
 }
 
 @Test func junkEmptiesAllButWhatItKeeps() throws {
