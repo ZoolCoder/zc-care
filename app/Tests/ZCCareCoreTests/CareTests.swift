@@ -1540,3 +1540,11 @@ private struct ProfilerRunner: Runner {
     #expect(parts.map(\.size) == [1050, 550, 300, 12, 12])
     #expect(Leftovers.breakdown([], app: app).isEmpty)
 }
+
+@Test func geminiChatsAreNotClutter() throws {
+    // Gemini CLI keeps saved chats and checkpoints under ~/.gemini/tmp, whatever the name says.
+    let home = try tempDir()
+    try write(home.appendingPathComponent(".gemini/tmp/abc123/chats/session.json"), bytes: 4096)
+    try write(home.appendingPathComponent(".gemini/tmp/abc123/checkpoint-work.json"), bytes: 4096)
+    #expect(AIClutter.find(home: home.path, claudeTemp: home.path + "/none").isEmpty)
+}

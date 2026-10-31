@@ -98,7 +98,7 @@ It has these modules:
 | Module | Does |
 |---|---|
 | Smart Care | Scans everything at once and cleans up in one click. |
-| Cleanup | Clears caches, logs, build output and Mail downloads. Clears what AI tools leave behind: Claude Code temp files and old versions, and the caches of Claude, Cursor, ChatGPT, Windsurf, Codex and Gemini CLI. |
+| Cleanup | Clears caches, logs, build output and Mail downloads. Clears what AI tools leave behind: Claude Code temp files and old versions, and the caches of Claude, Cursor, ChatGPT, Windsurf and Codex. |
 | Protection | Shows Gatekeeper's verdict per app, background apps (newly appeared ones marked), extensions (Safari, Finder, Share, Quick Look, Spotlight and system extensions, with their host app and state) and privacy permissions. |
 | Performance | Manages login items and runs maintenance: free RAM, flush DNS, thin snapshots, reindex Spotlight. Top processes by CPU or memory, with *Quit* and *Force Quit*. |
 | Applications | Uninstalls apps with their leftovers. *Adopt* moves an app installed by hand to Homebrew. |
