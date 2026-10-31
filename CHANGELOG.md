@@ -4,7 +4,9 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
-## Unreleased
+## v0.4.2 — 2026-10-31
+
+A crash fix, so upgrade: ZC Care quit soon after it opened.
 
 ### ZC Care
 
