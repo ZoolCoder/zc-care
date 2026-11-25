@@ -4,7 +4,9 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
-## Unreleased
+## v0.5.0 — 2026-11-25
+
+Keeps the disk from filling: Docker cleanup that reaches Colima, two new disk alerts, and a floor under every removal.
 
 ### ZC Care
 
