@@ -45,6 +45,7 @@ struct DeveloperView: View {
                             }
                         }
                     }
+                    if !care.staleBuilds.isEmpty { staleBuilds }
                     if !care.xcodeSpots.isEmpty { xcode }
                     HomebrewSection(care: care)
                     SimulatorRuntimesSection(care: care)
@@ -80,6 +81,28 @@ struct DeveloperView: View {
                 }
                 .padding(.horizontal, 28)
                 .padding(.bottom, 70)
+            }
+        }
+    }
+
+    private var staleBuilds: some View {
+        CareSection("Old Rust Builds") {
+            ForEach(care.staleBuilds) { builds in
+                CareRow(icon: SymbolTile(symbol: "gearshape.2.fill", colors: Tint.orange, size: 32),
+                    title: builds.project.lastPathComponent,
+                    detail: "\(Store.counted(builds.folders.count, "build-script folder")) over a week old · "
+                        + (builds.project.path as NSString).abbreviatingWithTildeInPath,
+                    value: Store.bytes(builds.size)) {
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([builds.project.appendingPathComponent("target")]) } label: {
+                        Image(systemName: "magnifyingglass").accessibilityLabel("Show in Finder")
+                    }
+                    .controlSize(.small)
+                    .help("Show in Finder")
+                    Button(removalButton(care.store)) { Task { await care.trash(builds) } }
+                        .controlSize(.small)
+                        .help(removalVerb(care.store))
+                        .gatedOnBusy(care.store)
+                }
             }
         }
     }

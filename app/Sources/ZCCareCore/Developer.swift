@@ -50,7 +50,7 @@ public enum ProjectDependencies {
     }
 
     /// Calls `hit` for each dependency folder, and does not go into one.
-    private static func walk(_ folder: URL, depth: Int, hit: (URL) -> Void) {
+    static func walk(_ folder: URL, depth: Int, hit: (URL) -> Void) {
         guard depth > 0 else { return }
         let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey, .isPackageKey]
         let children = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
@@ -104,6 +104,78 @@ public enum ProjectDependencies {
             newest = max(newest, (try? url.resourceValues(forKeys: keys))?.contentModificationDate ?? .distantPast)
         }
         return newest
+    }
+}
+
+/// Old build-script output in one Rust project.
+public struct StaleBuilds: Sendable, Equatable, Identifiable {
+    public var project: URL
+    public var folders: [URL]
+    public var size: Int64
+
+    public var id: String { project.path }
+}
+
+/// Cargo keeps a build script's output in target/<profile>/build/<package>/<hash>,
+/// starts a new hash when features, flags or the toolchain change, and never
+/// removes the old one. A crate that compiles a C++ library leaves gigabytes
+/// in each.
+public enum CargoBuilds {
+    /// Each project's old output, biggest first. A project in active
+    /// work is where it piles up, so idleness is not asked for.
+    public static func find(roots: [URL], olderThan days: Int = 7, now: Date = .now, depth: Int = 6) -> [StaleBuilds] {
+        var found: [StaleBuilds] = []
+        for root in roots {
+            ProjectDependencies.walk(root, depth: depth) { target in
+                let project = target.deletingLastPathComponent()
+                guard target.lastPathComponent == "target", FileManager.default.fileExists(atPath: project.appendingPathComponent("Cargo.toml").path) else { return }
+                let folders = stale(target: target, olderThan: days, now: now)
+                guard !folders.isEmpty else { return }
+                found.append(StaleBuilds(project: project, folders: folders, size: folders.reduce(0) { $0 + DiskUsage.allocated($1) }))
+            }
+        }
+        return found.sorted { $0.size > $1.size }
+    }
+
+    /// Where a build script ran, older than `days`, except each package's
+    /// newest. Only those: a package's other hash folders are its compiled
+    /// units, all in use at once. Two runs can be in use too, for other
+    /// features or a host build, so an older one may be rebuilt.
+    public static func stale(target: URL, olderThan days: Int = 7, now: Date = .now) -> [URL] {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86400)
+        var stale: [URL] = []
+        for profile in folders(in: target) {
+            for package in folders(in: profile).filter({ $0.lastPathComponent == "build" }).flatMap(folders) {
+                let hashes = folders(in: package).filter { isHash($0.lastPathComponent) && ranBuildScript($0) }
+                    .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? now) }
+                    .sorted { $0.1 > $1.1 }
+                stale += hashes.dropFirst().filter { $0.1 < cutoff }.map(\.0)
+            }
+        }
+        return stale
+    }
+
+    /// A build in progress may be reading any of it.
+    public static func building(_ commands: [String]) -> Bool {
+        commands.contains { ["cargo", "rustc"].contains(($0.prefix { $0 != " " } as NSString).lastPathComponent) }
+    }
+
+    private static func ranBuildScript(_ folder: URL) -> Bool {
+        let fingerprints = (try? FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent("fingerprint").path)) ?? []
+        return fingerprints.contains { $0.hasPrefix("run-build-script-") }
+    }
+
+    static func isHash(_ name: String) -> Bool {
+        name.count == 16 && name.allSatisfy(\.isHexDigit)
+    }
+
+    private static func folders(in url: URL) -> [URL] {
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isSymbolicLinkKey]
+        let all = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: keys)) ?? []
+        return all.filter {
+            let v = try? $0.resourceValues(forKeys: Set(keys))
+            return v?.isDirectory == true && v?.isSymbolicLink != true
+        }
     }
 }
 

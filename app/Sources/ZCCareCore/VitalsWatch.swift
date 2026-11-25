@@ -44,8 +44,11 @@ public struct VitalsWatch: Sendable {
     /// Checks in a row before memory or heat counts.
     static let sustained = 3
     static let quiet: [String: TimeInterval] = [
-        "disk": 6 * 3600, "memory": 3600, "heat": 3600, "battery": 7 * 86400, "trash": 86400,
+        "disk": 6 * 3600, "disk critical": 1800, "memory": 3600, "heat": 3600, "battery": 7 * 86400, "trash": 86400,
     ]
+    /// Free space under which builds fail and apps cannot save. It warns
+    /// apart from the limit in Settings, and more often.
+    static let diskCritical: Int64 = 5_000_000_000
     /// Each device keeps still this long once it has warned.
     static let deviceQuiet: TimeInterval = 6 * 3600
     /// Checks in a row before one app counts as hogging: ten minutes, so a
@@ -79,7 +82,12 @@ public struct VitalsWatch: Sendable {
             alerts.append(alert())
         }
         if let disk = v.disk {
-            check("disk", disk.available < Int64(limits.diskFreeGB) * 1_000_000_000) {
+            let critical = disk.available < Self.diskCritical
+            check("disk critical", critical) {
+                Alert(id: "vitals disk critical", title: "\(disk.name) is nearly out of space",
+                      body: "\(Self.gb(disk.available)) left. Developer lists what builds and Docker hold.")
+            }
+            check("disk", !critical && disk.available < Int64(limits.diskFreeGB) * 1_000_000_000) {
                 Alert(id: "vitals disk", title: "\(disk.name) is almost full",
                       body: "\(Self.gb(disk.available)) left. Cleanup can free space.")
             }

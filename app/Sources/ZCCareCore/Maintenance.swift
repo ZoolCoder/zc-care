@@ -65,11 +65,15 @@ public enum Maintenance {
                                          every: 30 * day))
         }
         // Stopped containers stay: one may hold a dev database's only copy.
+        // Those Testcontainers started are test fixtures left by a run that
+        // was killed; volume prune takes only unnamed volumes no container uses.
         if let docker {
             tasks.append(MaintenanceTask(id: "docker", title: "Prune Docker",
-                                         detail: "Dangling images, unused networks and build cache; containers stay.",
+                                         detail: "Dangling images, unused networks, build cache, stopped Testcontainers containers and unnamed volumes no container uses; other containers stay.",
                                          symbol: "shippingbox.fill",
-                                         steps: [[docker, "image", "prune", "-f"], [docker, "network", "prune", "-f"],
+                                         steps: [[docker, "container", "prune", "-f", "--filter", Docker.testcontainers],
+                                                 [docker, "volume", "prune", "-f", "--filter", Docker.anonymousVolumes],
+                                                 [docker, "image", "prune", "-f"], [docker, "network", "prune", "-f"],
                                                  [docker, "builder", "prune", "-f"]],
                                          docker: true, every: 14 * day))
         }

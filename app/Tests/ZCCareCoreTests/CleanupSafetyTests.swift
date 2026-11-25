@@ -313,3 +313,75 @@ private func age(_ url: URL, days: Double) throws {
     let cookies = try #require(BrowserPrivacy.find(home: home.path).first { $0.kind == BrowserPrivacy.cookies })
     #expect(cookies.bundleIDs == ["org.mozilla.firefox", "org.mozilla.firefoxdeveloperedition", "org.mozilla.nightly"])
 }
+
+@Test func cargoSweepKeepsEachPackagesNewestRunAndItsCompiledUnits() throws {
+    let root = try tempDir()
+    let build = root.appendingPathComponent("app/target/debug/build")
+    try write(root.appendingPathComponent("app/Cargo.toml"))
+    let run = "fingerprint/run-build-script-build-script-build"
+    let units: [(String, String, Double)] = [
+        ("duck/00000000000000a1", run, 30), ("duck/00000000000000a2", run, 20), ("duck/00000000000000a3", run, 2),
+        ("duck/00000000000000a4", run, 1), ("duck/00000000000000a5", "fingerprint/lib-duck", 30),
+        ("duck/00000000000000a6", "fingerprint/build-script-build-script-build", 30),
+        ("lone/00000000000000b1", run, 40), ("duck/out", run, 50),
+    ]
+    for (path, file, _) in units { try write(build.appendingPathComponent(path + "/" + file)) }
+    for (path, _, days) in units { try age(build.appendingPathComponent(path), days: days) }
+    for name in ["plain/target", "mixed/node_modules"] {
+        try write(root.appendingPathComponent(name + "/debug/build/duck/00000000000000c1/" + run))
+        try write(root.appendingPathComponent(name + "/debug/build/duck/00000000000000c2/" + run))
+        try age(root.appendingPathComponent(name + "/debug/build/duck/00000000000000c1"), days: 30)
+    }
+    try write(root.appendingPathComponent("mixed/Cargo.toml"))
+    let linked = root.appendingPathComponent("linked/target/debug")
+    try write(root.appendingPathComponent("linked/Cargo.toml"))
+    try FileManager.default.createDirectory(at: linked, withIntermediateDirectories: true)
+    try FileManager.default.createSymbolicLink(at: linked.appendingPathComponent("build"), withDestinationURL: build)
+
+    let found = CargoBuilds.find(roots: [root])
+    #expect(found.map(\.project.lastPathComponent) == ["app"])
+    #expect(Set(found.first?.folders.map(\.lastPathComponent) ?? []) == ["00000000000000a1", "00000000000000a2"])
+    #expect((found.first?.size ?? 0) > 0)
+
+    #expect(CargoBuilds.building(["/bin/zsh -l", "/Users/x/.cargo/bin/cargo build --release"]))
+    #expect(CargoBuilds.building(["rustc --crate-name app src/main.rs"]))
+    #expect(!CargoBuilds.building(["/usr/bin/vim Cargo.toml", "/opt/homebrew/bin/cargo-watch -x check"]))
+}
+
+@Test func removalRefusesTheFoldersEverythingLivesIn() throws {
+    let home = "/Users/someone"
+    for path in ["/", "/Users", "/Users/someone", "/Users/other", "/Volumes/Disk", "/Applications", "/Library/Caches",
+                 "/System/Library/Fonts/a.ttf", "/usr/bin/true", "/opt/homebrew", "relative/path",
+                 home + "/Documents", home + "/Developer", home + "/Library", home + "/Library/Caches",
+                 home + "/Library/Application Support", home + "/Documents/../Desktop", home + "/./Documents",
+                 home + "/documents", home + "/LIBRARY/caches", "/system/x/y", "/usr/local", home + "/.ssh",
+                 home + "/Pictures/Photos Library.photoslibrary", home + "/Library/Mobile Documents/com~apple~CloudDocs",
+                 "/opt/homebrew/Cellar", "/.vol/1/2"] {
+        #expect(Removal.isProtected(path, home: home), "\(path)")
+    }
+    for path in ["/Applications/Some.app", "/usr/local/bin/tool", "/Library/LaunchDaemons/a.plist", "/private/tmp/claude/x",
+                 home + "/.npm", home + "/Library/Caches/com.some.app", home + "/Documents/old.zip",
+                 home + "/Developer/project/target", home + "/Applications/Some.app", "/Volumes/Disk/file",
+                 home + "/Library/Developer/Xcode", home + "/.ssh/known_hosts.old", "/opt/homebrew/Cellar/old/1.0"] {
+        #expect(!Removal.isProtected(path, home: home), "\(path)")
+    }
+    #expect(Removal.isProtected(home + "/Documents", home: home + "/"))
+}
+
+@Test func removalFollowsALinkedParentToAProtectedFolder() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let home = root.appendingPathComponent("home")
+    let caches = home.appendingPathComponent("Library/Caches")
+    try FileManager.default.createDirectory(at: caches, withIntermediateDirectories: true)
+    let link = home.appendingPathComponent(".tool")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: home.appendingPathComponent("Library"))
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(Removal.isProtected(link.appendingPathComponent("Caches").path, home: home.path))
+    #expect(!Removal.isProtected(link.path, home: home.path))
+    #expect(!Removal.isProtected(caches.appendingPathComponent("com.some.app").path, home: home.path))
+
+    let kept = Removal.delete([caches, link.appendingPathComponent("Caches")], home: home.path)
+    #expect(kept.failures.map(\.reason) == [.protected, .protected])
+    #expect(FileManager.default.fileExists(atPath: caches.path))
+}

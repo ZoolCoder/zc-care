@@ -74,6 +74,8 @@ final class Care {
     var diskImages: [LargeFile] = []
     /// node_modules and the like in projects left alone for 90 days.
     var dependencies: [LargeFile] = []
+    /// Build-script output Cargo has replaced, a row for each Rust project.
+    var staleBuilds: [StaleBuilds] = []
     var models: [AIModel] = []
     /// Nil when Docker is not installed or its daemon does not answer.
     var docker: [DockerUsage]?
@@ -192,6 +194,7 @@ final class Care {
         oldDownloads = list.keep(oldDownloads)
         diskImages = list.keep(diskImages)
         dependencies = list.keep(dependencies)
+        staleBuilds.removeAll { list.touches($0.project) || $0.folders.contains(where: list.touches) }
         duplicates = list.keep(duplicates)
         similar = similar.map(list.keep)
         models.removeAll { $0.paths.contains(where: list.touches) }
@@ -749,8 +752,11 @@ final class Care {
         }.value
         async let found = Task.detached(priority: .utility) { AIModels.find(home: home) }.value
         async let xcode = Task.detached(priority: .utility) { XcodeSpots.find(home: home) }.value
+        async let builds = Task.detached(priority: .utility) {
+            CargoBuilds.find(roots: ProjectDependencies.roots(home: home))
+        }.value
         async let usage: Void = scanDocker()
-        (dependencies, models, xcodeSpots) = await (stale, found, xcode)
+        (dependencies, models, xcodeSpots, staleBuilds) = await (stale, found, xcode, builds)
         await usage
         scannedDeveloper = true
         applyIgnoreList()
@@ -776,13 +782,15 @@ final class Care {
         let failed = await store.failure("docker exited with an error") {
             try await Docker.run(program, arguments, env: store.loginEnv, runner: ProcessRunner(timeout: 300))
         }
+        let untrimmed = failed == nil ? await trimDocker() : nil
         await scanDocker()
         let freed = max(before - (docker?.reduce(0) { $0 + $1.size } ?? before), 0)
         if let failed {
             store.message = Store.Message(text: "\(title): \(failed)", failed: true)
         } else {
             store.record(.developer, title, freed: freed)
-            store.message = Store.Message(text: "\(title): freed \(Store.bytes(freed)).", failed: false)
+            let note = untrimmed.map { " Colima's disk was not trimmed: \($0)" } ?? ""
+            store.message = Store.Message(text: "\(title): freed \(Store.bytes(freed)).\(note)", failed: untrimmed != nil)
         }
         monitor.readDisk()
     }
@@ -807,6 +815,44 @@ final class Care {
         } else {
             xcodeSpots.removeAll { $0.id == spot.id }
             store.message = Store.Message(text: "\(spot.title) is \(store.removed).", failed: false)
+        }
+        monitor.readDisk()
+    }
+
+    /// Removes the build-script output the project's builds have replaced,
+    /// read again first: a build since the scan may have changed which is newest.
+    func trash(_ builds: StaleBuilds) async {
+        guard store.busy == nil, !removing else { return }
+        removing = true
+        defer { removing = false }
+        let title = "Old builds of \(builds.project.lastPathComponent)"
+        if CargoBuilds.building(await Monitor.commands()) {
+            store.message = Store.Message(text: "\(title): Cargo is building, so they stay for now.", failed: false)
+            return
+        }
+        let target = builds.project.appendingPathComponent("target")
+        let (folders, size) = await Task.detached(priority: .userInitiated) {
+            let folders = CargoBuilds.stale(target: target)
+            return (folders, folders.reduce(0) { $0 + DiskUsage.allocated($1) })
+        }.value
+        guard !folders.isEmpty else { staleBuilds.removeAll { $0.id == builds.id }; return }
+        guard allowed(folders),
+              Alerts.confirm(store.removeQuestion(title),
+                             "\(Store.bytes(size)) in \(Store.counted(folders.count, "folder")) of "
+                                 + "\((target.path as NSString).abbreviatingWithTildeInPath). Each package keeps its newest; "
+                                 + "Cargo runs the build script again if a build still needs one of the others.",
+                             button: store.removeButton), store.busy == nil else { return }
+        // A build may have started while the question was up.
+        guard !CargoBuilds.building(await Monitor.commands()), store.busy == nil else { return }
+        store.busy = "Removing \(title.lowercased())"
+        defer { store.busy = nil }
+        let (failure, trashed) = await recycle(folders)
+        recordRemoval(.developer, title, freed: size, failure: failure, trashed: trashed)
+        if let failure {
+            store.message = Store.Message(text: "\(title): \(failure)", failed: true)
+        } else {
+            staleBuilds.removeAll { $0.id == builds.id }
+            store.message = Store.Message(text: "\(title) are \(store.removed).", failed: false)
         }
         monitor.readDisk()
     }
@@ -1447,6 +1493,10 @@ final class Care {
             let removal = await remove(urls)
             return (removal.failures.isEmpty ? nil : removal.summary, [])
         }
+        // The Finder's move does not pass Removal, so its floor is asked here.
+        if let refused = urls.first(where: { Removal.isProtected($0.path) }) {
+            return ("ZC Care never removes \(refused.lastPathComponent)", [])
+        }
         // Read before the move: without Full Disk Access the Trash is closed.
         let identities = Dictionary(urls.map { ($0, Trashed.prepare($0.path)) }, uniquingKeysWith: { a, _ in a })
         return await withCheckedContinuation { continuation in
@@ -1609,7 +1659,19 @@ final class Care {
             }
             if let failed { return failed }
         }
+        // The prune is done whether or not the trim works.
+        if task.docker { _ = await trimDocker() }
         return nil
+    }
+
+    /// Gives the space a prune freed inside Colima's VM back to macOS; why
+    /// that failed, if it did.
+    private func trimDocker() async -> String? {
+        guard let program = dockerProgram else { return nil }
+        return await store.failure("fstrim failed") {
+            try await Docker.trim(docker: program, colima: self.store.program("colima"), env: self.store.loginEnv,
+                                  runner: ProcessRunner(timeout: 300)) ?? CommandResult(status: 0)
+        }
     }
 
     /// Runs one task after asking; admin tasks go through osascript, which

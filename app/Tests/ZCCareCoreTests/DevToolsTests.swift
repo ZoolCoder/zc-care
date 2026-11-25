@@ -23,9 +23,9 @@ private let df = """
 }
 
 @Test func dockerUsageIsNilWhenTheDaemonDoesNotAnswer() async {
-    let down = FakeRunner(outputs: ["system": CommandResult(status: 1, stderr: "Cannot connect to the Docker daemon")])
+    let down = FakeRunner(outputs: ["--context": CommandResult(status: 1, stderr: "Cannot connect to the Docker daemon")])
     #expect(await Docker.usage(docker: "docker", env: [:], runner: down) == nil)
-    let up = FakeRunner(outputs: ["system": ok(df)])
+    let up = FakeRunner(outputs: ["--context": ok(df)])
     #expect(await Docker.usage(docker: "docker", env: [:], runner: up)?.count == 3)
 }
 

@@ -4,6 +4,30 @@ Notable changes, newest first. Versions follow [semver](https://semver.org);
 before 1.0 a minor bump may change the config format, and any that does says so
 here with what to edit.
 
+## Unreleased
+
+### ZC Care
+
+- A second disk warning comes when less than 5 GB is free, every half hour
+  while it lasts, and opens Developer. The first one, at the limit in
+  Settings, comes once in six hours and was easy to miss.
+- Docker cleanup works again, and works with Colima and OrbStack. ZC Care put
+  `--context` after the subcommand, which Docker refuses, and only ever named
+  Docker Desktop's context, so Developer showed no Docker usage and every
+  prune failed. It now uses the context in use when that is a local socket.
+- Prune Docker also removes the stopped containers Testcontainers leaves
+  behind and the unnamed volumes no container uses. Other stopped containers
+  and named volumes stay. With Colima, a prune then runs `fstrim` in the VM,
+  so the space it freed comes back to macOS.
+- Developer lists Old Rust Builds: build-script output more than a week old,
+  which Cargo never removes, a row for each project. Each package keeps its
+  newest, compiled crates stay, and nothing goes while Cargo is building.
+- No cleanup can remove a folder everything else lives in. The top of the
+  disk, of a volume and of a home folder, Documents, Desktop, Library and their
+  like, `~/Library/Caches` and its neighbours and the system's own folders are
+  refused at the last step, whatever a scan listed, also when a link in the
+  path leads to one. Only Space Lens had such a check before.
+
 ## v0.4.2 — 2026-10-31
 
 A crash fix, so upgrade: ZC Care quit soon after it opened.
