@@ -26,6 +26,9 @@ here with what to edit.
   before the disk is full.
 - Developer lists the largest dependency and build folders of projects in use, to see where the space went; it does
   not remove them. The Docker section shows what Colima's disk takes on the Mac.
+- Settings can let routine maintenance run by itself when it is due: Homebrew cleanup, Docker prune and Open
+  With repair. It is off until turned on, and waits for mains power like the weekly scan.
+- Prune Docker leaves networks made within the hour, so it cannot take one from a compose run that is starting.
 - No cleanup can remove a folder everything else lives in. The top of the
   disk, of a volume and of a home folder, Documents, Desktop, Library and their
   like, `~/Library/Caches` and its neighbours and the system's own folders are

@@ -1240,6 +1240,14 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(!Maintenance.due(tasks, log: ActivityLog(), now: now).contains { $0.admin })
 }
 
+@Test func maintenanceRunsUnaskedOnlyWhatIsSafeAndNotJustTried() {
+    let now = Date()
+    let tasks = Maintenance.tasks(brew: "/opt/homebrew/bin/brew", docker: "/opt/homebrew/bin/docker", xcode: true)
+    #expect(Maintenance.unattended(tasks, log: ActivityLog(), now: now).map(\.id) == ["launchservices", "brew", "docker"])
+    let tried = ["docker": now.addingTimeInterval(-3600), "brew": now.addingTimeInterval(-90_000)]
+    #expect(Maintenance.unattended(tasks, log: ActivityLog(), tried: tried, now: now).map(\.id) == ["launchservices", "brew"])
+}
+
 @Test func processRunnerStopsWhatOutlivesItsTimeout() async throws {
     let start = Date()
     await #expect(throws: CLIError.self) {

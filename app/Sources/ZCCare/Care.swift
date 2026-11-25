@@ -375,6 +375,7 @@ final class Care {
             try? await Task.sleep(for: .seconds(60))
             while !Task.isCancelled {
                 await self?.scheduledScan()
+                await self?.scheduledMaintenance()
                 try? await Task.sleep(for: .seconds(3600))
             }
         }
@@ -397,6 +398,33 @@ final class Care {
         guard store.notifies else { return }
         store.notifier.post(CareSchedule.alerts(junk: junk, outdated: store.snapshot?.outdated.count ?? 0,
                                                 findings: store.findings.count, drive: diskHealth))
+    }
+
+    /// When each task was last tried unasked.
+    private var triedUnasked: [String: Date] = [:]
+
+    /// Nothing the user started, and no question waiting for an answer.
+    private var idle: Bool {
+        store.busy == nil && !scanning && !monitor.scanning && !removing && review == nil && quitRequest == nil
+            && NSApp.modalWindow == nil
+    }
+
+    /// Runs the routine tasks that are due, when Settings allows it. One
+    /// that fails is not logged as run, and is tried again the next day.
+    private func scheduledMaintenance() async {
+        guard store.autoMaintenance, idle, Self.canWorkUnasked else { return }
+        await store.connected()
+        if maintenance.isEmpty { loadMaintenance() }
+        for task in Maintenance.unattended(maintenance, log: store.activity, tried: triedUnasked) {
+            guard idle, !Task.isCancelled else { return }
+            triedUnasked[task.id] = .now
+            store.busy = task.title
+            let failure = await store.cancellable { await self.steps(of: task, runner: ProcessRunner(timeout: 600)) }
+            store.busy = nil
+            if failure == nil { store.record(.maintenance, task.title) }
+            if failure == Store.cancelled { break }
+        }
+        monitor.readDisk()
     }
 
     /// Smart Care's Run: cleans up, then updates, each after its question.
@@ -1649,7 +1677,7 @@ final class Care {
     }
 
     /// Runs the task's steps; why one failed, if one did.
-    private func steps(of task: MaintenanceTask) async -> String? {
+    private func steps(of task: MaintenanceTask, runner: ProcessRunner = ProcessRunner()) async -> String? {
         if task.admin {
             let failed = await store.failure("osascript failed") {
                 try await ProcessRunner().run("/usr/bin/osascript", ["-e", Maintenance.adminScript(task.steps)], env: [:])
@@ -1661,9 +1689,9 @@ final class Care {
                 let arguments = Array(step.dropFirst())
                 let env = self.store.loginEnv.merging(task.env) { $1 }
                 if task.docker {
-                    return try await Docker.run(step[0], arguments, env: env, runner: ProcessRunner())
+                    return try await Docker.run(step[0], arguments, env: env, runner: runner)
                 }
-                return try await ProcessRunner().run(step[0], arguments, env: env)
+                return try await runner.run(step[0], arguments, env: env)
             }
             if let failed { return failed }
         }

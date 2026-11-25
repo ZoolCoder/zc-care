@@ -15,6 +15,9 @@ public struct MaintenanceTask: Sendable, Equatable, Identifiable {
     /// How often Smart Care suggests it; nil for a task run only when
     /// something is wrong.
     public var every: TimeInterval?
+    /// May run with nobody there to ask. Not when what it deletes for good
+    /// depends on a passing state, as simulators do on the Xcode selected.
+    public var unattended = true
     /// Set over the login environment for each step.
     public var env: [String: String] = [:]
 }
@@ -62,7 +65,7 @@ public enum Maintenance {
             tasks.append(MaintenanceTask(id: "simulators", title: "Delete Unavailable Simulators",
                                          detail: "Simulators whose runtime Xcode no longer has.",
                                          symbol: "iphone", steps: [["/usr/bin/xcrun", "simctl", "delete", "unavailable"]],
-                                         every: 30 * day))
+                                         every: 30 * day, unattended: false))
         }
         // Stopped containers stay: one may hold a dev database's only copy.
         // Those Testcontainers started are test fixtures left by a run that
@@ -73,7 +76,7 @@ public enum Maintenance {
                                          symbol: "shippingbox.fill",
                                          steps: [[docker, "container", "prune", "-f", "--filter", Docker.testcontainers],
                                                  [docker, "volume", "prune", "-f", "--filter", Docker.anonymousVolumes],
-                                                 [docker, "image", "prune", "-f"], [docker, "network", "prune", "-f"],
+                                                 [docker, "image", "prune", "-f"], [docker, "network", "prune", "-f", "--filter", "until=1h"],
                                                  [docker, "builder", "prune", "-f"]],
                                          docker: true, every: 14 * day))
         }
@@ -89,6 +92,15 @@ public enum Maintenance {
             guard let every = task.every, !task.admin else { return false }
             let last = log.entries.last { $0.kind == .maintenance && $0.title == task.title }?.date
             return last.map { now.timeIntervalSince($0) >= every } ?? true
+        }
+    }
+
+    /// What may run by itself now: due, safe with nobody there, and not
+    /// tried within a day, so a task that keeps failing does not run every hour.
+    public static func unattended(_ tasks: [MaintenanceTask], log: ActivityLog, tried: [String: Date] = [:],
+                                  now: Date = .now) -> [MaintenanceTask] {
+        due(tasks, log: log, now: now).filter { task in
+            task.unattended && tried[task.id].map { now.timeIntervalSince($0) >= day } ?? true
         }
     }
 
