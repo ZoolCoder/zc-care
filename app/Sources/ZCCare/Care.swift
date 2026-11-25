@@ -76,9 +76,13 @@ final class Care {
     var dependencies: [LargeFile] = []
     /// Build-script output Cargo has replaced, a row for each Rust project.
     var staleBuilds: [StaleBuilds] = []
+    /// The biggest dependency and build folders of projects in use, to see only.
+    var activeBuilds: [LargeFile] = []
     var models: [AIModel] = []
     /// Nil when Docker is not installed or its daemon does not answer.
     var docker: [DockerUsage]?
+    /// What Colima's disk images take on this Mac; 0 without Colima.
+    var colimaDisk: Int64 = 0
     var xcodeSpots: [XcodeSpot] = []
     /// Caches, logs, temp files and old versions AI tools leave.
     var aiJunk: [AIJunk] = []
@@ -194,6 +198,7 @@ final class Care {
         oldDownloads = list.keep(oldDownloads)
         diskImages = list.keep(diskImages)
         dependencies = list.keep(dependencies)
+        activeBuilds = list.keep(activeBuilds)
         staleBuilds.removeAll { list.touches($0.project) || $0.folders.contains(where: list.touches) }
         duplicates = list.keep(duplicates)
         similar = similar.map(list.keep)
@@ -746,9 +751,10 @@ final class Care {
         defer { scanningDeveloper = false }
         let home = NSHomeDirectory()
         async let stale = Task.detached(priority: .utility) {
-            let found = ProjectDependencies.find(roots: ProjectDependencies.roots(home: home))
+            let all = ProjectDependencies.all(roots: ProjectDependencies.roots(home: home))
+            let found = ProjectDependencies.idle(all)
             let running = Set(ProjectDependencies.running(found, commands: await Monitor.commands()).map(\.id))
-            return found.filter { !running.contains($0.id) }
+            return (found.filter { !running.contains($0.id) }, ProjectDependencies.active(all))
         }.value
         async let found = Task.detached(priority: .utility) { AIModels.find(home: home) }.value
         async let xcode = Task.detached(priority: .utility) { XcodeSpots.find(home: home) }.value
@@ -756,7 +762,7 @@ final class Care {
             CargoBuilds.find(roots: ProjectDependencies.roots(home: home))
         }.value
         async let usage: Void = scanDocker()
-        (dependencies, models, xcodeSpots, staleBuilds) = await (stale, found, xcode, builds)
+        ((dependencies, activeBuilds), models, xcodeSpots, staleBuilds) = await (stale, found, xcode, builds)
         await usage
         scannedDeveloper = true
         applyIgnoreList()
@@ -768,8 +774,10 @@ final class Care {
     }
 
     private func scanDocker() async {
-        guard let program = dockerProgram else { docker = nil; return }
+        guard let program = dockerProgram else { docker = nil; colimaDisk = 0; return }
         docker = await Docker.usage(docker: program, env: store.loginEnv)
+        let disks = URL(fileURLWithPath: NSHomeDirectory() + "/.colima/_lima")
+        colimaDisk = await Task.detached(priority: .utility) { DiskUsage.allocated(disks) }.value
     }
 
     /// Runs a Docker prune after asking; `what` says what it removes.

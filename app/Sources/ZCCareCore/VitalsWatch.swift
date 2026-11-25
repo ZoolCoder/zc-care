@@ -44,11 +44,17 @@ public struct VitalsWatch: Sendable {
     /// Checks in a row before memory or heat counts.
     static let sustained = 3
     static let quiet: [String: TimeInterval] = [
-        "disk": 6 * 3600, "disk critical": 1800, "memory": 3600, "heat": 3600, "battery": 7 * 86400, "trash": 86400,
+        "disk": 6 * 3600, "disk critical": 1800, "disk falling": 1800, "memory": 3600, "heat": 3600, "battery": 7 * 86400, "trash": 86400,
     ]
     /// Free space under which builds fail and apps cannot save. It warns
     /// apart from the limit in Settings, and more often.
     static let diskCritical: Int64 = 5_000_000_000
+    /// Space lost within an hour that warns whatever is still free: a
+    /// runaway build fills a disk between two checks of its level.
+    static let diskFall: Int64 = 10_000_000_000
+    /// The free space read at each check of the last hour: a fall is
+    /// measured from the most among them.
+    private var diskReadings: [(at: Date, available: Int64)] = []
     /// Each device keeps still this long once it has warned.
     static let deviceQuiet: TimeInterval = 6 * 3600
     /// Checks in a row before one app counts as hogging: ten minutes, so a
@@ -87,6 +93,15 @@ public struct VitalsWatch: Sendable {
                 Alert(id: "vitals disk critical", title: "\(disk.name) is nearly out of space",
                       body: "\(Self.gb(disk.available)) left. Developer lists what builds and Docker hold.")
             }
+            diskReadings.removeAll { now.timeIntervalSince($0.at) > 3600 }
+            diskReadings.append((now, disk.available))
+            let fallen = (diskReadings.map(\.available).max() ?? disk.available) - disk.available
+            check("disk falling", !critical && fallen >= Self.diskFall) {
+                Alert(id: "vitals disk falling", title: "\(disk.name) is filling fast",
+                      body: "\(Self.gb(fallen)) gone within the hour, \(Self.gb(disk.available)) left. Developer lists what builds and Docker hold.")
+            }
+            // One fall warns once: the next is measured from here.
+            if posted["disk falling"] == now { diskReadings = [(now, disk.available)] }
             check("disk", !critical && disk.available < Int64(limits.diskFreeGB) * 1_000_000_000) {
                 Alert(id: "vitals disk", title: "\(disk.name) is almost full",
                       body: "\(Self.gb(disk.available)) left. Cleanup can free space.")

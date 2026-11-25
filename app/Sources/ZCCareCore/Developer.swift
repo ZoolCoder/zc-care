@@ -22,16 +22,33 @@ public enum ProjectDependencies {
     /// Dependency folders of projects not touched for `days`, biggest first;
     /// `modified` is when the project itself last changed.
     public static func find(roots: [URL], olderThan days: Int = 90, now: Date = .now, depth: Int = 6) -> [LargeFile] {
-        let cutoff = now.addingTimeInterval(-Double(days) * 86400)
+        idle(all(roots: roots, depth: depth), olderThan: days, now: now)
+    }
+
+    /// Every dependency folder under the roots with its size, biggest first.
+    public static func all(roots: [URL], depth: Int = 6) -> [LargeFile] {
         var found: [LargeFile] = []
         for root in roots {
             walk(root, depth: depth) { folder in
                 let touched = lastTouched(project: folder.deletingLastPathComponent(), skipping: folder.lastPathComponent)
-                guard touched < cutoff else { return }
                 found.append(LargeFile(url: folder, size: DiskUsage.allocated(folder), modified: touched))
             }
         }
         return found.sorted { $0.size > $1.size }
+    }
+
+    public static func idle(_ folders: [LargeFile], olderThan days: Int = 90, now: Date = .now) -> [LargeFile] {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86400)
+        return folders.filter { $0.modified.map { $0 < cutoff } ?? false }
+    }
+
+    /// The biggest folders of projects in use. They are listed to be seen,
+    /// not removed: work there needs them, and a build tool's own clean is
+    /// the way to shrink one.
+    public static func active(_ folders: [LargeFile], within days: Int = 90, now: Date = .now,
+                              atLeast size: Int64 = 1_000_000_000, limit: Int = 8) -> [LargeFile] {
+        let cutoff = now.addingTimeInterval(-Double(days) * 86400)
+        return Array(folders.filter { ($0.modified.map { $0 >= cutoff } ?? false) && $0.size >= size }.prefix(limit))
     }
 
     /// The folders whose project changed within `days` since the list was

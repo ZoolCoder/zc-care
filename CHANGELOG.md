@@ -22,6 +22,10 @@ here with what to edit.
 - Developer lists Old Rust Builds: build-script output more than a week old,
   which Cargo never removes, a row for each project. Each package keeps its
   newest, compiled crates stay, and nothing goes while Cargo is building.
+- A warning comes when the disk loses 10 GB within an hour, whatever is still free, so a runaway build is caught
+  before the disk is full.
+- Developer lists the largest dependency and build folders of projects in use, to see where the space went; it does
+  not remove them. The Docker section shows what Colima's disk takes on the Mac.
 - No cleanup can remove a folder everything else lives in. The top of the
   disk, of a volume and of a home folder, Documents, Desktop, Library and their
   like, `~/Library/Caches` and its neighbours and the system's own folders are

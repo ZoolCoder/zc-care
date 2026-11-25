@@ -46,6 +46,7 @@ struct DeveloperView: View {
                         }
                     }
                     if !care.staleBuilds.isEmpty { staleBuilds }
+                    if !care.activeBuilds.isEmpty { activeBuilds }
                     if !care.xcodeSpots.isEmpty { xcode }
                     HomebrewSection(care: care)
                     SimulatorRuntimesSection(care: care)
@@ -107,6 +108,26 @@ struct DeveloperView: View {
         }
     }
 
+    private var activeBuilds: some View {
+        CareSection("Largest Folders of Projects in Use") {
+            ForEach(care.activeBuilds) { folder in
+                CareRow(icon: SymbolTile(symbol: "shippingbox.fill", colors: Tint.gray, size: 32),
+                    title: folder.url.deletingLastPathComponent().lastPathComponent + "/" + folder.name,
+                    detail: (folder.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+                        + " · project changed " + relativeDate(folder.modified),
+                    value: Store.bytes(folder.size)) {
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([folder.url]) } label: {
+                        Image(systemName: "magnifyingglass").accessibilityLabel("Show in Finder")
+                    }
+                    .controlSize(.small)
+                    .help("Show in Finder")
+                }
+            }
+            Text("Work there needs these, so ZC Care does not remove them. cargo clean, mvn clean or a fresh install shrinks one.")
+                .font(.caption).foregroundStyle(.secondary).padding(10)
+        }
+    }
+
     private var xcode: some View {
         CareSection("Xcode") {
             ForEach(care.xcodeSpots) { spot in
@@ -133,6 +154,12 @@ struct DeveloperView: View {
                     title: item.type,
                     detail: "\(item.total) in all, \(item.active) in use · \(Store.bytes(item.reclaimable)) can be pruned",
                     value: Store.bytes(item.size)) { EmptyView() }
+            }
+            if care.colimaDisk > 0 {
+                CareRow(icon: SymbolTile(symbol: "internaldrive.fill", colors: Tint.cyan, size: 32),
+                    title: "Colima's disk",
+                    detail: "What Docker's data takes on this Mac. It grows as Docker writes and shrinks only when a prune trims it.",
+                    value: Store.bytes(care.colimaDisk)) { EmptyView() }
             }
             HStack {
                 Text("Pruning deletes for good, there is no Trash for it. Build cache and dangling images come back when Docker builds or pulls.")

@@ -90,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let first = ids.first { openAlert(first) } else { window.show() }
         case _ where id.hasPrefix("care"): care.show()
         case "vitals disk", "vitals trash": care.show(.cleanup)
-        case "vitals disk critical": care.show(.developer)
+        case "vitals disk critical", "vitals disk falling": care.show(.developer)
         case _ where id.hasPrefix("leftovers "):
             care.care.removedIDs.insert(String(id.dropFirst("leftovers ".count)))
             care.care.orphans = nil
