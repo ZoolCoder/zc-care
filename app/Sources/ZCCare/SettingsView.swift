@@ -165,6 +165,9 @@ struct SettingsView: View {
                 Toggle("Scan every week", isOn: $store.weeklyScan)
                 Text("The weekly scan only looks and notifies; nothing is cleaned without you. It waits until the Mac is on power and not in Low Power Mode.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("Run routine maintenance when it is due", isOn: $store.autoMaintenance)
+                Text("Homebrew cleanup, Docker prune and Open With repair, without a question each time. None needs a password; Docker's prune deletes for good. It waits like the scan does.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Full Disk Access") {
                 HStack {

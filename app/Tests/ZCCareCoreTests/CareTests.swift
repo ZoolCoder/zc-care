@@ -701,7 +701,8 @@ private func write(_ url: URL, bytes: Int) throws {
     #expect(tasks.first { $0.id == "quicklook" }?.admin == false && tasks.first { $0.id == "fonts" }?.admin == false)
     let docker = Maintenance.tasks(brew: "/b", docker: "/d", xcode: true).first { $0.id == "docker" }
     #expect(docker != nil)
-    #expect(docker?.steps.allSatisfy { !$0.contains("system") && !$0.contains("container") } == true)
+    #expect(docker?.steps.allSatisfy { !$0.contains("system") && !$0.contains("--all") && !$0.contains("-a") } == true)
+    #expect(docker?.steps.filter { $0.contains("container") } == [["/d", "container", "prune", "-f", "--filter", "label=org.testcontainers=true"]])
 }
 
 @Test func devCachesStayOutOfAppCaches() {
@@ -998,6 +999,84 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
     #expect(watch.alerts(for: v, now: now.addingTimeInterval(14 * 3600)).isEmpty)
 }
 
+@Test func vitalsWatchWarnsMoreOftenWhenTheDiskIsNearlyFull() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 10_000_000_000)
+    let now = Date(timeIntervalSince1970: 0)
+    #expect(watch.alerts(for: v, now: now).map(\.id) == ["vitals disk"])
+    // The earlier warning does not hold this one back.
+    v.disk?.available = 600_000_000
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(60)).map(\.id) == ["vitals disk critical"])
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(600)).isEmpty)
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(1900)).map(\.id) == ["vitals disk critical"])
+}
+
+@Test func vitalsWatchWarnsWhenTheDiskFillsFast() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    let now = Date(timeIntervalSince1970: 0)
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 100_000_000_000)
+    #expect(watch.alerts(for: v, now: now).isEmpty)
+    v.disk?.available = 95_000_000_000
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(600)).isEmpty)
+    v.disk?.available = 88_000_000_000
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(1200)).map(\.id) == ["vitals disk falling"])
+    // Still down: one fall warns once, also when its quiet time is over.
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(1260)).isEmpty)
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(3100)).isEmpty)
+    // Space came back, and goes again.
+    v.disk?.available = 120_000_000_000
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(3200)).isEmpty)
+    v.disk?.available = 109_000_000_000
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(3300)).map(\.id) == ["vitals disk falling"])
+}
+
+@Test func vitalsWatchMeasuresAFallFromAnyReadingOfTheHour() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    let now = Date(timeIntervalSince1970: 0)
+    var posted: [String] = []
+    for (minute, free) in [(0, 100), (30, 100), (59, 91), (61, 91), (70, 82)] {
+        v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: Int64(free) * 1_000_000_000)
+        posted += watch.alerts(for: v, now: now.addingTimeInterval(Double(minute) * 60)).map(\.id)
+    }
+    #expect(posted == ["vitals disk falling"])
+}
+
+@Test func vitalsWatchLeavesAFallToTheCriticalWarning() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    let now = Date(timeIntervalSince1970: 0)
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 30_000_000_000)
+    #expect(watch.alerts(for: v, now: now).isEmpty)
+    v.disk?.available = 2_000_000_000
+    #expect(watch.alerts(for: v, now: now.addingTimeInterval(60)).map(\.id) == ["vitals disk critical"])
+}
+
+@Test func vitalsWatchKeepsStillWhenTheDiskFillsSlowly() {
+    var watch = VitalsWatch()
+    var v = Vitals()
+    let now = Date(timeIntervalSince1970: 0)
+    // 12 GB over three hours: each hour measures from its own start.
+    for (minute, free) in [(0, 100), (50, 97), (70, 96), (130, 92), (190, 88)] {
+        v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: Int64(free) * 1_000_000_000)
+        #expect(watch.alerts(for: v, now: now.addingTimeInterval(Double(minute) * 60)).isEmpty, "\(minute)")
+    }
+}
+
+@Test func activeProjectsListTheirBiggestFolders() {
+    let now = Date(timeIntervalSince1970: 1_000_000_000)
+    func folder(_ name: String, gb: Int64, days: Double?) -> LargeFile {
+        LargeFile(url: URL(fileURLWithPath: "/code/\(name)/target"), size: gb * 1_000_000_000,
+                  modified: days.map { now.addingTimeInterval(-$0 * 86400) })
+    }
+    let all = [folder("busy", gb: 40, days: 1), folder("old", gb: 30, days: 200), folder("unknown", gb: 20, days: nil),
+               folder("small", gb: 0, days: 1)]
+    #expect(ProjectDependencies.active(all, now: now).map(\.url.path) == ["/code/busy/target"])
+    #expect(ProjectDependencies.idle(all, now: now).map(\.url.path) == ["/code/old/target"])
+}
+
 @Test func vitalsWatchWaitsOutSpikes() {
     var watch = VitalsWatch()
     var v = Vitals()
@@ -1159,6 +1238,14 @@ private func picture(_ url: URL, side: Int, seed: Int) throws {
                                                     title: "Clean Up Homebrew", bytes: 0)])
     #expect(Maintenance.due(tasks, log: stale, now: now).map(\.id) == ["launchservices", "brew"])
     #expect(!Maintenance.due(tasks, log: ActivityLog(), now: now).contains { $0.admin })
+}
+
+@Test func maintenanceRunsUnaskedOnlyWhatIsSafeAndNotJustTried() {
+    let now = Date()
+    let tasks = Maintenance.tasks(brew: "/opt/homebrew/bin/brew", docker: "/opt/homebrew/bin/docker", xcode: true)
+    #expect(Maintenance.unattended(tasks, log: ActivityLog(), now: now).map(\.id) == ["launchservices", "brew", "docker"])
+    let tried = ["docker": now.addingTimeInterval(-3600), "brew": now.addingTimeInterval(-90_000)]
+    #expect(Maintenance.unattended(tasks, log: ActivityLog(), tried: tried, now: now).map(\.id) == ["launchservices", "brew"])
 }
 
 @Test func processRunnerStopsWhatOutlivesItsTimeout() async throws {

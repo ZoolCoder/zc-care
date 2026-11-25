@@ -212,10 +212,16 @@ private final class Recorder: Runner, @unchecked Sendable {
     private var calls: [(args: [String], env: [String: String])] = []
     var recorded: [(args: [String], env: [String: String])] { lock.withLock { calls } }
 
+    private let contexts: String
+
+    /// `current` is the context in use, with its endpoint.
+    init(current: String = "remote\tssh://prod") {
+        contexts = "default\tunix:///var/run/docker.sock\tfalse\ndesktop-linux\tunix:///h/.docker/run/docker.sock\tfalse\n\(current)\ttrue\n"
+    }
+
     func run(_ executable: String, _ args: [String], env: [String: String]) async throws -> CommandResult {
         lock.withLock { calls.append((args, env)) }
-        return args.first == "context" ? CommandResult(status: 0, stdout: Data("default\ndesktop-linux\nremote\n".utf8))
-                                       : CommandResult(status: 0)
+        return args.first == "context" ? CommandResult(status: 0, stdout: Data(contexts.utf8)) : CommandResult(status: 0)
     }
 }
 
@@ -226,7 +232,30 @@ private final class Recorder: Runner, @unchecked Sendable {
     let calls = recorder.recorded
     #expect(calls.allSatisfy { $0.env["DOCKER_HOST"] == nil && $0.env["DOCKER_CONTEXT"] == nil && $0.env["PATH"] == "/usr/bin" })
     let prune = try #require(calls.last)
-    #expect(prune.args == Docker.pruneBuildCache + ["--context", "desktop-linux"])
+    #expect(prune.args == ["--context", "desktop-linux"] + Docker.pruneBuildCache)
+}
+
+@Test func dockerRunsAgainstTheLocalContextInUse() async throws {
+    let recorder = Recorder(current: "colima\tunix:///h/.colima/default/docker.sock")
+    _ = try await Docker.run("docker", Docker.pruneBuildCache, env: [:], runner: recorder)
+    #expect(recorder.recorded.last?.args == ["--context", "colima"] + Docker.pruneBuildCache)
+}
+
+@Test func dockerTrimRunsOnlyInColimasVM() async throws {
+    let colima = Recorder(current: "colima-work\tunix:///h/.colima/work/docker.sock")
+    #expect(try await Docker.trim(docker: "docker", colima: "/c", env: [:], runner: colima) != nil)
+    #expect(colima.recorded.last?.args == ["ssh", "--profile", "work", "--", "sudo", "fstrim", "-a"])
+    #expect(try await Docker.trim(docker: "docker", colima: nil, env: [:], runner: colima) == nil)
+    #expect(try await Docker.trim(docker: "docker", colima: "/c", env: [:], runner: Recorder()) == nil)
+    let namesake = Recorder(current: "colima-x\tunix:///h/elsewhere/docker.sock")
+    #expect(try await Docker.trim(docker: "docker", colima: "/c", env: [:], runner: namesake) == nil)
+}
+
+@Test func dockerFallsBackToDefaultWithoutALocalContext() async {
+    let failing = FakeRunner(outputs: [:])
+    #expect(await Docker.localContext("docker", env: [:], runner: failing).name == "default")
+    let remoteOnly = FakeRunner(outputs: ["context": ok("remote\tssh://prod\ttrue\n")])
+    #expect(await Docker.localContext("docker", env: [:], runner: remoteOnly).name == "default")
 }
 
 /// A record as Removal.trash leaves it: the item tagged with where it came from.

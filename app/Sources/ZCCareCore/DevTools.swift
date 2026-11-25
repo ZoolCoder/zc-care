@@ -16,6 +16,12 @@ public enum Docker {
 
     public static let pruneBuildCache = ["builder", "prune", "--force"]
     public static let pruneDanglingImages = ["image", "prune", "--force"]
+    /// The label Testcontainers puts on every container it starts.
+    static let testcontainers = "label=org.testcontainers=true"
+    /// The label Docker 23 and later puts on a volume made without a name.
+    /// Older daemons and Podman prune named volumes too; theirs carry no
+    /// such label, so the filter leaves them everything.
+    static let anonymousVolumes = "label=com.docker.volume.anonymous"
 
     /// What Docker keeps, by kind. Nil when the daemon does not answer in
     /// time, such as Docker Desktop not running: then there is nothing to show.
@@ -27,15 +33,44 @@ public enum Docker {
 
     /// Runs Docker against this Mac's own daemon only: DOCKER_HOST and
     /// DOCKER_CONTEXT in the login environment could point a prune at a
-    /// remote machine, so both go and the context is named.
+    /// remote machine, so both go and the context is named. --context is a
+    /// global flag: Docker refuses it after the subcommand.
     public static func run(_ docker: String, _ arguments: [String], env: [String: String], runner: any Runner) async throws -> CommandResult {
+        let env = local(env)
+        let context = await localContext(docker, env: env, runner: runner)
+        return try await runner.run(docker, ["--context", context.name] + arguments, env: env)
+    }
+
+    private static func local(_ env: [String: String]) -> [String: String] {
         var env = env
         env["DOCKER_HOST"] = nil
         env["DOCKER_CONTEXT"] = nil
-        let contexts = try? await runner.run(docker, ["context", "ls", "--format", "{{.Name}}"], env: env)
-        let names = contexts?.status == 0 ? (contexts?.output ?? "").split(whereSeparator: \.isNewline).map(String.init) : []
-        let local = names.contains("desktop-linux") ? "desktop-linux" : "default"
-        return try await runner.run(docker, arguments + ["--context", local], env: env)
+        return env
+    }
+
+    /// The context of this Mac's own daemon: the one in use when it talks to
+    /// a socket file, as Colima's and OrbStack's do, else Docker Desktop's,
+    /// else the default.
+    static func localContext(_ docker: String, env: [String: String], runner: any Runner) async -> (name: String, endpoint: String?) {
+        let format = "{{.Name}}\t{{.DockerEndpoint}}\t{{.Current}}"
+        let listed = try? await runner.run(docker, ["context", "ls", "--format", format], env: env)
+        let rows = listed?.status == 0 ? (listed?.output ?? "").split(whereSeparator: \.isNewline).map { $0.split(separator: "\t") } : []
+        if let current = rows.first(where: { $0.count == 3 && $0[2] == "true" && $0[1].hasPrefix("unix://") }) {
+            return (String(current[0]), String(current[1]))
+        }
+        return (rows.contains { $0.first == "desktop-linux" } ? "desktop-linux" : "default", nil)
+    }
+
+    /// Colima keeps Docker's data in a disk image that grows as Docker
+    /// writes and does not shrink after a prune: fstrim in its VM hands the
+    /// freed blocks back to macOS. Nil when the daemon is not Colima's.
+    public static func trim(docker: String, colima: String?, env: [String: String], runner: any Runner) async throws -> CommandResult? {
+        let env = local(env)
+        let context = await localContext(docker, env: env, runner: runner)
+        let name = context.name
+        guard let colima, name == "colima" || name.hasPrefix("colima-"), context.endpoint?.contains("/.colima/") == true else { return nil }
+        let profile = name == "colima" ? "default" : String(name.dropFirst("colima-".count))
+        return try await runner.run(colima, ["ssh", "--profile", profile, "--", "sudo", "fstrim", "-a"], env: env)
     }
 
     /// One JSON object a line, sizes as "1.2GB" and reclaimable as "1.2GB (50%)".
