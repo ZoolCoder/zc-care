@@ -445,7 +445,7 @@ struct EchoEnvRunner: Runner {
     let now = Date(timeIntervalSince1970: 1_000_000)
     watch.posted = ["disk": now.addingTimeInterval(-60)]
     var v = Vitals()
-    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 1_000_000_000)
+    v.disk = Disk(name: "Macintosh HD", total: 500_000_000_000, available: 10_000_000_000)
     #expect(watch.alerts(for: v, now: now).isEmpty)
     #expect(watch.alerts(for: v, now: now.addingTimeInterval(6 * 3600)).map(\.id) == ["vitals disk"])
 }

@@ -81,6 +81,7 @@ final class Store {
         static let notifies = "notifies"
         static let hotkey = "hotkey"
         static let weeklyScan = "weeklyScan"
+        static let autoMaintenance = "autoMaintenance"
         static let ignoreList = "ignoreList"
         static let vitalsAlerts = "vitalsAlerts"
         static let vitalLimits = "vitalLimits"
@@ -144,6 +145,7 @@ final class Store {
         notifies = UserDefaults.standard.bool(forKey: Keys.notifies)
         hotkey = UserDefaults.standard.bool(forKey: Keys.hotkey)
         weeklyScan = UserDefaults.standard.bool(forKey: Keys.weeklyScan)
+        autoMaintenance = UserDefaults.standard.bool(forKey: Keys.autoMaintenance)
         ignoreList = IgnoreList(UserDefaults.standard.stringArray(forKey: Keys.ignoreList) ?? [])
         vitalsAlerts = UserDefaults.standard.bool(forKey: Keys.vitalsAlerts)
         leftoverAlerts = UserDefaults.standard.bool(forKey: Keys.leftoverAlerts)
@@ -293,6 +295,12 @@ final class Store {
     func ignore(_ url: URL) {
         ignoreList.add(url.path)
         message = Message(text: "\(url.lastPathComponent) is on the ignore list; Settings takes it off.", failed: false)
+    }
+
+    /// Routine maintenance that needs no password runs by itself when due.
+    /// Off until the user asks for it: Docker's prune deletes for good.
+    var autoMaintenance: Bool {
+        didSet { UserDefaults.standard.set(autoMaintenance, forKey: Keys.autoMaintenance) }
     }
 
     /// Smart Care scans by itself once a week.
